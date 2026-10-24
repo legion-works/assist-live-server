@@ -1,0 +1,22 @@
+[project]
+name = "assist-live-workspace"
+version = "0.0.0"
+requires-python = ">=3.14.2"
+license = "Apache-2.0"
+dependencies = ["assist-live-server", "assist-live-client"]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["server", "client"]
+
+[tool.uv.sources]
+assist-live-server = { workspace = true }
+assist-live-client = { workspace = true }
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.pyright]
+extraPaths = ["client"]
