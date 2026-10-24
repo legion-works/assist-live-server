@@ -16,7 +16,16 @@ assist-live-server = { workspace = true }
 assist-live-client = { workspace = true }
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.14", "mypy>=1.18", "PyYAML>=6", "types-PyYAML>=6"]
+dev = [
+    "pytest>=8",
+    "ruff>=0.14",
+    "mypy>=1.18",
+    "PyYAML>=6",
+    "types-PyYAML>=6",
+    "numpy==2.5.4",
+    "onnxruntime==1.31.0",
+    "transformers==5.20.2",
+]
 
 [tool.pyright]
 extraPaths = ["client", ".", "server"]
@@ -30,6 +39,7 @@ select = ["E", "F", "W", "I", "B", "UP"]
 [tool.mypy]
 python_version = "3.14"
 mypy_path = ["client", "server", "."]
+explicit_package_bases = true
 files = ["client", "server", "tools"]
 check_untyped_defs = true
 disallow_untyped_defs = true

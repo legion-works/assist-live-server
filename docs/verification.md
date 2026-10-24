@@ -125,8 +125,10 @@ It examines runtime source and package metadata for the asset ID, URL, and liste
 It also checks the image inventory and the download plan. Tests and rights documents are not runtime inputs.
 
 Unconfirmed hashes, revisions, and license sources stay empty for blocked assets. They are not permission to supply those assets.
-Piper is the only blocked-absent decision in the bootstrap manifest.
-No model or voice rights investigation has a recorded result at this time.
+Piper has a `confirmed_blocked_absent` record.
+Smart Turn v3.2 has a `confirmed_included` record and a planned startup download.
+Its ONNX file has a pinned revision, SHA-256, and file-level BSD-2-Clause sources.
+There is no startup downloader or server image at this time.
 
 Asset tests ran before the checker was available:
 
@@ -206,3 +208,128 @@ The ASD-STE100 check reports 0 findings in this record and the pull request temp
 The public-file self-scan reports 0 private terms, 0 absolute home paths, and 0 private network addresses.
 The public-tree check reports `PASS history secrets commits=2` and `PASS public data matches=0`.
 A static analysis snapshot reports 0 errors and 0 warnings across 10 source files. Date: 2026-10-24.
+
+## Smart Turn input contract
+
+The first input-window test ran before the probe module was available:
+
+```sh
+cd $WORKSPACE/assist-live-server && uv run pytest tests/test_probe_smart_turn.py -q
+```
+
+Result: `ModuleNotFoundError: No module named 'tools.probe_smart_turn'`, `1 failed`.
+Date: 2026-10-24.
+
+The input contract is eight seconds of mono audio at 16 kHz.
+The probe keeps the last 128000 samples and adds `zero padding` on the left for shorter inputs.
+`WhisperFeatureExtractor(chunk_length=8)` uses the prototype arguments.
+The ONNX input is `input_features`, with shape `(1, 80, 800)` and dtype `float32`.
+The extractor uses constructor defaults. It downloads no configuration or tokenizer.
+No external tensor file is necessary for the model session.
+
+## Smart Turn dependency metadata
+
+The probe uses development dependencies only.
+The server and client package dependencies do not change.
+The client has no model-runtime dependencies.
+`uv.lock` pins the probe dependencies, their transitive dependencies, and wheel SHA-256 values.
+
+All new package requirements accept Python `3.14.2`. The `flatbuffers` field is empty.
+The CI interpreter is Python `3.14.3`.
+
+Source for each row: `https://pypi.org/pypi/<package>/<version>/json`, field `info.requires_python`.
+Access date: 2026-10-24.
+The check compared each requirement with Python `3.14.2` through `packaging.specifiers.SpecifierSet`.
+Result: `PASS dependency floors packages=27`.
+
+| Package | Version | `requires_python` |
+|---|---|---|
+| `annotated-doc` | `0.0.5` | `>=3.9` |
+| `anyio` | `4.15.1` | `>=3.10` |
+| `click` | `8.5.0` | `>=3.10` |
+| `filelock` | `4.2.4` | `>=3.11` |
+| `flatbuffers` | `25.12.19` | Empty |
+| `fsspec` | `2026.9.0` | `>=3.10` |
+| `h11` | `0.16.0` | `>=3.8` |
+| `hf-xet` | `1.7.0` | `>=3.8` |
+| `httpcore2` | `2.16.0` | `>=3.11` |
+| `httpx2` | `2.16.0` | `>=3.11` |
+| `httpx2-jsfetch` | `1.0` | `>=3.12` |
+| `huggingface-hub` | `2.3.0` | `>=3.10.0` |
+| `idna` | `3.20` | `>=3.9` |
+| `markdown-it-py` | `4.2.0` | `>=3.10` |
+| `mdurl` | `0.1.2` | `>=3.7` |
+| `numpy` | `2.5.4` | `>=3.12` |
+| `onnxruntime` | `1.31.0` | `>=3.11` |
+| `protobuf` | `7.36.2` | `>=3.10` |
+| `regex` | `2026.9.29` | `>=3.10` |
+| `rich` | `15.0.0` | `>=3.9.0` |
+| `safetensors` | `0.8.0` | `>=3.10` |
+| `shellingham` | `1.5.4` | `>=3.7` |
+| `tokenizers` | `0.23.3` | `>=3.10` |
+| `tqdm` | `4.70.1` | `>=3.8` |
+| `transformers` | `5.20.2` | `>=3.10.0` |
+| `truststore` | `0.10.5` | `>=3.10` |
+| `typer` | `0.27.3` | `>=3.10` |
+
+Probe dependency license declarations:
+
+- NumPy: `info.license_expression` is `BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0`.
+  Source: https://pypi.org/pypi/numpy/2.5.4/json.
+- ONNX Runtime: `info.license` is `MIT License`.
+  Source: https://pypi.org/pypi/onnxruntime/1.31.0/json.
+- Transformers: `info.license` is `Apache 2.0 License`.
+  Source: https://pypi.org/pypi/transformers/5.20.2/json.
+
+Mypy uses explicit package bases for the `tools` namespace.
+This prevents duplicate module names when one tool imports a different tool.
+The NumPy-only extractor uses no PyTorch model.
+Its optional-framework advisory is not applicable to this use.
+The upstream logging interface supplies `TRANSFORMERS_NO_ADVISORY_WARNINGS` for that condition.
+Source: https://huggingface.co/docs/transformers/main_classes/logging.
+
+## Smart Turn rights and cost
+
+The file-level rights sources and cost table are in `docs/research/q5-smart-turn.md`.
+The full BSD-2-Clause notice is in `THIRD_PARTY_NOTICES.md`.
+The rights decision uses a pinned `model card` and the model project's full license text.
+The project names the v3.2 model and explicitly includes model weights.
+It supplies a URL for the pinned file's repository.
+The downloaded bytes agree with the recorded SHA-256.
+
+The measurement uses 100 local synthetic candidates after five warm-up candidates.
+It reports process CPU time and wall time independently, for `feature extraction`, inference, and the total.
+It records p50 and p90 for each phase and clock.
+ONNX intra-op and inter-op `thread counts` are 1. Numerical-library `thread limits` are also 1.
+
+This development host is not a validated target host.
+There is no claim about correct model decisions or release performance.
+
+Command:
+
+```sh
+cd $WORKSPACE/assist-live-server && uv run pytest tests/test_probe_smart_turn.py -q && uv run python tools/probe_smart_turn.py --record-decision --allow-blocked-absent --candidates 100 --report docs/research/q5-smart-turn.md && uv run python tools/check_assets.py --manifest assets/manifest.json --release
+```
+
+Result: `13 passed`, `PASS decision recorded`, `PASS included rights`, and `PASS asset licenses`.
+The image check prints `NOT CHECKED image inventory: no image inventory exists`.
+Date: 2026-10-24.
+
+Command: `cd $WORKSPACE/assist-live-server && task check`.
+
+Result: `22 files already formatted`, `All checks passed!`, `PASS CI boundaries`, and `54 passed`.
+Mypy prints `Success: no issues found in 6 source files`.
+The package checks print `PASS server bootstrap` and `PASS isolated client and server packages`.
+The asset check prints `PASS asset licenses`. The `secret scan` reports `no leaks found`.
+Date: 2026-10-24.
+
+Command: `uv run --locked --python 3.14.3 pytest tests/ -q` with an isolated temporary environment.
+
+Result: `54 passed`. The same command with the Python floor, `3.14.2`, also reports `54 passed`.
+Date: 2026-10-24.
+
+The ASD-STE100 checker reports 0 findings in this record, the research report, and the notices.
+The public-file self-check reads 43 files and reports 0 private terms, 0 home paths, and 0 private addresses.
+The public-tree check with `--history` reports `PASS own Git root`, `PASS history secrets commits=3`, and `PASS public data matches=0`.
+A current Python analysis reports 0 errors and 0 warnings for the two changed Python files.
+Date: 2026-10-24.

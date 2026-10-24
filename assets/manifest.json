@@ -2,7 +2,7 @@
   "schema": 1,
   "release_root": "..",
   "image_inventory": null,
-  "download_plan": [],
+  "download_plan": ["smart-turn-v3.2-cpu"],
   "assets": [
     {
       "id": "piper-runtime",
@@ -18,6 +18,36 @@
       "attribution": "Not distributed. No rights approval for the Apache server image.",
       "paths": ["piper", "piper.bin", "models/piper", "server/piper"],
       "identifiers": ["piper-tts", "piper1-gpl"],
+      "components": []
+    },
+    {
+      "id": "smart-turn-v3.2-cpu",
+      "kind": "model",
+      "status": "confirmed_included",
+      "url": "https://huggingface.co/pipecat-ai/smart-turn-v3/resolve/f766f81d3cfdf7737ac64aad813d91bbfd56bf93/smart-turn-v3.2-cpu.onnx",
+      "revision": "f766f81d3cfdf7737ac64aad813d91bbfd56bf93",
+      "sha256": "2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f",
+      "license": "BSD-2-Clause",
+      "license_sources": [
+        {
+          "kind": "model_card",
+          "url": "https://huggingface.co/pipecat-ai/smart-turn-v3/blob/f766f81d3cfdf7737ac64aad813d91bbfd56bf93/README.md"
+        }
+      ],
+      "upstream_project": {
+        "repository": "https://github.com/pipecat-ai/smart-turn",
+        "revision": "4786657e242dfe77dd138699ac564ee074a2a543",
+        "scope_url": "https://github.com/pipecat-ai/smart-turn/blob/4786657e242dfe77dd138699ac564ee074a2a543/README.md",
+        "scope_quote": "This is a truly open model (BSD 2-clause license).",
+        "weights_quote": "The datasets, training script, and model weights are all open source.",
+        "weights_link": "https://huggingface.co/pipecat-ai/smart-turn-v3",
+        "license_url": "https://github.com/pipecat-ai/smart-turn/blob/4786657e242dfe77dd138699ac564ee074a2a543/LICENSE",
+        "license_sha256": "0d66364067f678c08586ebb60a16a2aed4fa081ec11057df35585759ce0e774f"
+      },
+      "redistribution": true,
+      "download": "startup",
+      "attribution": "Smart Turn v3.2. Copyright (c) 2024–2025, Daily. BSD-2-Clause. Full notice, conditions, and disclaimer in THIRD_PARTY_NOTICES.md.",
+      "paths": ["models/smart-turn-v3.2-cpu.onnx"],
       "components": []
     }
   ]
