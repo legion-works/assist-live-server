@@ -333,3 +333,110 @@ The public-file self-check reads 43 files and reports 0 private terms, 0 home pa
 The public-tree check with `--history` reports `PASS own Git root`, `PASS history secrets commits=3`, and `PASS public data matches=0`.
 A current Python analysis reports 0 errors and 0 warnings for the two changed Python files.
 Date: 2026-10-24.
+
+## Local synthesis rights test
+
+The first rights test ran before the Kokoro checker was available:
+
+```sh
+cd $WORKSPACE/assist-live-server && uv run pytest tests/test_kokoro_licenses.py -q
+```
+
+Result: `ModuleNotFoundError: No module named 'tools.probe_kokoro_licenses'`, `1 failed`.
+Date: 2026-10-24.
+
+## Local synthesis package boundaries
+
+The actual candidate packages cannot run in the server environment as packaged.
+Version-specific PyPI metadata gives these requirements:
+
+| Package | Version | `info.requires_python` | Source |
+|---|---|---|---|
+| `kokoro` | `0.9.4` | `<3.13,>=3.10` | https://pypi.org/pypi/kokoro/0.9.4/json |
+| `misaki` | `0.9.4` | `<3.13,>=3.8` | https://pypi.org/pypi/misaki/0.9.4/json |
+
+Access date: 2026-10-24.
+The server floor is `>=3.14.2`. No package or Python-floor change follows from this inspection.
+The repository checker uses the standard library only.
+The root development group, server dependencies, client dependencies, and lock file stay unchanged.
+
+The candidate inspection used an isolated Python `3.12` environment in scratch storage.
+It installed `kokoro==0.9.4`, `misaki==0.9.4`, `torch==2.6.0+cpu`, and `transformers==4.51.3`.
+The install resolver supplied the remaining declared dependencies.
+The inspection installed no system package or runtime external to that scratch environment.
+
+Commands, with `$PROBE` set to the isolated scratch directory:
+
+```sh
+uv venv --python 3.12 $PROBE/venv
+uv pip install --python $PROBE/venv/bin/python --index-url https://download.pytorch.org/whl/cpu torch==2.6.0+cpu
+uv pip install --python $PROBE/venv/bin/python kokoro==0.9.4 misaki==0.9.4 transformers==4.51.3
+```
+
+Result: the candidate and its declared English phonemizer dependencies installed in scratch storage.
+The model, voice, and first-use G2P model loaded there. Date: 2026-10-24.
+
+## Local synthesis first-use inspection
+
+The inspection used `KPipeline(lang_code="a", trf=False, device="cpu")` and candidate voice `af_heart`.
+The model download calls used Hugging Face revision `f3ff3571791e39611d31c381e3a41a3af07b4987`.
+The model and voice loaded without synthesis. The inspection made no audio file.
+All download caches stayed in scratch storage.
+
+Downloads:
+
+- `config.json`: `5abb01e2403b072bf03d04fde160443e209d7a0dad49a423be15196b9b43c17f`.
+- `kokoro-v1_0.pth`: `496dba118d1a58f5f3db2efc88dbdc216e0483fc89fe6e47ee1f2c53f18ad1e4`.
+- `voices/af_heart.pt`: `0ab5709b8ffab19bfd849cd11d98f75b60af7733253ad0d67b12382a102cb4ff`.
+- `en_core_web_sm-3.8.0-py3-none-any.whl`: `1932429db727d4bff3deed6b34cfc05df17794f4a52eeb26cf8928f7c1a0fb85`.
+
+The voice tensor shape was `(510, 1, 256)`.
+The inspection tested the English out-of-dictionary fallback with synthetic text.
+The active bundled eSpeak library reported version `1.52.0`.
+Its SHA-256 was `b15ce0803b26254e8a0d088c6b9281a2637b2b02613147cc320cfdefaf2c3ccf`.
+
+The installed loader source bytes agree with the pinned upstream source.
+The wheel has no license file, although the loader source has an MIT license.
+The loaded library and its data have GPL rights and Unicode data notices.
+The data inventory includes 364 files, with individual SHA-256 values in scratch storage.
+The manifest records the necessary English data digests and the complete tree digest.
+
+The inspection also checked packaged Misaki dictionaries, `phonemizer-fork`, `num2words`, and spaCy model notices.
+GPL and LGPL components stop inclusion in the image policy.
+The unconfirmed voice and configuration scopes also stop inclusion.
+The full source records are in `docs/research/q7-kokoro.md` and `assets/manifest.json`.
+
+## Local synthesis release checks
+
+The decision is `confirmed_blocked_absent`, with an explicit empty `kokoro_default_voices` allowlist.
+No voice name, digest, or attribution can go into that allowlist without file-scoped rights for the complete necessary chain.
+The release check also examines blocked paths, runtime source, image-inventory records, and the startup download plan.
+No Kokoro component is in that plan. The Smart Turn record stays unchanged.
+
+Command:
+
+```sh
+cd $WORKSPACE/assist-live-server && uv run pytest tests/test_kokoro_licenses.py -q && uv run python tools/probe_kokoro_licenses.py --record-decision --allow-blocked-absent --check assets/manifest.json --report docs/research/q7-kokoro.md && uv run python tools/check_assets.py --manifest assets/manifest.json --release
+```
+
+Result: `20 passed`, `PASS decision recorded`, `PASS blocked asset absent`, and `PASS asset licenses`.
+The image check prints `NOT CHECKED image inventory: no image inventory exists`.
+Date: 2026-10-24.
+
+Command: `cd $WORKSPACE/assist-live-server && task check`.
+
+Result: `25 files already formatted`, `All checks passed!`, `PASS CI boundaries`, and `74 passed`.
+Mypy prints `Success: no issues found in 7 source files`.
+The package checks print `PASS server bootstrap` and `PASS isolated client and server packages`.
+The asset check prints `PASS asset licenses`. The `secret scan` reports `no leaks found`.
+Date: 2026-10-24.
+
+Command: `uv run --locked --python 3.14.3 pytest tests/ -q` with an isolated temporary environment.
+
+Result: `74 passed`. The same command with Python `3.14.2` also reports `74 passed`.
+Date: 2026-10-24.
+
+The ASD-STE100 checker reports 0 findings in the research report, notices, and this record.
+The public-file self-check reads 46 files and reports 0 private terms, 0 home paths, and 0 private addresses.
+The public-tree check with `--history` reports `PASS own Git root`, `PASS history secrets commits=4`, and `PASS public data matches=0`.
+Date: 2026-10-24.
