@@ -267,6 +267,145 @@
           "paths": ["models/kokoro/runtime/en_core_web_sm"], "identifiers": ["en-core-web-sm", "en_core_web_sm"], "components": []
         }
       ]
+    },
+    {
+      "id": "silero-vad",
+      "kind": "model",
+      "status": "confirmed_blocked_absent",
+      "url": "https://raw.githubusercontent.com/snakers4/silero-vad/5cd7945676eb32225748052e2e6a0580e4686a08/src/silero_vad/data/silero_vad.onnx",
+      "revision": "5cd7945676eb32225748052e2e6a0580e4686a08",
+      "tag": "v6.2.3",
+      "sha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3",
+      "bytes": 2327524,
+      "license": "NOASSERTION",
+      "redistribution": false,
+      "download": "none",
+      "attribution": "Not distributed. MIT and CC-BY-NC-4.0 source statements remain unresolved for the selected model file.",
+      "paths": ["models/silero_vad.onnx", "models/silero", "server/silero_vad.onnx"],
+      "identifiers": ["silero-vad", "silero_vad", "snakers4/silero"],
+      "components": [],
+      "reason": "The repository LICENSE, README body, and package statements say MIT. The README badge alt text, also present in wheel METADATA, says CC BY-NC 4.0. Neither the badge image nor a general MIT statement resolves this file's contradictory claims.",
+      "package": {
+        "version": "6.2.3",
+        "url": "https://files.pythonhosted.org/packages/84/ef/9099037ed6f180ea33220178df4107112c0ce2bf5fb4d6f6ab19db2844ed/silero_vad-6.2.3-py3-none-any.whl",
+        "sha256": "7b7f5436cfcb02fae583a05b512ea96467fd449fe54cb49a5e4f06c51a1e43b8",
+        "model_member": "silero_vad/data/silero_vad.onnx",
+        "model_sha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3",
+        "metadata_url": "https://pypi.org/pypi/silero-vad/6.2.3/json",
+        "requires_python": ">=3.8",
+        "metadata_license": null,
+        "metadata_license_expression": null,
+        "license_classifier": "License :: OSI Approved :: MIT License",
+        "metadata_member": "silero_vad-6.2.3.dist-info/METADATA",
+        "metadata_sha256": "ff91344bc524cfe9970eabf27b7ec68e721aa32968079b0012b797803725b529",
+        "license_member": "silero_vad-6.2.3.dist-info/licenses/LICENSE",
+        "license_sha256": "2e63e9a38b6e8fc0c7bc37ce174caca1862870856c6daf5697cfb785e925520b"
+      },
+      "inspection": {
+        "prototype_identity": "unverified",
+        "prototype_note": "The prototype names silero_vad.onnx and input/state/sr, but its binary, download URL, revision, and digest were not retained.",
+        "onnxruntime_version": "1.31.0",
+        "inputs": [{"name": "input", "type": "tensor(float)", "shape": [null, null]}, {"name": "state", "type": "tensor(float)", "shape": [2, null, 128]}, {"name": "sr", "type": "tensor(int64)", "shape": []}],
+        "model_metadata": {"producer_name": "spox", "domain": "", "description": "", "custom_metadata_map": {}},
+        "model_card": "No separate model card is present in the package or selected model directory.",
+        "readme_sha256": "cd0ee56c91b8042e62a714c0c94bc8b74dbea127a483e390f8033bb8ec8cec78",
+        "textual_package_license_matches": 6,
+        "new_dependencies": 0
+      },
+      "license_sources": [
+        {
+          "kind": "license_text", "revision_or_version": "5cd7945676eb32225748052e2e6a0580e4686a08",
+          "url": "https://github.com/snakers4/silero-vad/blob/5cd7945676eb32225748052e2e6a0580e4686a08/LICENSE#L1-L21",
+          "quote": "MIT License\n\nCopyright (c) 2020-present Silero Team\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.",
+          "file_binding": {"path": "src/silero_vad/data/silero_vad.onnx", "sha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3"}
+        },
+        {
+          "kind": "readme_body", "revision_or_version": "5cd7945676eb32225748052e2e6a0580e4686a08",
+          "url": "https://github.com/snakers4/silero-vad/blob/5cd7945676eb32225748052e2e6a0580e4686a08/README.md#L137",
+          "quote": "Published under permissive license (MIT) Silero VAD has zero strings attached - no telemetry, no keys, no registration, no built-in expiration, no keys or vendor lock.",
+          "file_binding": {"path": "src/silero_vad/data/silero_vad.onnx", "sha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3"}
+        },
+        {
+          "kind": "badge_text", "revision_or_version": "5cd7945676eb32225748052e2e6a0580e4686a08",
+          "url": "https://github.com/snakers4/silero-vad/blob/5cd7945676eb32225748052e2e6a0580e4686a08/README.md#L1",
+          "quote": "License: CC BY-NC 4.0",
+          "file_binding": {"path": "src/silero_vad/data/silero_vad.onnx", "sha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3"}
+        },
+        {
+          "kind": "badge_image", "revision_or_version": "5cd7945676eb32225748052e2e6a0580e4686a08",
+          "url": "https://github.com/snakers4/silero-vad/blob/5cd7945676eb32225748052e2e6a0580e4686a08/README.md#L1",
+          "quote": "https://img.shields.io/badge/License-MIT-lightgrey.svg?style=for-the-badge",
+          "file_binding": {"path": "src/silero_vad/data/silero_vad.onnx", "sha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3"}
+        },
+        {
+          "kind": "badge_link", "revision_or_version": "5cd7945676eb32225748052e2e6a0580e4686a08",
+          "url": "https://github.com/snakers4/silero-vad/blob/5cd7945676eb32225748052e2e6a0580e4686a08/README.md#L1",
+          "quote": "https://github.com/snakers4/silero-vad/blob/master/LICENSE",
+          "file_binding": {"path": "src/silero_vad/data/silero_vad.onnx", "sha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3"}
+        },
+        {
+          "kind": "package_metadata", "revision_or_version": "5cd7945676eb32225748052e2e6a0580e4686a08",
+          "url": "https://github.com/snakers4/silero-vad/blob/5cd7945676eb32225748052e2e6a0580e4686a08/pyproject.toml#L15",
+          "quote": "License :: OSI Approved :: MIT License",
+          "file_binding": {"path": "src/silero_vad/data/silero_vad.onnx", "sha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3"}
+        },
+        {
+          "kind": "license_text", "revision_or_version": "6.2.3",
+          "url": "https://files.pythonhosted.org/packages/84/ef/9099037ed6f180ea33220178df4107112c0ce2bf5fb4d6f6ab19db2844ed/silero_vad-6.2.3-py3-none-any.whl#silero_vad-6.2.3.dist-info/licenses/LICENSE:L1-L21",
+          "quote": "MIT License\n\nCopyright (c) 2020-present Silero Team\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.",
+          "file_binding": {"path": "src/silero_vad/data/silero_vad.onnx", "sha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3"}
+        },
+        {
+          "kind": "package_metadata", "revision_or_version": "6.2.3",
+          "url": "https://files.pythonhosted.org/packages/84/ef/9099037ed6f180ea33220178df4107112c0ce2bf5fb4d6f6ab19db2844ed/silero_vad-6.2.3-py3-none-any.whl#silero_vad-6.2.3.dist-info/METADATA:L8,L12",
+          "quote": "License-File: LICENSE\nClassifier: License :: OSI Approved :: MIT License",
+          "file_binding": {"path": "src/silero_vad/data/silero_vad.onnx", "sha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3"}
+        },
+        {
+          "kind": "badge_text", "revision_or_version": "6.2.3",
+          "url": "https://files.pythonhosted.org/packages/84/ef/9099037ed6f180ea33220178df4107112c0ce2bf5fb4d6f6ab19db2844ed/silero_vad-6.2.3-py3-none-any.whl#silero_vad-6.2.3.dist-info/METADATA:L51",
+          "quote": "License: CC BY-NC 4.0",
+          "file_binding": {"path": "src/silero_vad/data/silero_vad.onnx", "sha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3"}
+        },
+        {
+          "kind": "badge_image", "revision_or_version": "6.2.3",
+          "url": "https://files.pythonhosted.org/packages/84/ef/9099037ed6f180ea33220178df4107112c0ce2bf5fb4d6f6ab19db2844ed/silero_vad-6.2.3-py3-none-any.whl#silero_vad-6.2.3.dist-info/METADATA:L51",
+          "quote": "https://img.shields.io/badge/License-MIT-lightgrey.svg?style=for-the-badge",
+          "file_binding": {"path": "src/silero_vad/data/silero_vad.onnx", "sha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3"}
+        },
+        {
+          "kind": "badge_link", "revision_or_version": "6.2.3",
+          "url": "https://files.pythonhosted.org/packages/84/ef/9099037ed6f180ea33220178df4107112c0ce2bf5fb4d6f6ab19db2844ed/silero_vad-6.2.3-py3-none-any.whl#silero_vad-6.2.3.dist-info/METADATA:L51",
+          "quote": "https://github.com/snakers4/silero-vad/blob/master/LICENSE",
+          "file_binding": {"path": "src/silero_vad/data/silero_vad.onnx", "sha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3"}
+        },
+        {
+          "kind": "readme_body", "revision_or_version": "6.2.3",
+          "url": "https://files.pythonhosted.org/packages/84/ef/9099037ed6f180ea33220178df4107112c0ce2bf5fb4d6f6ab19db2844ed/silero_vad-6.2.3-py3-none-any.whl#silero_vad-6.2.3.dist-info/METADATA:L187",
+          "quote": "Published under permissive license (MIT) Silero VAD has zero strings attached - no telemetry, no keys, no registration, no built-in expiration, no keys or vendor lock.",
+          "file_binding": {"path": "src/silero_vad/data/silero_vad.onnx", "sha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3"}
+        }
+      ],
+      "clarification_search": {
+        "access_date": "2026-10-24",
+        "issue_queries": {"license": 5, "CC BY-NC": 1, "badge": 0, "commercial": 5},
+        "issue_threads_read": [37, 46, 71, 110, 254, 335, 454, 551, 555],
+        "discussion_titles_and_bodies": 263,
+        "discussion_matches": [111, 246, 336],
+        "rights_discussion_replies_read": [246, 336],
+        "readme_commits": 108,
+        "old_path_commits": 1,
+        "finding": "No examined OWNER or MEMBER statement gives a license for these model weights or resolves the badge conflict for this file and revision.",
+        "owner_examples": [
+          {"url": "https://github.com/snakers4/silero-vad/discussions/246#discussioncomment-3910625", "date": "2022-10-19T00:26:45Z", "author_association": "OWNER", "quote": "Hi, no we do not provide model training options. If someone requires a custom model we do it commercially as a service.", "scope": "Custom training service, not a license grant for the selected weights."},
+          {"url": "https://github.com/snakers4/silero-vad/issues/555#issuecomment-2413520879", "date": "2024-10-15T10:35:18Z", "author_association": "OWNER", "quote": "Probably using ONNX runtime is the easiest option.\n\n> converting the ONNX model to a Core ML model\n\nTypically, such things are what we do commercially for companies for a fee.", "scope": "ONNX deployment and Core ML conversion service, not a license grant for the selected file."}
+        ],
+        "badge_history": [
+          {"url": "https://github.com/snakers4/silero-vad/commit/56860ee673881e211ff2bda6f560cf9bc496575e", "date": "2020-11-23T10:28:37Z", "location": "Added silero-vad/README.md:1", "quote": "[![License: CC BY-NC 4.0](https://img.shields.io/badge/License-GNU%20AGPL%203.0-lightgrey.svg?style=for-the-badge)](https://github.com/snakers4/silero-models/blob/master/LICENSE)"},
+          {"url": "https://github.com/snakers4/silero-vad/commit/dbf3adf06046fee7caa4fef096974c1891b3440d", "date": "2020-11-23T10:42:52Z", "location": "README.md:1 diff, image changed from AGPL to MIT; CC BY-NC alt text retained", "quote": "[![License: CC BY-NC 4.0](https://img.shields.io/badge/License-MIT-lightgrey.svg?style=for-the-badge)](https://github.com/snakers4/silero-models/blob/master/LICENSE)"}
+        ],
+        "history_interpretation": "The alt text predates the selected model. The historical image change suggests inherited text, but does not state a license for the selected model file. Historical AGPL image text is not treated as an additional license for this release."
+      }
     }
   ]
 }

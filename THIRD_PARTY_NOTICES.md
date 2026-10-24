@@ -101,3 +101,32 @@ This is a project supply rule, not a statement about all possible GPL combinatio
 `assets/manifest.json` records the pinned sources, versions, digests, source statements, and blocked paths.
 `docs/research/q7-kokoro.md` records the actual first-use downloads and other package declarations.
 The inspection copied no third-party code or data into this repository.
+
+## Silero model rights
+
+Silero VAD has status `confirmed_blocked_absent`.
+The selected candidate is `v6.2.3`, commit `5cd7945676eb32225748052e2e6a0580e4686a08`.
+The file is `src/silero_vad/data/silero_vad.onnx`.
+Its SHA-256 is `1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3`.
+The PyPI `silero-vad==6.2.3` wheel supplies the same model bytes.
+
+The repository and package have MIT text and an MIT classifier.
+The README body also states MIT. The badge alt text states `CC BY-NC 4.0`.
+The wheel metadata has this conflict. The badge image says MIT.
+
+No examined owner or member statement resolves these claims for the selected file and revision.
+The badge history suggests inherited text, but supplies no file-scoped license clarification.
+
+The project accepts no statement as a resolved model-file license.
+The release tree and startup download plan do not include the model.
+No replacement VAD follows from this decision. The VAD-dependent runtime stays blocked.
+Image inventory stays `NOT CHECKED` because there is no image.
+
+`assets/manifest.json` has the pinned file, package, source statements, and blocked-path checks.
+`docs/research/q8-silero.md` has all license statements, source locations, history, and a proposed upstream question.
+The inspection opened no issue, sent no upstream message, and added no model or runtime dependency.
+
+The Silero record uses `license_sources` for all rights statements.
+Each entry has `kind`, `url`, `quote`, and `revision_or_version`.
+Each entry also has `file_binding` with the selected `path` and `sha256`.
+The checker reads license identifiers from `quote`, not a different source list.

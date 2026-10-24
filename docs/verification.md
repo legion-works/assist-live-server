@@ -440,3 +440,124 @@ The ASD-STE100 checker reports 0 findings in the research report, notices, and t
 The public-file self-check reads 46 files and reports 0 private terms, 0 home paths, and 0 private addresses.
 The public-tree check with `--history` reports `PASS own Git root`, `PASS history secrets commits=4`, and `PASS public data matches=0`.
 Date: 2026-10-24.
+
+## Voice detector rights test
+
+Command: `cd $WORKSPACE/assist-live-server && uv run pytest tests/test_silero_license.py -q`.
+
+Before the checker was available, the result was `ModuleNotFoundError: No module named 'tools.probe_silero_license'`, `1 failed`.
+Date: 2026-10-24.
+
+## Voice detector source and input contract
+
+Command: `gh api repos/snakers4/silero-vad/tags --jq '[.[]|{name,sha:.commit.sha}]'`.
+
+Result: tag `v6.2.3` names commit `5cd7945676eb32225748052e2e6a0580e4686a08`.
+Date: 2026-10-24.
+
+The selected file is `src/silero_vad/data/silero_vad.onnx` at that commit.
+Its SHA-256 is `1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3`.
+The file size is `2327524` bytes.
+The `silero_vad-6.2.3-py3-none-any.whl` SHA-256 is `7b7f5436cfcb02fae583a05b512ea96467fd449fe54cb49a5e4f06c51a1e43b8`.
+Its `silero_vad/data/silero_vad.onnx` member has the same model bytes.
+
+PyPI metadata source: https://pypi.org/pypi/silero-vad/6.2.3/json .
+Its `Requires-Python` is `>=3.8`, which includes the server floor `3.14.2`.
+The checker uses the standard library only. No repository package or dependency changed.
+The model and package stayed in scratch storage for inspection.
+Access date: 2026-10-24.
+
+The prototype names `silero_vad.onnx`, but its binary and source pin are not available.
+Its byte identity stays `unverified`. This investigation selects a named release file for the rights check.
+The installed ONNX Runtime `1.31.0` loaded the selected file and printed `PASS prototype ONNX input contract`.
+
+Its actual inputs are `input: tensor(float)`, `state: tensor(float)`, and `sr: tensor(int64)`.
+The state shape is `[2, null, 128]`. The sampling-rate input is scalar.
+The embedded model metadata has no license statement.
+
+## Voice detector license sources
+
+The repository `LICENSE`, README body, package classifier, and attached package license state MIT.
+README line `1` and wheel `METADATA` line `51` have badge alt text `License: CC BY-NC 4.0`.
+The image URL says MIT and has the repository license as its `link target`.
+The MIT and non-commercial claims stay unresolved for the selected model file.
+The badge is not a file-license grant.
+
+The repository and package license-text SHA-256 is `2e63e9a38b6e8fc0c7bc37ce174caca1862870856c6daf5697cfb785e925520b`.
+The wheel metadata SHA-256 is `ff91344bc524cfe9970eabf27b7ec68e721aa32968079b0012b797803725b529`.
+The investigation examined all textual package members for license statements.
+Six license-related lines occur in `METADATA` and its attached `LICENSE`.
+The package and selected model directory have no `model card`.
+The manifest and research report keep each statement, source location, URL, and file digest.
+
+The Silero rights records use only `license_sources`.
+Each source has `kind`, `url`, `quote`, `revision_or_version`, and `file_binding`.
+The `file_binding` has the selected model `path` and `sha256` in the same entry.
+The checker reads the claims from `quote`. The earlier asset records stay unchanged.
+
+## Voice detector clarification search
+
+Commands:
+
+```sh
+gh search issues --repo snakers4/silero-vad license --json number,title,url --limit 10
+gh search issues --repo snakers4/silero-vad 'CC BY-NC' --json number,title,url --limit 30
+gh search issues --repo snakers4/silero-vad badge --json number,title,url --limit 30
+gh search issues --repo snakers4/silero-vad commercial --json number,title,url --limit 30
+gh api --paginate --slurp 'repos/snakers4/silero-vad/discussions?per_page=100'
+gh api --paginate --slurp 'repos/snakers4/silero-vad/commits?path=README.md&per_page=100'
+```
+
+Results: `license=5`, `CC BY-NC=1`, `badge=0`, and `commercial=5`.
+The discussion query gave `263` titles and bodies. The history query gave `108` root README commits.
+The positive `license` results checked that the query could find known issues.
+The investigation read nine issues and their comments, plus replies to the two related discussions.
+
+The owner replies are about custom training, tuning, and conversion services.
+No examined `OWNER` or `MEMBER` statement grants a license for this model file and revision.
+Source URLs, dates, associations, and source statements are in `docs/research/q8-silero.md`.
+
+The README rename led to the initial `silero-vad/README.md` path.
+Its history has one commit: `56860ee673881e211ff2bda6f560cf9bc496575e`, dated `2020-11-23T10:28:37Z`.
+The diff adds the non-commercial alt text with an AGPL image.
+The `link target` is a different model project.
+Commit `dbf3adf06046fee7caa4fef096974c1891b3440d`, dated `2020-11-23T10:42:52Z`, changes the image to MIT but keeps the alt text.
+
+This history suggests inherited text. It supplies no license clarification for the selected model.
+
+The historical AGPL image is not a license finding for the selected release.
+
+The investigation made no upstream contact.
+The research report has a proposed question for operator approval.
+Access date: 2026-10-24.
+
+## Voice detector release checks
+
+Command:
+
+```sh
+cd $WORKSPACE/assist-live-server && uv run pytest tests/test_silero_license.py -q && uv run python tools/probe_silero_license.py --record-decision --allow-blocked-absent --check assets/manifest.json --report docs/research/q8-silero.md && uv run python tools/check_assets.py --manifest assets/manifest.json --release
+```
+
+Result: `31 passed`, `PASS decision recorded`, `PASS blocked asset absent`, and `PASS asset licenses`.
+The image check prints `NOT CHECKED image inventory: no image inventory exists`.
+Date: 2026-10-24.
+
+Command: `cd $WORKSPACE/assist-live-server && task check`.
+
+Result: `28 files already formatted`, `All checks passed!`, `PASS CI boundaries`, and `105 passed`.
+Mypy prints `Success: no issues found in 8 source files`.
+The package checks print `PASS server bootstrap` and `PASS isolated client and server packages`.
+The asset check prints `PASS asset licenses`. The `secret scan` reports `no leaks found`.
+Date: 2026-10-24.
+
+Command: `uv run --locked --python 3.14.3 pytest tests/ -q` with an isolated temporary environment.
+
+Result: `105 passed`. The same command with Python `3.14.2` also reports `105 passed`.
+Date: 2026-10-24.
+
+The ASD-STE100 checker reports 0 findings in this record, the research report, and the notices.
+The public-file self-check reads 49 files and reports 0 private terms, 0 home paths, and 0 private addresses.
+The public-tree check with `--history` reports `PASS own Git root`, `PASS history secrets commits=5`, and `PASS public data matches=0`.
+The three earlier asset records are byte-identical. Their probes and the package metadata stay unchanged.
+Date: 2026-10-24.
