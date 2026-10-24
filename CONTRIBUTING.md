@@ -1,7 +1,20 @@
-# Contributing
+# Contribution instructions
 
-The project is experimental and has no release. Check the open issues before you start a large change.
+## Status
 
-Keep each change small. Add tests for changed behavior. Do not add personal data, secrets, or household recordings.
+The project is experimental. No release is available.
+Keep changes small. Add tests for changed behavior.
+Do not add personal data, secrets, or household recordings.
 
-Run the checks for the part that you change. A future task will add full automation.
+## Development checks
+
+Use Python `3.14.2` or above and `uv`.
+Run these commands from the repository root:
+
+```sh
+uv sync --locked
+uv run pytest tests/test_package.py -q
+uv run python tools/check_bootstrap.py
+uvx ruff format --check .
+uvx ruff check .
+```

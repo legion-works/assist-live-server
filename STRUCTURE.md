@@ -1,4 +1,4 @@
-# Repository Structure
+# Repository structure
 
 The repository has three deliverables in different directories.
 

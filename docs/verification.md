@@ -1,45 +1,79 @@
-# Verification
+# Verification record
 
-The Home Assistant 2026.10.3 Python requirement is `>=3.14.2`. Source: https://pypi.org/pypi/homeassistant/2026.10.3/json, field `info.requires_python`.
+## Package metadata
 
-RED test command: `$WORKSPACE/assist-live-server: uv run --no-project --with pytest pytest tests/test_package.py -q`.
+Home Assistant 2026.10.3 has Python floor `>=3.14.2`.
+Source: https://pypi.org/pypi/homeassistant/2026.10.3/json, field `info.requires_python`.
 
-RED result: `ModuleNotFoundError: No module named 'assist_live_client'`. Date: 2026-10-24.
+The standalone package test ran before package metadata was available:
 
-Ruff I001 rejected the first literal import order. The client import came before the standard-library import. The test puts `Path` first, then the client import on a new line. The test resolves repository paths from its file location.
+```sh
+cd $WORKSPACE/assist-live-server && uv run --no-project --with pytest pytest tests/test_package.py -q
+```
 
-Bootstrap command: `$WORKSPACE/assist-live-server: uv sync --locked && uv run pytest tests/test_package.py -q && uv run python tools/check_bootstrap.py`.
+Result: `ModuleNotFoundError: No module named 'assist_live_client'`. Date: 2026-10-24.
 
-Bootstrap result: `1 passed` and `PASS server bootstrap`. Date: 2026-10-24.
+## Package checks
 
-Import command: `$WORKSPACE/assist-live-server: uv run python -c "import assist_live_server, assist_live_client; print('import ok')"`.
+Command:
 
-Import result: `import ok`. Date: 2026-10-24.
+```sh
+cd $WORKSPACE/assist-live-server && uv sync --locked && uv run pytest tests/test_package.py -q && uv run python tools/check_bootstrap.py
+```
 
-Tree command: `$WORKSPACE/assist-live-server: uv tree`.
+Result: `1 passed` and `PASS server bootstrap`. Date: 2026-10-24.
 
-Tree result: root lists the server and client. The client has no dependencies. Date: 2026-10-24.
+Command:
 
-Ruff command: `$WORKSPACE/assist-live-server: uvx ruff format --check . && uvx ruff check .`.
+```sh
+cd $WORKSPACE/assist-live-server && uv run python -c "import assist_live_server, assist_live_client; print('import ok')"
+```
 
-Ruff result: `14 files already formatted` and `All checks passed!`. Date: 2026-10-24.
+Result: `import ok`. Date: 2026-10-24.
 
-STE command: run `ste_check.py` on the 10 Markdown files.
+Command: `cd $WORKSPACE/assist-live-server && uv tree`.
 
-STE result: 0 findings. Date: 2026-10-24.
+Result: the workspace root lists the server and client. The client has no dependencies. Date: 2026-10-24.
 
-Git root result: `PASS own Git root`. Date: 2026-10-24.
+## Formatting and lint
 
-Publish-file check result: 22 files, 0 denylist hits, 0 absolute home paths, and 0 RFC1918 addresses. Date: 2026-10-24.
+Command: `cd $WORKSPACE/assist-live-server && uvx ruff format --check . && uvx ruff check .`.
 
-## Repair round 1
+Result: `14 files already formatted` and `All checks passed!`. Date: 2026-10-24.
 
-Ruff I001 rejected the first import order. The client import came before `Path`. The repository has no Ruff configuration, so Ruff uses its default rules. Put `Path` first. Put the client import on the next line after one empty line. Test paths come from the test file location.
+## Documentation checks
 
-Test from the client directory: `$WORKSPACE/assist-live-server/client: uv run pytest ../tests/test_package.py -q` → `1 passed`. Date: 2026-10-24.
+The ASD-STE100 checker reported no findings. Date: 2026-10-24.
 
-Dependency probes in a temporary copy: `tensorflow`, `huggingface-hub`, and `faster-whisper` each printed `FAIL client model-runtime dependencies`. `pydantic-model` printed `PASS server bootstrap`. Date: 2026-10-24.
+## Repository checks
 
-Missing descriptor probe in a temporary copy: removing `ha-app/repository.yaml` printed `FAIL app descriptor`. Date: 2026-10-24.
+The Git root check printed `PASS own Git root`. Date: 2026-10-24.
 
-The probe removed the temporary copy after the tests.
+The public-file checker read 22 files. It found 0 private-denylist terms, 0 absolute home paths, and 0 RFC1918 addresses. Date: 2026-10-24.
+
+The package test also ran from the client directory:
+
+```sh
+cd $WORKSPACE/assist-live-server/client && uv run pytest ../tests/test_package.py -q
+```
+
+Result: `1 passed`. Date: 2026-10-24.
+
+Dependency checks rejected `tensorflow`, `huggingface-hub`, and `faster-whisper` with `FAIL client model-runtime dependencies`. They accepted `pydantic-model` and printed `PASS server bootstrap`. The missing app descriptor check printed `FAIL app descriptor`. Date: 2026-10-24.
+
+The checker import test printed `PASS importable checker` and did not start package checks. A failure-collection probe printed 10 named `FAIL` lines to stdout. It printed no traceback. Date: 2026-10-24.
+
+## Deferred checks
+
+HA runtime tests, type checks, and HACS validation are not part of the bootstrap. CI adds them.
+CI compares warnings with this baseline and stops on each new warning.
+
+## Review of all three repositories
+
+On 2026-10-24, the review checked `assist-live`, `assist-live-server`, and `assist-live-esphome` for cross-repository contracts and convention drift.
+It also checked comment and prose hygiene and privacy across history.
+Result: REVISE. Changes were necessary.
+This change aligns repository documents with shared conventions.
+It also gives the bootstrap checker a main entry point, complete failure reporting, stdout results, and a Python-floor check.
+
+A static analysis snapshot reported 0 errors, 0 warnings, 0 info, and 0 hints across 5 source files. Date: 2026-10-24.
