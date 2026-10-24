@@ -1,0 +1,44 @@
+version: "3"
+
+env:
+  UV_LINK_MODE: copy
+
+tasks:
+  format:
+    cmds:
+      - uv run --locked ruff format .
+  lint:
+    cmds:
+      - uv run --locked ruff format --check .
+      - uv run --locked ruff check .
+      - uv run --locked python tools/check_ci.py
+      - actionlint
+  typecheck:
+    cmds:
+      - uv run --locked mypy
+  unit:
+    cmds:
+      - uv run --locked pytest -q
+      - uv run --locked python tools/check_bootstrap.py
+  contract:
+    cmds:
+      - uv run --locked python tools/check_ci.py --packages
+  packaging:
+    cmds:
+      - uv run --locked python tools/check_ci.py --packages
+  asset-license:
+    cmds:
+      - uv run --locked python tools/check_assets.py --manifest assets/manifest.json --release
+  secret-scan:
+    cmds:
+      - gitleaks dir . --redact --exit-code 1
+  check:
+    cmds:
+      - uv sync --locked
+      - task: lint
+      - task: typecheck
+      - task: unit
+      - task: contract
+      - task: packaging
+      - task: asset-license
+      - task: secret-scan

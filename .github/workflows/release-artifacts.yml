@@ -1,0 +1,51 @@
+name: Release artifact checks
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  client:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require publication approval
+        env:
+          RELEASES_APPROVED: ${{ vars.ASSIST_LIVE_RELEASES_APPROVED }}
+        run: test "$RELEASES_APPROVED" = "true"
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@85856786d1ce8acfbcc2f13a5f3fbd6b938f9f41 # v7.1.2
+        with:
+          version: "0.13.1"
+          python-version: "3.14.3"
+      - run: uv sync --locked
+        env:
+          UV_LINK_MODE: copy
+      - name: Check isolated client distribution
+        run: uv run --locked python tools/check_ci.py --package client
+      - name: Check repository asset rights
+        run: uv run --locked python tools/check_assets.py --manifest assets/manifest.json --release
+  server:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require publication approval
+        env:
+          RELEASES_APPROVED: ${{ vars.ASSIST_LIVE_RELEASES_APPROVED }}
+        run: test "$RELEASES_APPROVED" = "true"
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@85856786d1ce8acfbcc2f13a5f3fbd6b938f9f41 # v7.1.2
+        with:
+          version: "0.13.1"
+          python-version: "3.14.3"
+      - run: uv sync --locked
+        env:
+          UV_LINK_MODE: copy
+      - name: Check server asset rights
+        run: uv run --locked python tools/check_assets.py --manifest assets/manifest.json --release
+      - name: Check isolated server distribution
+        run: uv run --locked python tools/check_ci.py --package server

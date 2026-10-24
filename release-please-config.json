@@ -1,0 +1,9 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "include-component-in-tag": true,
+  "tag-separator": "-",
+  "packages": {
+    "server": {"release-type": "python", "component": "server", "package-name": "assist-live-server"},
+    "client": {"release-type": "python", "component": "client", "package-name": "assist-live-client"}
+  }
+}

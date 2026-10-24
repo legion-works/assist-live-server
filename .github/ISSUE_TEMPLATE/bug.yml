@@ -1,0 +1,20 @@
+name: Bug report
+description: Report a fault in the experimental server or client.
+body:
+  - type: markdown
+    attributes:
+      value: Do not include secrets, personal data, or household recordings.
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Give the commands and the expected result.
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Actual result
+      description: Give the version and logs with private data removed.
+    validations:
+      required: true

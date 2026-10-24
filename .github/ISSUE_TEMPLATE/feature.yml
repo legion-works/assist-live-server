@@ -1,0 +1,20 @@
+name: Feature request
+description: Request a server or client function.
+body:
+  - type: markdown
+    attributes:
+      value: This project is experimental and has no release. Do not include personal data.
+  - type: textarea
+    id: need
+    attributes:
+      label: Problem
+      description: Give the task that the function must support.
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Proposed result
+      description: Give a testable result and its limits.
+    validations:
+      required: true

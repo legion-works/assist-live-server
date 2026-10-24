@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: ${{ matrix.check }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        check: [lint, typecheck, unit, contract, packaging, asset-license]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@85856786d1ce8acfbcc2f13a5f3fbd6b938f9f41 # v7.1.2
+        with:
+          version: "0.13.1"
+          python-version: "3.14.3"
+      - uses: go-task/setup-task@0ab1b2a65bc55236a3bc64cde78f80e20e8885c2 # v1.0.0
+        with:
+          version: "3.45.5"
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version: "1.26.1"
+          cache: false
+      - name: Install workflow checker
+        if: matrix.check == 'lint'
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+      - run: uv sync --locked
+        env:
+          UV_LINK_MODE: copy
+      - run: task "$CHECK"
+        env:
+          CHECK: ${{ matrix.check }}
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version: "1.26.1"
+          cache: false
+      - run: go run github.com/zricethezav/gitleaks/v8@v8.30.0 dir . --redact --exit-code 1
+  ci-complete:
+    needs: [checks, secret-scan]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every job to succeed
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+          results = json.loads(os.environ["NEEDS_JSON"])
+          failed = [name for name, job in results.items() if job["result"] != "success"]
+          print("FAIL CI: " + ", ".join(failed) if failed else "PASS CI complete")
+          sys.exit(bool(failed))
+          PY

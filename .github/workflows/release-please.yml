@@ -1,0 +1,36 @@
+name: Release metadata
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    # Release metadata needs tags, releases, and release pull requests after approval.
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Require publication approval
+        env:
+          RELEASES_APPROVED: ${{ vars.ASSIST_LIVE_RELEASES_APPROVED }}
+        run: test "$RELEASES_APPROVED" = "true"
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@85856786d1ce8acfbcc2f13a5f3fbd6b938f9f41 # v7.1.2
+        with:
+          version: "0.13.1"
+          python-version: "3.14.3"
+      - name: Check asset rights before release metadata
+        run: uv run --locked python tools/check_assets.py --manifest assets/manifest.json --release
+        env:
+          UV_LINK_MODE: copy
+      - uses: googleapis/release-please-action@16a9c90856f42705d54a6fda1823352bdc62cf38 # v4.4.0
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          target-branch: main

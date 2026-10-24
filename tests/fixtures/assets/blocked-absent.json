@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "assets": [
+    {
+      "id": "piper-runtime",
+      "kind": "runtime",
+      "status": "confirmed_blocked_absent",
+      "url": "https://github.com/OHF-Voice/piper1-gpl",
+      "download": "none",
+      "paths": ["piper.bin"],
+      "components": []
+    }
+  ],
+  "image_inventory": [],
+  "download_plan": []
+}

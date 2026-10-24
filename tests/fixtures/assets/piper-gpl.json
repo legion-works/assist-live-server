@@ -1,0 +1,17 @@
+[
+  {
+    "id": "piper-runtime",
+    "kind": "runtime",
+    "status": "confirmed_included",
+    "url": "https://example.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/piper.bin",
+    "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "license": "GPL-3.0-only",
+    "license_sources": [{"kind": "license_text", "url": "https://example.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/COPYING"}],
+    "redistribution": true,
+    "download": "included",
+    "attribution": "Synthetic GPL runtime fixture. Not a real artifact.",
+    "paths": ["piper.bin"],
+    "components": []
+  }
+]
