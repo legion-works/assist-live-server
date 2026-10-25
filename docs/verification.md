@@ -98,14 +98,15 @@ Each included record must have these fields:
 
 - `id`, `kind`, and `status: confirmed_included`.
 - An HTTPS `url` with the immutable `revision`, and a 64-digit `sha256`.
-- An approved SPDX `license` and `license_sources` at that revision.
+- An approved SPDX `license` and pinned `license_sources` for the file.
 - `redistribution: true`, `download: included` or `startup`, and non-empty `attribution`.
 - Relative artifact `paths` and an explicit `components` list, empty if there are no parts.
 
 Approved licenses are `Apache-2.0`, `MIT`, `BSD-2-Clause`, `BSD-3-Clause`, `CC0-1.0`, and `CC-BY-4.0`.
 Other licenses stop the release. This includes unknown, non-commercial, and no-derivatives terms and GPL, AGPL, or LGPL components.
 
-An upstream license-text or model-card URL must contain the pinned revision. A badge URL is not a source record.
+Each source URL must contain its own pinned revision or package version.
+A badge URL is not a license grant.
 The gate checks the recorded facts. A rights investigation must check the source text before the manifest includes the record.
 
 The gate checks SHA-256 against each available local artifact. A startup downloader must check that hash before it uses a downloaded file.
@@ -124,7 +125,10 @@ The gate checks those paths in the release tree.
 It examines runtime source and package metadata for the asset ID, URL, and listed identifiers.
 It also checks the image inventory and the download plan. Tests and rights documents are not runtime inputs.
 
-Unconfirmed hashes, revisions, and license sources stay empty for blocked assets. They are not permission to supply those assets.
+Unconfirmed artifact hashes and revisions can stay empty for blocked assets.
+Their `license_sources` must contain source text and a clear scope, with or without a file-level grant.
+Those records are not permission to supply the assets.
+
 Piper has a `confirmed_blocked_absent` record.
 Smart Turn v3.2 has a `confirmed_included` record and a planned startup download.
 Its ONNX file has a pinned revision, SHA-256, and file-level BSD-2-Clause sources.
@@ -561,3 +565,156 @@ The public-file self-check reads 49 files and reports 0 private terms, 0 home pa
 The public-tree check with `--history` reports `PASS own Git root`, `PASS history secrets commits=5`, and `PASS public data matches=0`.
 The three earlier asset records are byte-identical. Their probes and the package metadata stay unchanged.
 Date: 2026-10-24.
+
+## Rights source record contract
+
+All 16 asset and component records use one `license_sources` shape.
+The six support-package records use the same shape.
+Each entry has `kind`, `url`, `quote`, and `revision_or_version`.
+It also has `file_binding` with `path` and `sha256`, or a non-empty `scope`.
+The gate must find a non-empty `quote` from the cited source for included and blocked records.
+
+An included record must have a license-text or model-card entry with the selected file SHA-256.
+The download plan uses the same asset record and digest.
+The source can have its own upstream-project revision, different from the model revision.
+Its statement and file identity must be in the same entry.
+`upstream_project` contains navigation only.
+The gate refuses `evidence` and `license_claims` fields.
+
+The source audit downloaded the pinned source files and package archives to temporary storage.
+Each of the 45 source statements is one text segment from its cited source.
+Package-archive fragments identify the source member.
+The audit also checked dictionary bytes and the attached-license digests.
+
+Command: `python $PROBE/audit_sources.py` against a saved initial manifest and the current manifest.
+
+```text
+PASS decision-bearing fields unchanged records=16
+PASS canonical sources=45 quotes are contiguous verbatim source excerpts
+PASS each fetched source digest and embedded dictionary digest verified
+```
+
+The compared fields include ID, status, license, revision, version, file SHA-256, URL, and download behavior.
+Redistribution flags, the download plan, the default voice list, and the image inventory also stay unchanged.
+Piper, Kokoro, and Silero stay blocked. Smart Turn stays included for the planned startup download.
+Date: 2026-10-24.
+
+## Shared source failure conditions
+
+The new source-contract tests ran before the gate changes.
+
+Command: `uv run pytest tests/test_asset_gate.py tests/test_probe_smart_turn.py -q`.
+
+Result: `29 failed, 45 passed`.
+The tests found missing source fields, legacy lists, and a missing file-digest bridge.
+They also found report inputs that were not compatible.
+They also found that corrupt cache recovery and saved-measurement use were not available.
+The missing-quote test gave `AssertionError: assert False` before the check was available.
+Date: 2026-10-24.
+
+The gate reports the record name and missing field on stdout.
+A mutation test removed `quote` from each top-level record in turn.
+
+Command: `uv run python $PROBE/mutations.py`.
+
+```text
+FAIL asset licenses: piper-runtime: license source quote required
+FAIL asset licenses: smart-turn-v3.2-cpu: license source quote required
+FAIL asset licenses: kokoro-82m: license source quote required
+FAIL asset licenses: silero-vad: license source quote required
+PASS quote-removal mutations rejected=4 of 4
+```
+
+Each mutated gate command gave exit 1. The mutation script gave exit 0 after all four checks.
+The gate also reports the missing source-field set for each mutation.
+Date: 2026-10-24.
+
+## Rights report generation
+
+The three probes use the shared source reader.
+Each probe can render all 16 asset and component records.
+The renderers use manifest-owned source URLs, revisions, file hashes, and inspection values.
+No rights decision reads a parallel source list.
+
+The source data keeps the upstream line breaks, Markdown, and source-header comment prefixes.
+The voice table's `af\_heart` identifier keeps its backslash in the source record.
+The two non-contiguous Silero metadata lines have individual source entries.
+These changes keep the license-statement words and the upstream format.
+
+The saved Smart Turn measurement has its initial 100 rows and digest.
+No model download, session construction, or cost measurement ran for report generation.
+The cached JSON digest is `62270a7120211374463cda06c2fef1677247c411821fec8189b77fe18f10d1e7`.
+
+Commands, with `ASSIST_LIVE_PROBE_DIRECTORY` set to temporary storage and `UV_LINK_MODE=copy`:
+
+```sh
+uv run pytest tests/test_probe_smart_turn.py -q
+uv run python tools/probe_smart_turn.py --record-decision --reuse-measurements $PROBE/measurements.json --allow-blocked-absent --candidates 100 --report docs/research/q5-smart-turn.md
+uv run python tools/check_assets.py --manifest assets/manifest.json --release
+uv run pytest tests/test_kokoro_licenses.py -q
+uv run python tools/probe_kokoro_licenses.py --record-decision --allow-blocked-absent --check assets/manifest.json --report docs/research/q7-kokoro.md
+uv run python tools/check_assets.py --manifest assets/manifest.json --release
+uv run pytest tests/test_silero_license.py -q
+uv run python tools/probe_silero_license.py --record-decision --allow-blocked-absent --check assets/manifest.json --report docs/research/q8-silero.md
+uv run python tools/check_assets.py --manifest assets/manifest.json --release
+```
+
+Results: Smart Turn `15 passed`, `PASS decision recorded`, and `PASS included rights`.
+Kokoro reports `22 passed`, `PASS decision recorded`, and `PASS blocked asset absent`.
+Silero reports `32 passed`, `PASS decision recorded`, and `PASS blocked asset absent`.
+Each asset command reports `PASS asset licenses`.
+
+Image inventory stays `NOT CHECKED`. There is no image.
+Date: 2026-10-24.
+
+The Smart Turn runtime and measurement text is byte-identical to the previous report.
+The Kokoro inspection values and earlier source-statement words stay unchanged.
+All earlier report SHA-256 values stay available in the reports.
+The report diff contains source data and its display only, with the corrected phrase `six license statements`.
+
+## Cached model validation
+
+The model cache checks the file digest before use.
+A corrupt cached file starts a new download, but replacement must have the correct SHA-256.
+A bad download keeps the cached file unchanged and stops the command.
+The tests use an in-memory downloader with no network.
+
+The installed Transformers `5.20.2` source checks package availability in `is_torch_available()`.
+It does not read the `USE_TORCH` or `USE_TF` settings.
+Its `USE_TORCH_XLA` setting is a different setting.
+The NumPy-only feature-extractor test gives `PASS` without those two assignments.
+Date: 2026-10-24.
+
+## Rights release checks
+
+Command: `task check`.
+
+```text
+29 files already formatted
+All checks passed!
+PASS CI boundaries
+Success: no issues found in 9 source files
+148 passed
+PASS server bootstrap
+PASS isolated client and server packages
+NOT CHECKED image inventory: no image inventory exists
+PASS asset licenses
+no leaks found
+```
+
+Command: `uv run --locked --python 3.14.2 pytest tests/ -q` in an isolated temporary environment.
+Result: `148 passed`. The same command with the CI version, Python `3.14.3`, reports `148 passed`.
+
+Command: `unshare -rn sh -c 'UV_LINK_MODE=copy uv run --offline --no-sync pytest tests/ -q'`.
+Result: `148 passed` with the network namespace disabled.
+Date: 2026-10-24.
+
+The ASD-STE100 checker reports 0 findings in each of the four changed Markdown files.
+The public-file self-check reads 50 files, with 0 private terms, 0 home paths, and 0 private addresses.
+The public-tree check with `--history` reports `PASS own Git root`, `PASS history secrets commits=6`, and `PASS public data matches=0`.
+Client and server package metadata, the lockfile, and CI stay unchanged.
+Date: 2026-10-24.
+
+Workspace analysis reports 31 unresolved imports and 0 warnings.
+Its workspace root is not the repository root.
+Configured Mypy and pytest resolve those modules. No import or type exemption is in use.

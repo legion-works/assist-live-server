@@ -6,11 +6,14 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
+if __package__ in (None, ""):
+    sys.path.insert(0, str(ROOT))
 ALLOWED = {"Apache-2.0", "MIT", "BSD-2-Clause", "BSD-3-Clause", "CC0-1.0", "CC-BY-4.0"}
 KINDS = {"model", "voice", "runtime", "phonemizer", "tokenizer", "voice_data"}
 ASSET_SUFFIXES = {
@@ -150,20 +153,6 @@ def check_included(record: dict[str, Any], root: Path, errors: list[str]) -> Non
     license_id = record.get("license")
     if not isinstance(license_id, str) or license_id not in ALLOWED:
         errors.append(f"{label}: license does not permit this Apache image policy")
-    sources = record.get("license_sources")
-    if not isinstance(sources, list) or not sources:
-        errors.append(f"{label}: license source records required")
-    else:
-        for source in sources:
-            if (
-                not isinstance(source, dict)
-                or source.get("kind") not in ("license_text", "model_card")
-                or not https_url(source.get("url"))
-                or not revision
-                or revision not in source["url"]
-                or re.search(r"badge|shields\.io", source["url"], re.IGNORECASE)
-            ):
-                errors.append(f"{label}: pinned license text or model card required")
     if record.get("redistribution") is not True:
         errors.append(f"{label}: redistribution permission required")
     if record.get("download") not in ("included", "startup"):
@@ -244,6 +233,8 @@ def check_absent(
 def check_assets(manifest: Path, release: bool) -> list[str]:
     """Return all stop-work errors. Both delivery paths use the same policy."""
     errors: list[str] = []
+    from tools.asset_rights import source_errors
+
     manifest = Path(manifest).resolve()
     document = load_json(manifest, errors)
     if isinstance(document, list):
@@ -288,6 +279,18 @@ def check_assets(manifest: Path, release: bool) -> list[str]:
         if label in ids:
             errors.append(f"{label}: duplicate asset id")
         ids.add(label)
+        errors.extend(source_errors(record))
+        inspection = record.get("inspection", {})
+        if isinstance(inspection, dict):
+            packages = inspection.get("supporting_packages", [])
+            if not isinstance(packages, list):
+                errors.append(f"{label}: supporting package list required")
+            else:
+                for package in packages:
+                    if isinstance(package, dict):
+                        errors.extend(source_errors(package))
+                    else:
+                        errors.append(f"{label}: supporting package record required")
         if not isinstance(record.get("kind"), str) or record["kind"] not in KINDS:
             errors.append(f"{label}: asset kind required")
         if record.get("status") == "confirmed_included":

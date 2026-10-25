@@ -13,7 +13,7 @@
       "revision": null,
       "sha256": null,
       "license": "GPL-3.0-only",
-      "license_sources": [],
+      "license_sources": [{"kind": "license_text", "url": "https://github.com/OHF-Voice/piper1-gpl/blob/74ac24e7e8e2e57a5e1fada5505c74e3d9c1843a/COPYING", "quote": "GNU GENERAL PUBLIC LICENSE\n                       Version 3, 29 June 2007", "revision_or_version": "74ac24e7e8e2e57a5e1fada5505c74e3d9c1843a", "scope": "Piper runtime source. Not distributed under the Apache image policy."}],
       "redistribution": false,
       "download": "none",
       "attribution": "Not distributed. No rights approval for the Apache server image.",
@@ -32,18 +32,19 @@
       "license_sources": [
         {
           "kind": "model_card",
-          "url": "https://huggingface.co/pipecat-ai/smart-turn-v3/blob/f766f81d3cfdf7737ac64aad813d91bbfd56bf93/README.md"
-        }
+          "url": "https://huggingface.co/pipecat-ai/smart-turn-v3/blob/f766f81d3cfdf7737ac64aad813d91bbfd56bf93/README.md",
+          "quote": "license: bsd-2-clause",
+          "revision_or_version": "f766f81d3cfdf7737ac64aad813d91bbfd56bf93",
+          "file_binding": {"path": "smart-turn-v3.2-cpu.onnx", "sha256": "2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f"}
+        },
+        {"kind": "license_text", "url": "https://github.com/pipecat-ai/smart-turn/blob/4786657e242dfe77dd138699ac564ee074a2a543/LICENSE", "quote": "BSD 2-Clause License\n\nCopyright (c) 2024–2025, Daily\n\nRedistribution and use in source and binary forms, with or without\nmodification, are permitted provided that the following conditions are met:\n\n1. Redistributions of source code must retain the above copyright notice, this\n   list of conditions and the following disclaimer.\n\n2. Redistributions in binary form must reproduce the above copyright notice,\n   this list of conditions and the following disclaimer in the documentation\n   and/or other materials provided with the distribution.\n\nTHIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS \"AS IS\"\nAND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE\nIMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE\nDISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE\nFOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL\nDAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR\nSERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER\nCAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,\nOR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE\nOF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.\n", "revision_or_version": "4786657e242dfe77dd138699ac564ee074a2a543", "file_binding": {"path": "smart-turn-v3.2-cpu.onnx", "sha256": "2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f"}},
+        {"kind": "model_card", "url": "https://github.com/pipecat-ai/smart-turn/blob/4786657e242dfe77dd138699ac564ee074a2a543/README.md", "quote": "This is a truly open model (BSD 2-clause license).", "revision_or_version": "4786657e242dfe77dd138699ac564ee074a2a543", "file_binding": {"path": "smart-turn-v3.2-cpu.onnx", "sha256": "2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f"}},
+        {"kind": "model_card", "url": "https://github.com/pipecat-ai/smart-turn/blob/4786657e242dfe77dd138699ac564ee074a2a543/README.md", "quote": "The datasets, training script, and model weights are all open source.", "revision_or_version": "4786657e242dfe77dd138699ac564ee074a2a543", "file_binding": {"path": "smart-turn-v3.2-cpu.onnx", "sha256": "2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f"}},
+        {"kind": "model_card", "url": "https://github.com/pipecat-ai/smart-turn/blob/4786657e242dfe77dd138699ac564ee074a2a543/README.md", "quote": "* [HuggingFace page with model weights](https://huggingface.co/pipecat-ai/smart-turn-v3)", "revision_or_version": "4786657e242dfe77dd138699ac564ee074a2a543", "file_binding": {"path": "smart-turn-v3.2-cpu.onnx", "sha256": "2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f"}}
       ],
       "upstream_project": {
         "repository": "https://github.com/pipecat-ai/smart-turn",
-        "revision": "4786657e242dfe77dd138699ac564ee074a2a543",
-        "scope_url": "https://github.com/pipecat-ai/smart-turn/blob/4786657e242dfe77dd138699ac564ee074a2a543/README.md",
-        "scope_quote": "This is a truly open model (BSD 2-clause license).",
-        "weights_quote": "The datasets, training script, and model weights are all open source.",
-        "weights_link": "https://huggingface.co/pipecat-ai/smart-turn-v3",
-        "license_url": "https://github.com/pipecat-ai/smart-turn/blob/4786657e242dfe77dd138699ac564ee074a2a543/LICENSE",
-        "license_sha256": "0d66364067f678c08586ebb60a16a2aed4fa081ec11057df35585759ce0e774f"
+        "revision": "4786657e242dfe77dd138699ac564ee074a2a543"
       },
       "redistribution": true,
       "download": "startup",
@@ -63,19 +64,18 @@
         "kind": "model_card",
         "url": "https://huggingface.co/hexgrad/Kokoro-82M/blob/f3ff3571791e39611d31c381e3a41a3af07b4987/README.md",
         "quote": "This is an Apache-licensed model, and Kokoro has been deployed in numerous projects and commercial APIs.",
-        "file_tie": "The same page records the complete SHA-256 of kokoro-v1_0.pth."
-      }],
+        "revision_or_version": "f3ff3571791e39611d31c381e3a41a3af07b4987",
+        "file_binding": {"path": "kokoro-v1_0.pth", "sha256": "496dba118d1a58f5f3db2efc88dbdc216e0483fc89fe6e47ee1f2c53f18ad1e4"}
+      }, {"kind": "license_text", "url": "https://github.com/hexgrad/kokoro/blob/dfb907a02bba8152ca444717ca5d78747ccb4bec/LICENSE", "quote": "Apache License\n                           Version 2.0, January 2004", "revision_or_version": "dfb907a02bba8152ca444717ca5d78747ccb4bec", "scope": "Repository license text SHA-256 c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4. Context for the blocked weights chain."}],
       "upstream_project": {
-        "revision": "dfb907a02bba8152ca444717ca5d78747ccb4bec",
-        "license_url": "https://github.com/hexgrad/kokoro/blob/dfb907a02bba8152ca444717ca5d78747ccb4bec/LICENSE",
-        "license_sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        "repository": "https://github.com/hexgrad/kokoro",
+        "revision": "dfb907a02bba8152ca444717ca5d78747ccb4bec"
       },
       "redistribution": false,
       "download": "none",
       "attribution": "Not distributed. Apache-2.0 weights do not approve the complete runtime chain.",
       "paths": ["models/kokoro", "server/kokoro"],
       "identifiers": ["kokoro", "Kokoro-82M"],
-      "evidence": [],
       "stop_causes": [
         "Kokoro 0.9.4 requires Python <3.13,>=3.10; misaki 0.9.4 requires <3.13,>=3.8. The server requires >=3.14.2.",
         "The actual English fallback loads phonemizer-fork and bundled eSpeak NG with GPL-3.0-or-later rights.",
@@ -96,42 +96,42 @@
             "source": "https://download.pytorch.org/whl/cpu/torch/",
             "license_file": "torch-2.6.0+cpu.dist-info/LICENSE",
             "license_sha256": "6ecc267746f8c2b9c1faa1facc857c6f0d26db9bd00e6f43017da06f06120313",
-            "quote": "Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:"
+            "license_sources": [{"kind": "license_text", "url": "https://github.com/pytorch/pytorch/blob/1eba9b3aa3c43f86f4a2c807ac8e12c4a7767340/LICENSE", "quote": "Redistribution and use in source and binary forms, with or without\nmodification, are permitted provided that the following conditions are met:", "revision_or_version": "1eba9b3aa3c43f86f4a2c807ac8e12c4a7767340", "scope": "Supporting package torch 2.6.0+cpu; not a release selection."}]
           },
           {
             "name": "transformers", "version": "4.51.3", "license": "Apache-2.0", "requires_python": ">=3.9.0",
             "source": "https://pypi.org/pypi/transformers/4.51.3/json",
             "license_file": "transformers-4.51.3.dist-info/LICENSE",
             "license_sha256": "77fd4710def9ec3c0f6225800e0235f15a425abd4a8b03559127fcd782612049",
-            "quote": "Apache License Version 2.0, January 2004"
+            "license_sources": [{"kind": "license_text", "url": "https://files.pythonhosted.org/packages/a9/b6/5257d04ae327b44db31f15cce39e6020cc986333c715660b1315a9724d82/transformers-4.51.3-py3-none-any.whl#transformers-4.51.3.dist-info/LICENSE", "quote": "Apache License\n                           Version 2.0, January 2004", "revision_or_version": "4.51.3", "scope": "Supporting package transformers 4.51.3; not a release selection."}]
           },
           {
             "name": "spacy", "version": "3.8.16", "license": "MIT", "requires_python": "<3.15,>=3.9",
             "source": "https://pypi.org/pypi/spacy/3.8.16/json",
             "license_file": "spacy-3.8.16.dist-info/licenses/LICENSE",
             "license_sha256": "3f4378e67708fecacd3e27651c8bc0f977cf20789e19da0d81a2840e7cf573a2",
-            "quote": "Permission is hereby granted, free of charge, to any person obtaining a copy"
+            "license_sources": [{"kind": "license_text", "url": "https://files.pythonhosted.org/packages/e3/d1/ca928dde89792ba589c973d7c120ec791ccbd18d539edb3d05dc738ab4e7/spacy-3.8.16-cp310-cp310-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl#spacy-3.8.16.dist-info/licenses/LICENSE", "quote": "Permission is hereby granted, free of charge, to any person obtaining a copy", "revision_or_version": "3.8.16", "scope": "Supporting package spacy 3.8.16; not a release selection."}]
           },
           {
             "name": "spacy-curated-transformers", "version": "0.3.1", "license": "MIT", "requires_python": "<3.14,>=3.9",
             "source": "https://pypi.org/pypi/spacy-curated-transformers/0.3.1/json",
             "license_file": "spacy_curated_transformers-0.3.1.dist-info/licenses/LICENSE",
             "license_sha256": "e4f2431f403ea0d20d108bbe1f0615a4ca3b6b765e2dbafae93908d3986d153a",
-            "quote": "Permission is hereby granted, free of charge, to any person obtaining a copy"
+            "license_sources": [{"kind": "license_text", "url": "https://files.pythonhosted.org/packages/42/d8/f053d43125ae4ad14f3e2a12a475a656128233f1f40a272c6e09a05c73e8/spacy_curated_transformers-0.3.1-py2.py3-none-any.whl#spacy_curated_transformers-0.3.1.dist-info/licenses/LICENSE", "quote": "Permission is hereby granted, free of charge, to any person obtaining a copy", "revision_or_version": "0.3.1", "scope": "Supporting package spacy-curated-transformers 0.3.1; not a release selection."}]
           },
           {
             "name": "curated-transformers", "version": "0.1.1", "license": "MIT", "requires_python": ">=3.6",
             "source": "https://pypi.org/pypi/curated-transformers/0.1.1/json",
             "license_file": "curated_transformers-0.1.1.dist-info/LICENSE",
             "license_sha256": "e4f2431f403ea0d20d108bbe1f0615a4ca3b6b765e2dbafae93908d3986d153a",
-            "quote": "Permission is hereby granted, free of charge, to any person obtaining a copy"
+            "license_sources": [{"kind": "license_text", "url": "https://files.pythonhosted.org/packages/d6/67/3b72b3fdfcadab61bc8f59c17e63770e526ffabd583ed32f174a7c01af85/curated_transformers-0.1.1-py2.py3-none-any.whl#curated_transformers-0.1.1.dist-info/LICENSE", "quote": "Permission is hereby granted, free of charge, to any person obtaining a copy", "revision_or_version": "0.1.1", "scope": "Supporting package curated-transformers 0.1.1; not a release selection."}]
           },
           {
             "name": "curated-tokenizers", "version": "0.0.10", "license": "MIT", "requires_python": ">=3.9",
             "source": "https://pypi.org/pypi/curated-tokenizers/0.0.10/json",
             "license_file": "curated_tokenizers-0.0.10.dist-info/licenses/LICENSE",
             "license_sha256": "49d8fef96cd92719cb5242ef4c4f954edc008a46fcf7caabecae14dbcc444b50",
-            "quote": "Permission is hereby granted, free of charge, to any person obtaining a copy"
+            "license_sources": [{"kind": "license_text", "url": "https://files.pythonhosted.org/packages/c3/bf/94fbdeaa195a896ff06ae49e85de6a65c47b18c580e869ed4025de6f9e05/curated_tokenizers-0.0.10-cp310-cp310-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl#curated_tokenizers-0.0.10.dist-info/licenses/LICENSE", "quote": "Permission is hereby granted, free of charge, to any person obtaining a copy", "revision_or_version": "0.0.10", "scope": "Supporting package curated-tokenizers 0.0.10; not a release selection."}]
           }
         ]
       },
@@ -142,7 +142,7 @@
           "revision": null, "version": "0.9.4",
           "sha256": "a129dc6364a286bd6a92c396e9862459d3d3e45f2c15596ed5a94dcee5789efd",
           "license": "Apache-2.0",
-          "license_sources": [{"kind": "license_text", "url": "https://pypi.org/pypi/kokoro/0.9.4/json", "quote": "Apache License Version 2.0, January 2004", "installed_file": "kokoro-0.9.4.dist-info/licenses/LICENSE", "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"}],
+          "license_sources": [{"kind": "license_text", "url": "https://files.pythonhosted.org/packages/ea/cc/75f41633c75224ba820a4533163bc8b070b6bf25416014074c63284c2d4e/kokoro-0.9.4-py3-none-any.whl#kokoro-0.9.4.dist-info/licenses/LICENSE", "quote": "Apache License\n                           Version 2.0, January 2004", "revision_or_version": "0.9.4", "file_binding": {"path": "kokoro-0.9.4-py3-none-any.whl", "sha256": "a129dc6364a286bd6a92c396e9862459d3d3e45f2c15596ed5a94dcee5789efd"}}],
           "requires_python": "<3.13,>=3.10",
           "redistribution": false, "download": "none", "attribution": "Not distributed. The packaged Python requirement excludes the server interpreter.",
           "paths": ["models/kokoro/runtime/kokoro"], "identifiers": ["kokoro==0.9.4"], "components": []
@@ -152,7 +152,7 @@
           "url": "https://huggingface.co/hexgrad/Kokoro-82M/resolve/f3ff3571791e39611d31c381e3a41a3af07b4987/config.json",
           "revision": "f3ff3571791e39611d31c381e3a41a3af07b4987",
           "sha256": "5abb01e2403b072bf03d04fde160443e209d7a0dad49a423be15196b9b43c17f",
-          "license": "NOASSERTION", "license_sources": [],
+          "license": "NOASSERTION", "license_sources": [{"kind": "reference", "url": "https://huggingface.co/hexgrad/Kokoro-82M/blob/f3ff3571791e39611d31c381e3a41a3af07b4987/README.md", "quote": "license: apache-2.0", "revision_or_version": "f3ff3571791e39611d31c381e3a41a3af07b4987", "scope": "Context only. No file-scoped license grant for this candidate is approved."}],
           "redistribution": false, "download": "none", "attribution": "Not distributed. Model configuration and vocabulary have no explicit file-scoped license approval.",
           "paths": ["models/kokoro/config.json"], "identifiers": [], "components": []
         },
@@ -161,7 +161,7 @@
           "url": "https://huggingface.co/hexgrad/Kokoro-82M/resolve/f3ff3571791e39611d31c381e3a41a3af07b4987/voices/af_heart.pt",
           "revision": "f3ff3571791e39611d31c381e3a41a3af07b4987",
           "sha256": "0ab5709b8ffab19bfd849cd11d98f75b60af7733253ad0d67b12382a102cb4ff",
-          "license": "NOASSERTION", "license_sources": [], "evidence": [],
+          "license": "NOASSERTION", "license_sources": [{"kind": "reference", "url": "https://huggingface.co/hexgrad/Kokoro-82M/blob/f3ff3571791e39611d31c381e3a41a3af07b4987/VOICES.md", "quote": "af\\_heart", "revision_or_version": "f3ff3571791e39611d31c381e3a41a3af07b4987", "scope": "Context only. No file-scoped license grant for this candidate is approved."}],
           "redistribution": false, "download": "none", "attribution": "Not selected. The voice table names af_heart and its short hash but supplies no voice-specific license statement.",
           "paths": ["models/kokoro/voices/af_heart.pt"], "identifiers": ["voices/af_heart.pt"], "components": []
         },
@@ -171,7 +171,7 @@
           "revision": null, "version": "0.9.4",
           "sha256": "90e2eeb169786c014c429e5058d2ea6bcd02d651f2a24450ba6c9ffc0f8da15a",
           "license": "Apache-2.0",
-          "license_sources": [{"kind": "license_text", "url": "https://pypi.org/pypi/misaki/0.9.4/json", "quote": "Apache License Version 2.0, January 2004", "installed_file": "misaki-0.9.4.dist-info/licenses/LICENSE", "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"}],
+          "license_sources": [{"kind": "license_text", "url": "https://files.pythonhosted.org/packages/82/ec/0ee4110ddb54278b8f21c40a140370ae8f687036c4edf578316602697c56/misaki-0.9.4-py3-none-any.whl#misaki-0.9.4.dist-info/licenses/LICENSE", "quote": "Apache License\n                           Version 2.0, January 2004", "revision_or_version": "0.9.4", "file_binding": {"path": "misaki-0.9.4-py3-none-any.whl", "sha256": "90e2eeb169786c014c429e5058d2ea6bcd02d651f2a24450ba6c9ffc0f8da15a"}}],
           "requires_python": "<3.13,>=3.8",
           "redistribution": false, "download": "none", "attribution": "Not distributed. The Python floor and the actual transitive fallback stop runtime inclusion.",
           "paths": ["models/kokoro/runtime/misaki"], "identifiers": ["misaki"],
@@ -182,7 +182,7 @@
               "revision": null, "version": "0.9.4", "archive_path": "misaki/data/us_gold.json",
               "sha256": "dc414872a49a28ae6c141463d502fd945f3b2fde040484fdc47d00cc4612686f",
               "license": "Apache-2.0",
-              "license_sources": [{"kind": "license_text", "url": "https://pypi.org/pypi/misaki/0.9.4/json", "quote": "Apache License Version 2.0, January 2004", "scope": "Packaged dictionary under the wheel's attached license; no separate dictionary notice is present."}],
+              "license_sources": [{"kind": "license_text", "url": "https://files.pythonhosted.org/packages/82/ec/0ee4110ddb54278b8f21c40a140370ae8f687036c4edf578316602697c56/misaki-0.9.4-py3-none-any.whl#misaki-0.9.4.dist-info/licenses/LICENSE", "quote": "Apache License\n                           Version 2.0, January 2004", "revision_or_version": "0.9.4", "file_binding": {"path": "misaki/data/us_gold.json", "sha256": "dc414872a49a28ae6c141463d502fd945f3b2fde040484fdc47d00cc4612686f"}}],
               "redistribution": false, "download": "none", "attribution": "Not distributed. Dictionary rights use the attached package license, not an independent upstream-data approval.",
               "paths": ["models/kokoro/runtime/misaki/data/us_gold.json"], "identifiers": [], "components": []
             },
@@ -192,7 +192,7 @@
               "revision": null, "version": "0.9.4", "archive_path": "misaki/data/us_silver.json",
               "sha256": "de8f67be911bb6c659187b4a65fd966b6a30e56350e0f790d763210b053ac475",
               "license": "Apache-2.0",
-              "license_sources": [{"kind": "license_text", "url": "https://pypi.org/pypi/misaki/0.9.4/json", "quote": "Apache License Version 2.0, January 2004", "scope": "Packaged dictionary under the wheel's attached license; no separate dictionary notice is present."}],
+              "license_sources": [{"kind": "license_text", "url": "https://files.pythonhosted.org/packages/82/ec/0ee4110ddb54278b8f21c40a140370ae8f687036c4edf578316602697c56/misaki-0.9.4-py3-none-any.whl#misaki-0.9.4.dist-info/licenses/LICENSE", "quote": "Apache License\n                           Version 2.0, January 2004", "revision_or_version": "0.9.4", "file_binding": {"path": "misaki/data/us_silver.json", "sha256": "de8f67be911bb6c659187b4a65fd966b6a30e56350e0f790d763210b053ac475"}}],
               "redistribution": false, "download": "none", "attribution": "Not distributed. Dictionary rights use the attached package license, not an independent upstream-data approval.",
               "paths": ["models/kokoro/runtime/misaki/data/us_silver.json"], "identifiers": [], "components": []
             }
@@ -204,7 +204,7 @@
           "revision": null, "version": "3.3.2",
           "sha256": "97305c76f4183b3825dae8f4c032265fe78c9946ce58c47d4b62161349264b74",
           "license": "GPL-3.0-or-later",
-          "license_sources": [{"kind": "license_text", "url": "https://pypi.org/pypi/phonemizer-fork/3.3.2/json", "quote": "either version 3 of the License, or (at your option) any later version.", "installed_file": "phonemizer/__init__.py", "license_file": "phonemizer_fork-3.3.2.dist-info/licenses/LICENSE", "sha256": "d62f065830aa3739cc031156b9690805c7b2e811b4a178c8b4acd8725d561c94"}],
+          "license_sources": [{"kind": "license_text", "url": "https://files.pythonhosted.org/packages/64/f1/0dcce21b0ae16a82df4b6583f8f3ad8e55b35f7e98b6bf536a4dd225fa08/phonemizer_fork-3.3.2-py3-none-any.whl#phonemizer/__init__.py", "quote": "# published by the Free Software Foundation, either version 3 of the\n# License, or (at your option) any later version.", "revision_or_version": "3.3.2", "file_binding": {"path": "phonemizer_fork-3.3.2-py3-none-any.whl", "sha256": "97305c76f4183b3825dae8f4c032265fe78c9946ce58c47d4b62161349264b74"}}, {"kind": "license_text", "url": "https://files.pythonhosted.org/packages/64/f1/0dcce21b0ae16a82df4b6583f8f3ad8e55b35f7e98b6bf536a4dd225fa08/phonemizer_fork-3.3.2-py3-none-any.whl#phonemizer_fork-3.3.2.dist-info/licenses/LICENSE", "quote": "GNU GENERAL PUBLIC LICENSE", "revision_or_version": "3.3.2", "scope": "Attached license file SHA-256 d62f065830aa3739cc031156b9690805c7b2e811b4a178c8b4acd8725d561c94. The source header states GPL-3.0-or-later."}],
           "redistribution": false, "download": "none", "attribution": "Not distributed. GPL runtime components do not satisfy the Apache image policy.",
           "paths": ["models/kokoro/runtime/phonemizer"], "identifiers": ["phonemizer-fork"], "components": []
         },
@@ -214,7 +214,7 @@
           "revision": "0ddc87adf77e5850d7eeb542ac8a87d421b64daa", "version": "0.2.4",
           "sha256": "08721baf27d13d461f6be6eed9a65277e70d68234ff484fd8b9897b222cdcb6d",
           "license": "MIT",
-          "license_sources": [{"kind": "license_text", "url": "https://github.com/thewh1teagle/espeakng-loader/blob/0ddc87adf77e5850d7eeb542ac8a87d421b64daa/LICENSE", "quote": "Permission is hereby granted, free of charge, to any person obtaining a copy", "scope": "Loader source only. The installed __init__.py exactly matches this commit; its SHA-256 is 3900f0b174feebccb8991fd6f3888f037c7bfa23d9a3bdec480e894f75b03f3f."}],
+          "license_sources": [{"kind": "license_text", "url": "https://github.com/thewh1teagle/espeakng-loader/blob/0ddc87adf77e5850d7eeb542ac8a87d421b64daa/LICENSE", "quote": "Permission is hereby granted, free of charge, to any person obtaining a copy", "revision_or_version": "0ddc87adf77e5850d7eeb542ac8a87d421b64daa", "file_binding": {"path": "espeakng_loader-0.2.4-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", "sha256": "08721baf27d13d461f6be6eed9a65277e70d68234ff484fd8b9897b222cdcb6d"}}, {"kind": "license_text", "url": "https://github.com/thewh1teagle/espeakng-loader/blob/0ddc87adf77e5850d7eeb542ac8a87d421b64daa/LICENSE", "quote": "Permission is hereby granted, free of charge, to any person obtaining a copy", "revision_or_version": "0ddc87adf77e5850d7eeb542ac8a87d421b64daa", "scope": "Loader source only. The installed __init__.py exactly matches this commit; its SHA-256 is 3900f0b174feebccb8991fd6f3888f037c7bfa23d9a3bdec480e894f75b03f3f."}],
           "redistribution": false, "download": "none", "attribution": "Not distributed. The wheel contains no license file and bundles a GPL library and data. MIT for the loader does not cover those parts.",
           "paths": ["models/kokoro/runtime/espeakng_loader"], "identifiers": ["espeakng-loader"], "components": []
         },
@@ -224,7 +224,7 @@
           "revision": "4870adfa25b1a32b4361592f1be8a40337c58d6c", "version": "1.52.0",
           "sha256": "b15ce0803b26254e8a0d088c6b9281a2637b2b02613147cc320cfdefaf2c3ccf",
           "archive_path": "espeakng_loader/libespeak-ng.so", "license": "GPL-3.0-or-later",
-          "license_sources": [{"kind": "license_text", "url": "https://github.com/espeak-ng/espeak-ng/blob/4870adfa25b1a32b4361592f1be8a40337c58d6c/README.md", "quote": "eSpeak NG Text-to-Speech is released under the GPL version 3 or later license.", "full_text": "https://github.com/espeak-ng/espeak-ng/blob/4870adfa25b1a32b4361592f1be8a40337c58d6c/COPYING"}],
+          "license_sources": [{"kind": "license_text", "url": "https://github.com/espeak-ng/espeak-ng/blob/4870adfa25b1a32b4361592f1be8a40337c58d6c/README.md", "quote": "eSpeak NG Text-to-Speech is released under the [GPL version 3](COPYING) or\nlater license.", "revision_or_version": "4870adfa25b1a32b4361592f1be8a40337c58d6c", "file_binding": {"path": "espeakng_loader/libespeak-ng.so", "sha256": "b15ce0803b26254e8a0d088c6b9281a2637b2b02613147cc320cfdefaf2c3ccf"}}, {"kind": "license_text", "url": "https://github.com/espeak-ng/espeak-ng/blob/4870adfa25b1a32b4361592f1be8a40337c58d6c/COPYING", "quote": "GNU GENERAL PUBLIC LICENSE", "revision_or_version": "4870adfa25b1a32b4361592f1be8a40337c58d6c", "scope": "Complete GPL license text for the blocked runtime source."}],
           "redistribution": false, "download": "none", "attribution": "Not distributed. Actual loaded version is 1.52.0. The loader source references this eSpeak source commit.",
           "paths": ["models/kokoro/runtime/libespeak-ng.so"], "identifiers": ["libespeak-ng"], "components": []
         },
@@ -235,8 +235,8 @@
           "sha256": null, "tree_sha256": "bfc761d924f35641b0c124dfb9def58ae433113d6c3f118b859169fbec2335da", "file_count": 364,
           "license": "GPL-3.0-or-later AND Unicode-DFS-2016",
           "license_sources": [
-            {"kind": "license_text", "url": "https://github.com/espeak-ng/espeak-ng/blob/4870adfa25b1a32b4361592f1be8a40337c58d6c/README.md", "quote": "eSpeak NG Text-to-Speech is released under the GPL version 3 or later license."},
-            {"kind": "license_text", "url": "https://github.com/espeak-ng/espeak-ng/blob/4870adfa25b1a32b4361592f1be8a40337c58d6c/COPYING.UCD", "quote": "Permission is hereby granted, free of charge, to any person obtaining a copy of the Unicode data files and any associated documentation"}
+            {"kind": "license_text", "url": "https://github.com/espeak-ng/espeak-ng/blob/4870adfa25b1a32b4361592f1be8a40337c58d6c/README.md", "quote": "eSpeak NG Text-to-Speech is released under the [GPL version 3](COPYING) or\nlater license.", "revision_or_version": "4870adfa25b1a32b4361592f1be8a40337c58d6c", "scope": "Bundled eSpeak data tree and Unicode notices; see the recorded tree and individual file digests."},
+            {"kind": "license_text", "url": "https://github.com/espeak-ng/espeak-ng/blob/4870adfa25b1a32b4361592f1be8a40337c58d6c/COPYING.UCD", "quote": "Permission is hereby granted, free of charge, to any person obtaining\na copy of the Unicode data files and any associated documentation", "revision_or_version": "4870adfa25b1a32b4361592f1be8a40337c58d6c", "scope": "Bundled eSpeak data tree and Unicode notices; see the recorded tree and individual file digests."}
           ],
           "file_digests": {
             "en_dict": "1053f74a34af38abb6fbd64b7838dacbc655a687c48ce1bb663d364a127b05de",
@@ -253,7 +253,7 @@
           "url": "https://files.pythonhosted.org/packages/d6/5b/545e9267a1cc080c8a1be2746113a063e34bcdd0f5173fd665a5c13cb234/num2words-0.5.14-py3-none-any.whl",
           "revision": null, "version": "0.5.14", "sha256": "1c8e5b00142fc2966fd8d685001e36c4a9911e070d1b120e1beb721fa1edb33d",
           "license": "LGPL-2.1-or-later",
-          "license_sources": [{"kind": "license_text", "url": "https://pypi.org/pypi/num2words/0.5.14/json", "quote": "version 2.1 of the License, or (at your option) any later version.", "installed_file": "num2words/__init__.py", "license_file": "num2words-0.5.14.dist-info/COPYING", "sha256": "1457a03d928aeb06af3ea75ef065c517e915d7e41283d550dd4fa18ab20cda12"}],
+          "license_sources": [{"kind": "license_text", "url": "https://files.pythonhosted.org/packages/d6/5b/545e9267a1cc080c8a1be2746113a063e34bcdd0f5173fd665a5c13cb234/num2words-0.5.14-py3-none-any.whl#num2words/__init__.py", "quote": "version 2.1 of the License, or (at your option) any later version.", "revision_or_version": "0.5.14", "file_binding": {"path": "num2words-0.5.14-py3-none-any.whl", "sha256": "1c8e5b00142fc2966fd8d685001e36c4a9911e070d1b120e1beb721fa1edb33d"}}, {"kind": "license_text", "url": "https://files.pythonhosted.org/packages/d6/5b/545e9267a1cc080c8a1be2746113a063e34bcdd0f5173fd665a5c13cb234/num2words-0.5.14-py3-none-any.whl#num2words-0.5.14.dist-info/COPYING", "quote": "GNU Lesser General Public License", "revision_or_version": "0.5.14", "scope": "Attached license file SHA-256 1457a03d928aeb06af3ea75ef065c517e915d7e41283d550dd4fa18ab20cda12. The source header states LGPL-2.1-or-later."}],
           "redistribution": false, "download": "none", "attribution": "Not distributed. LGPL components do not satisfy the Apache image policy.",
           "paths": ["models/kokoro/runtime/num2words"], "identifiers": ["num2words"], "components": []
         },
@@ -262,7 +262,7 @@
           "url": "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl",
           "revision": null, "version": "3.8.0", "sha256": "1932429db727d4bff3deed6b34cfc05df17794f4a52eeb26cf8928f7c1a0fb85",
           "license": "MIT",
-          "license_sources": [{"kind": "license_text", "url": "https://github.com/explosion/spacy-models/releases/tag/en_core_web_sm-3.8.0", "quote": "Permission is hereby granted, free of charge, to any person obtaining a copy", "installed_file": "en_core_web_sm/en_core_web_sm-3.8.0/LICENSE", "sha256": "3933c176979b68bc6d0bcc902c7d6c130f1d127f476f17ba5cdba8d99cfd0012", "sources_notice_sha256": "20d9dfacd215112251f15341edd1a47b1f98bf393a212f10f194ffdc7ee98a90"}],
+          "license_sources": [{"kind": "license_text", "url": "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl#en_core_web_sm/en_core_web_sm-3.8.0/LICENSE", "quote": "Permission is hereby granted, free of charge, to any person obtaining a copy", "revision_or_version": "3.8.0", "file_binding": {"path": "en_core_web_sm-3.8.0-py3-none-any.whl", "sha256": "1932429db727d4bff3deed6b34cfc05df17794f4a52eeb26cf8928f7c1a0fb85"}}, {"kind": "license_text", "url": "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl#en_core_web_sm/en_core_web_sm-3.8.0/LICENSE", "quote": "Permission is hereby granted, free of charge, to any person obtaining a copy", "revision_or_version": "3.8.0", "scope": "Model license file SHA-256 3933c176979b68bc6d0bcc902c7d6c130f1d127f476f17ba5cdba8d99cfd0012. Source-data notice LICENSES_SOURCES SHA-256 20d9dfacd215112251f15341edd1a47b1f98bf393a212f10f194ffdc7ee98a90."}],
           "redistribution": false, "download": "none", "attribution": "Not distributed. The model has MIT and source-data notices. It is part of the blocked English chain.",
           "paths": ["models/kokoro/runtime/en_core_web_sm"], "identifiers": ["en-core-web-sm", "en_core_web_sm"], "components": []
         }
@@ -357,8 +357,14 @@
         },
         {
           "kind": "package_metadata", "revision_or_version": "6.2.3",
-          "url": "https://files.pythonhosted.org/packages/84/ef/9099037ed6f180ea33220178df4107112c0ce2bf5fb4d6f6ab19db2844ed/silero_vad-6.2.3-py3-none-any.whl#silero_vad-6.2.3.dist-info/METADATA:L8,L12",
-          "quote": "License-File: LICENSE\nClassifier: License :: OSI Approved :: MIT License",
+          "url": "https://files.pythonhosted.org/packages/84/ef/9099037ed6f180ea33220178df4107112c0ce2bf5fb4d6f6ab19db2844ed/silero_vad-6.2.3-py3-none-any.whl#silero_vad-6.2.3.dist-info/METADATA:L8",
+          "quote": "Classifier: License :: OSI Approved :: MIT License",
+          "file_binding": {"path": "src/silero_vad/data/silero_vad.onnx", "sha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3"}
+        },
+        {
+          "kind": "license_pointer", "revision_or_version": "6.2.3",
+          "url": "https://files.pythonhosted.org/packages/84/ef/9099037ed6f180ea33220178df4107112c0ce2bf5fb4d6f6ab19db2844ed/silero_vad-6.2.3-py3-none-any.whl#silero_vad-6.2.3.dist-info/METADATA:L12",
+          "quote": "License-File: LICENSE",
           "file_binding": {"path": "src/silero_vad/data/silero_vad.onnx", "sha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3"}
         },
         {

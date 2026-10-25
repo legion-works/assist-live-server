@@ -45,8 +45,6 @@ def prepare_samples(samples: NDArray[Any]) -> NDArray[np.float32]:
 
 def build_extractor() -> Any:
     # No framework model is used. Only the NumPy feature extractor is necessary.
-    os.environ["USE_TORCH"] = "0"
-    os.environ["USE_TF"] = "0"
     os.environ["TRANSFORMERS_NO_ADVISORY_WARNINGS"] = "1"
     transformers = importlib.import_module("transformers")
     return transformers.WhisperFeatureExtractor(chunk_length=8)
@@ -71,7 +69,10 @@ def extract_features(extractor: Any, samples: NDArray[Any]) -> NDArray[np.float3
 
 
 def verified_model(path: Path, record: dict[str, Any]) -> Path:
-    if not path.exists():
+    if (
+        not path.exists()
+        or hashlib.sha256(path.read_bytes()).hexdigest() != record["sha256"]
+    ):
         with urlopen(record["url"], timeout=120) as response:
             data = response.read()
         if hashlib.sha256(data).hexdigest() != record["sha256"]:
@@ -154,7 +155,11 @@ def summarize(rows: list[dict[str, float]]) -> dict[str, dict[str, float]]:
     }
 
 
-def render_report(record: dict[str, Any], result: dict[str, Any]) -> str:
+def render_report(record: dict[str, Any], result: dict[str, Any] | None = None) -> str:
+    from tools.asset_rights import license_sources, render_record, render_sources
+
+    if record.get("id") != MODEL_ID or result is None:
+        return render_record(record)
     metrics = result["percentiles"]
     table = "\n".join(
         f"| `{stage}` | {metrics[stage + '_cpu_ms']['p50']:.3f} | "
@@ -163,7 +168,11 @@ def render_report(record: dict[str, Any], result: dict[str, Any]) -> str:
         f"{metrics[stage + '_wall_ms']['p90']:.3f} |"
         for stage in ("features", "inference", "total")
     )
-    project = record["upstream_project"]
+    sources = license_sources(record)
+    license_text = next(s for s in sources if s["kind"] == "license_text")
+    project_scope = next(
+        s for s in sources if "github.com" in s["url"] and "README" in s["url"]
+    )
     status = record["status"]
     decision = (
         "Use the pinned model for local cost tests. "
@@ -186,26 +195,21 @@ Tests for safe turn endings are also necessary.
 
 ## File rights
 
-- Model repository: https://huggingface.co/pipecat-ai/smart-turn-v3
+- Model repository: {record["url"].split("/resolve/")[0]}
 - Revision: `{record["revision"]}`.
-- File: `smart-turn-v3.2-cpu.onnx`.
+- File: `{record["url"].rsplit("/", 1)[-1]}`.
 - Download: {record["url"]}
 - SHA-256 of the downloaded bytes: `{record["sha256"]}`.
-- `Model card`: {record["license_sources"][0]["url"]}
-- Project revision: `{project["revision"]}`.
-- Project scope: {project["scope_url"]}
-- Full license text: {project["license_url"]}
-- License-text SHA-256: `{project["license_sha256"]}`.
+- `Model card`: {sources[0]["url"]}
+- Project revision: `{project_scope["revision_or_version"]}`.
+- Project scope: {project_scope["url"]}
+- Full license text: {license_text["url"]}
+- License-text SHA-256: `{hashlib.sha256(license_text["quote"].encode()).hexdigest()}`.
 - Access date for these sources: 2026-10-24.
 
-The `model card` declares `bsd-2-clause`.
-The project page has the title `Smart Turn v3.2`.
-This sentence sets the rights decision:
-“This is a truly open model (BSD 2-clause license).”
-The same page states:
-“The datasets, training script, and model weights are all open source.”
-Its model-weights URL points to the Hugging Face repository above.
-These statements connect the `model card` and pinned file to the full license text.
+{render_sources(record)}
+
+These statements connect the model and pinned file to the full license text.
 This decision does not use a badge as a license source.
 
 BSD-2-Clause lets users use and redistribute the model with or without changes.
@@ -306,6 +310,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--record-decision", action="store_true")
     parser.add_argument("--allow-blocked-absent", action="store_true")
     parser.add_argument("--candidates", type=int, default=100)
+    parser.add_argument("--reuse-measurements", type=Path)
     parser.add_argument(
         "--report", type=Path, default=ROOT / "docs/research/q5-smart-turn.md"
     )
@@ -318,40 +323,49 @@ def main(argv: list[str] | None = None) -> int:
             ROOT / "assets/manifest.json", allow_blocked=args.allow_blocked_absent
         )
         SCRATCH.mkdir(parents=True, exist_ok=True)
-        model = verified_model(SCRATCH / "smart-turn-v3.2-cpu.onnx", record)
-        ort = importlib.import_module("onnxruntime")
-        options = ort.SessionOptions()
-        options.intra_op_num_threads = 1
-        options.inter_op_num_threads = 1
-        options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
-        session = ort.InferenceSession(
-            str(model), sess_options=options, providers=["CPUExecutionProvider"]
-        )
-        extractor = build_extractor()
+        if args.reuse_measurements:
+            result = json.loads(args.reuse_measurements.read_text())
+            if result["sha256"] != record["sha256"] or result["candidates"] < 100:
+                raise ValueError(
+                    "saved measurement model digest or candidate count mismatch"
+                )
+        else:
+            model = verified_model(SCRATCH / "smart-turn-v3.2-cpu.onnx", record)
+            ort = importlib.import_module("onnxruntime")
+            options = ort.SessionOptions()
+            options.intra_op_num_threads = 1
+            options.inter_op_num_threads = 1
+            options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+            session = ort.InferenceSession(
+                str(model), sess_options=options, providers=["CPUExecutionProvider"]
+            )
+            extractor = build_extractor()
 
-        def features(samples: NDArray[np.float32]) -> NDArray[np.float32]:
-            return extract_features(extractor, samples)
+            def features(samples: NDArray[np.float32]) -> NDArray[np.float32]:
+                return extract_features(extractor, samples)
 
-        def inference(inputs: NDArray[np.float32]) -> float:
-            return float(session.run(None, {"input_features": inputs})[0][0].item())
+            def inference(inputs: NDArray[np.float32]) -> float:
+                return float(session.run(None, {"input_features": inputs})[0][0].item())
 
-        measure_candidates(features, inference, 5)
-        started = datetime.now(UTC).isoformat()
-        rows = measure_candidates(features, inference, args.candidates)
-        result = {
-            "started_at": started,
-            "finished_at": datetime.now(UTC).isoformat(),
-            "candidates": args.candidates,
-            "threads": 1,
-            "numpy_version": np.__version__,
-            "onnxruntime_version": ort.__version__,
-            "transformers_version": importlib.metadata.version("transformers"),
-            "percentiles": summarize(rows),
-            "rows": rows,
-            "status": record["status"],
-            "sha256": record["sha256"],
-        }
-        (SCRATCH / "measurements.json").write_text(json.dumps(result, indent=2) + "\n")
+            measure_candidates(features, inference, 5)
+            started = datetime.now(UTC).isoformat()
+            rows = measure_candidates(features, inference, args.candidates)
+            result = {
+                "started_at": started,
+                "finished_at": datetime.now(UTC).isoformat(),
+                "candidates": args.candidates,
+                "threads": 1,
+                "numpy_version": np.__version__,
+                "onnxruntime_version": ort.__version__,
+                "transformers_version": importlib.metadata.version("transformers"),
+                "percentiles": summarize(rows),
+                "rows": rows,
+                "status": record["status"],
+                "sha256": record["sha256"],
+            }
+            (SCRATCH / "measurements.json").write_text(
+                json.dumps(result, indent=2) + "\n"
+            )
         if args.record_decision:
             args.report.parent.mkdir(parents=True, exist_ok=True)
             args.report.write_text(render_report(record, result))

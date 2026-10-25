@@ -24,14 +24,81 @@ Tests for safe turn endings are also necessary.
 - License-text SHA-256: `0d66364067f678c08586ebb60a16a2aed4fa081ec11057df35585759ce0e774f`.
 - Access date for these sources: 2026-10-24.
 
-The `model card` declares `bsd-2-clause`.
-The project page has the title `Smart Turn v3.2`.
-This sentence sets the rights decision:
-“This is a truly open model (BSD 2-clause license).”
-The same page states:
-“The datasets, training script, and model weights are all open source.”
-Its model-weights URL points to the Hugging Face repository above.
-These statements connect the `model card` and pinned file to the full license text.
+- License source: https://huggingface.co/pipecat-ai/smart-turn-v3/blob/f766f81d3cfdf7737ac64aad813d91bbfd56bf93/README.md
+- Source revision or version: `f766f81d3cfdf7737ac64aad813d91bbfd56bf93`.
+- File or scope: `{'path': 'smart-turn-v3.2-cpu.onnx', 'sha256': '2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f'}`.
+
+License statement:
+
+```text
+license: bsd-2-clause
+```
+
+- License source: https://github.com/pipecat-ai/smart-turn/blob/4786657e242dfe77dd138699ac564ee074a2a543/LICENSE
+- Source revision or version: `4786657e242dfe77dd138699ac564ee074a2a543`.
+- File or scope: `{'path': 'smart-turn-v3.2-cpu.onnx', 'sha256': '2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f'}`.
+
+License statement:
+
+```text
+BSD 2-Clause License
+
+Copyright (c) 2024–2025, Daily
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+```
+
+- License source: https://github.com/pipecat-ai/smart-turn/blob/4786657e242dfe77dd138699ac564ee074a2a543/README.md
+- Source revision or version: `4786657e242dfe77dd138699ac564ee074a2a543`.
+- File or scope: `{'path': 'smart-turn-v3.2-cpu.onnx', 'sha256': '2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f'}`.
+
+License statement:
+
+```text
+This is a truly open model (BSD 2-clause license).
+```
+
+- License source: https://github.com/pipecat-ai/smart-turn/blob/4786657e242dfe77dd138699ac564ee074a2a543/README.md
+- Source revision or version: `4786657e242dfe77dd138699ac564ee074a2a543`.
+- File or scope: `{'path': 'smart-turn-v3.2-cpu.onnx', 'sha256': '2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f'}`.
+
+License statement:
+
+```text
+The datasets, training script, and model weights are all open source.
+```
+
+- License source: https://github.com/pipecat-ai/smart-turn/blob/4786657e242dfe77dd138699ac564ee074a2a543/README.md
+- Source revision or version: `4786657e242dfe77dd138699ac564ee074a2a543`.
+- File or scope: `{'path': 'smart-turn-v3.2-cpu.onnx', 'sha256': '2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f'}`.
+
+License statement:
+
+```text
+* [HuggingFace page with model weights](https://huggingface.co/pipecat-ai/smart-turn-v3)
+```
+
+These statements connect the model and pinned file to the full license text.
 This decision does not use a badge as a license source.
 
 BSD-2-Clause lets users use and redistribute the model with or without changes.

@@ -93,7 +93,7 @@ The model metadata has no license statement:
 
 The package and selected model directory have no `model card`.
 The investigation examined all textual package members for license statements.
-The six license-related lines are in `METADATA` and its attached `LICENSE`.
+The six license statements are in `METADATA` and its attached `LICENSE`.
 The statements below include the complete license text and each badge part.
 
 ## License statements
@@ -241,18 +241,30 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### `package_metadata` at `silero_vad-6.2.3.dist-info/METADATA:L8,L12`
+### `package_metadata` at `silero_vad-6.2.3.dist-info/METADATA:L8`
 
 - Statement from source: `MIT`.
 - Type: `package_metadata`.
-- Source: https://files.pythonhosted.org/packages/84/ef/9099037ed6f180ea33220178df4107112c0ce2bf5fb4d6f6ab19db2844ed/silero_vad-6.2.3-py3-none-any.whl#silero_vad-6.2.3.dist-info/METADATA:L8,L12
+- Source: https://files.pythonhosted.org/packages/84/ef/9099037ed6f180ea33220178df4107112c0ce2bf5fb4d6f6ab19db2844ed/silero_vad-6.2.3-py3-none-any.whl#silero_vad-6.2.3.dist-info/METADATA:L8
+- Source revision or version: `6.2.3`.
+- Bound file: `src/silero_vad/data/silero_vad.onnx`.
+- File SHA-256: `1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3`.
+
+```text
+Classifier: License :: OSI Approved :: MIT License
+```
+
+### `license_pointer` at `silero_vad-6.2.3.dist-info/METADATA:L12`
+
+- Statement from source: `navigation only`.
+- Type: `license_pointer`.
+- Source: https://files.pythonhosted.org/packages/84/ef/9099037ed6f180ea33220178df4107112c0ce2bf5fb4d6f6ab19db2844ed/silero_vad-6.2.3-py3-none-any.whl#silero_vad-6.2.3.dist-info/METADATA:L12
 - Source revision or version: `6.2.3`.
 - Bound file: `src/silero_vad/data/silero_vad.onnx`.
 - File SHA-256: `1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3`.
 
 ```text
 License-File: LICENSE
-Classifier: License :: OSI Approved :: MIT License
 ```
 
 ### `badge_text` at `silero_vad-6.2.3.dist-info/METADATA:L51`

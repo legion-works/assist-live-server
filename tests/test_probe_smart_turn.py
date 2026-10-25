@@ -100,15 +100,95 @@ def test_percentiles_use_linear_interpolation():
 
 
 def test_digest_mismatch_is_not_usable(tmp_path):
+    import io
+
     from tools.probe_smart_turn import verified_model
 
     path = tmp_path / "model.onnx"
     path.write_bytes(b"wrong model")
-    with pytest.raises(ValueError, match="SHA-256 mismatch"):
+    from unittest.mock import patch
+
+    with (
+        patch(
+            "tools.probe_smart_turn.urlopen", return_value=io.BytesIO(b"bad download")
+        ),
+        pytest.raises(ValueError, match="SHA-256 mismatch"),
+    ):
         verified_model(
             path, {"url": "https://example.invalid/unused", "sha256": "0" * 64}
         )
     assert path.read_bytes() == b"wrong model"
+
+
+def test_corrupt_cache_is_replaced_only_by_a_verified_download(tmp_path, monkeypatch):
+    import hashlib
+    import io
+
+    from tools import probe_smart_turn as probe
+
+    path = tmp_path / "model.onnx"
+    path.write_bytes(b"broken")
+    monkeypatch.setattr(
+        probe, "urlopen", lambda *args, **kwargs: io.BytesIO(b"verified")
+    )
+    assert (
+        probe.verified_model(
+            path,
+            {
+                "url": "https://example.com/model",
+                "sha256": hashlib.sha256(b"verified").hexdigest(),
+            },
+        )
+        == path
+    )
+    assert path.read_bytes() == b"verified"
+
+
+def test_record_only_mode_reuses_saved_cost_without_network_or_measurement(
+    tmp_path, monkeypatch, capsys
+):
+    import json
+
+    from tools import probe_smart_turn as probe
+
+    result = {
+        "sha256": "2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f",
+        "candidates": 100,
+        "percentiles": {
+            f"{stage}_{clock}_ms": {"p50": 1, "p90": 2}
+            for stage in ("features", "inference", "total")
+            for clock in ("cpu", "wall")
+        },
+        "numpy_version": "test",
+        "onnxruntime_version": "test",
+        "transformers_version": "test",
+        "started_at": "2026-10-24T00:00:00Z",
+        "finished_at": "2026-10-24T00:00:01Z",
+    }
+    saved = tmp_path / "saved.json"
+    saved.write_text(json.dumps(result))
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("decision-only mode must not run model operations")
+
+    monkeypatch.setattr(probe, "verified_model", forbidden)
+    monkeypatch.setattr(probe, "measure_candidates", forbidden)
+    report = tmp_path / "report.md"
+    assert (
+        probe.main(
+            [
+                "--record-decision",
+                "--reuse-measurements",
+                str(saved),
+                "--allow-blocked-absent",
+                "--report",
+                str(report),
+            ]
+        )
+        == 0
+    )
+    assert "PASS decision recorded" in capsys.readouterr().out
+    assert "| `total` | 1.000 | 2.000 | 1.000 | 2.000 |" in report.read_text()
 
 
 def test_manifest_decision_runs_release_gate(tmp_path):
@@ -180,4 +260,7 @@ def test_report_keeps_cpu_and_wall_columns_and_no_image_claim():
     assert "The measured count is 100." in report
     assert "Image inventory: `NOT CHECKED`" in report
     assert record["sha256"] in report
-    assert record["upstream_project"]["license_url"] in report
+    assert (
+        next(s["url"] for s in record["license_sources"] if s["kind"] == "license_text")
+        in report
+    )

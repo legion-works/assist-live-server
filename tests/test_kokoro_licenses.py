@@ -11,6 +11,26 @@ def test_voice_without_evidence_is_blocked():
     assert not permitted({"license": "Apache-2.0", "evidence": ""})
 
 
+def test_report_uses_manifest_inspection_and_data_digest():
+    import json
+
+    from tools.check_assets import flatten
+    from tools.probe_kokoro_licenses import render_report
+
+    record = next(
+        a
+        for a in json.loads((ROOT / "assets/manifest.json").read_text())["assets"]
+        if a["id"] == "kokoro-82m"
+    )
+    record["inspection"].update(candidate_voice="candidate", espeak_version="9.9.9")
+    data = next(a for a in flatten([record], []) if a["id"] == "kokoro-espeak-data")
+    data["tree_sha256"] = "d" * 64
+    text = render_report(record)
+    assert "The candidate voice was `candidate`." in text
+    assert "reported version `9.9.9`" in text
+    assert "Its tree digest is `" + "d" * 64 + "`." in text
+
+
 def voice():
     revision = "a" * 40
     return {
@@ -22,13 +42,16 @@ def voice():
         "sha256": "b" * 64,
         "url": f"https://example.com/{revision}/voice.pt",
         "attribution": "Synthetic test voice. Apache-2.0.",
+        "redistribution": True,
+        "download": "startup",
         "components": [],
-        "evidence": [
+        "license_sources": [
             {
+                "kind": "license_text",
                 "url": f"https://example.com/{revision}/LICENSE",
                 "quote": "The voice file uses the Apache License, Version 2.0.",
-                "applies_to": "test-voice",
-                "sha256": "b" * 64,
+                "revision_or_version": revision,
+                "file_binding": {"path": "voice.pt", "sha256": "b" * 64},
             }
         ],
     }
@@ -54,13 +77,14 @@ def test_voice_digest_and_attribution_are_explicit():
     [
         ("license", "GPL-3.0-or-later"),
         ("license", "NOASSERTION"),
+        ("license", []),
         ("status", "unknown"),
         ("status", "confirmed_blocked_absent"),
         ("sha256", ""),
         ("attribution", " "),
         ("components", None),
-        ("evidence", "Apache-2.0"),
-        ("evidence", []),
+        ("license_sources", "Apache-2.0"),
+        ("license_sources", []),
     ],
 )
 def test_incomplete_or_blocked_voice_is_not_downloadable(key, value):
@@ -77,15 +101,15 @@ def test_incomplete_or_blocked_voice_is_not_downloadable(key, value):
     [
         ("url", "https://img.shields.io/badge/Apache-2.0"),
         ("quote", " "),
-        ("applies_to", "different-voice"),
-        ("sha256", "c" * 64),
+        ("revision_or_version", "main"),
+        ("file_binding", {"path": "voice.pt", "sha256": "c" * 64}),
     ],
 )
 def test_evidence_must_bind_this_voice_and_file(key, value):
     from tools.probe_kokoro_licenses import permitted
 
     record = voice()
-    record["evidence"][0][key] = value
+    record["license_sources"][0][key] = value
     assert not permitted(record)
 
 

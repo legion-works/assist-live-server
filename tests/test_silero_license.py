@@ -106,7 +106,7 @@ def test_source_records_must_have_quotes_pins_and_matching_file_digest(tmp_path,
     path, document, record = copied_manifest(tmp_path)
     record["license_sources"][0][field] = ""
     path.write_text(json.dumps(document))
-    with pytest.raises(ValueError, match="license source record"):
+    with pytest.raises(ValueError, match="license source"):
         check_decision(path, allow_blocked=True)
 
 
@@ -219,8 +219,28 @@ def test_source_binding_must_name_the_selected_file_and_digest(tmp_path, field):
     path, document, record = copied_manifest(tmp_path)
     record["license_sources"][0]["file_binding"][field] = "wrong"
     path.write_text(json.dumps(document))
-    with pytest.raises(ValueError, match="license source record"):
+    with pytest.raises(ValueError, match="license source"):
         check_decision(path, allow_blocked=True)
+
+
+def test_report_uses_manifest_file_path_in_the_record_and_question():
+    import json
+
+    from tools.probe_silero_license import render_report
+
+    record = next(
+        a
+        for a in json.loads((ROOT / "assets/manifest.json").read_text())["assets"]
+        if a["id"] == "silero-vad"
+    )
+    record["url"] = record["url"].replace(
+        "src/silero_vad/data/silero_vad.onnx", "models/selected.onnx"
+    )
+    for source in record["license_sources"]:
+        source["file_binding"]["path"] = "models/selected.onnx"
+    text = render_report(record)
+    assert "- File: `models/selected.onnx`." in text
+    assert "What license applies to `models/selected.onnx`" in text
 
 
 @pytest.mark.parametrize("field", ["evidence", "license_claims"])
@@ -232,7 +252,7 @@ def test_parallel_rights_fields_are_rejected(tmp_path, field):
     path, document, record = copied_manifest(tmp_path)
     record[field] = []
     path.write_text(json.dumps(document))
-    with pytest.raises(ValueError, match="license_sources only"):
+    with pytest.raises(ValueError, match="use license_sources"):
         check_decision(path, allow_blocked=True)
 
 

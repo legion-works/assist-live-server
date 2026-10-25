@@ -47,7 +47,8 @@ The first-use download list was:
 
 The inspection loaded the model and voice but made no voice output or audio file.
 It tested English G2P and the eSpeak fallback on a synthetic out-of-dictionary word.
-The fallback used the bundled `libespeak-ng.so`, which reported version `1.52.0`.
+The fallback used the bundled `libespeak-ng.so`, which
+reported version `1.52.0`.
 `misaki/espeak.py` sets the library and data paths from `espeakng_loader` explicitly.
 The English path loads `us_gold.json`, `us_silver.json`, and `num2words`.
 It also loads the spaCy tagger.
@@ -96,14 +97,25 @@ Attribution or stop cause:
 Not distributed. Apache-2.0 weights do not approve the complete runtime chain.
 ```
 - License source: https://huggingface.co/hexgrad/Kokoro-82M/blob/f3ff3571791e39611d31c381e3a41a3af07b4987/README.md
+- Source revision or version: `f3ff3571791e39611d31c381e3a41a3af07b4987`.
+- File or scope: `{'path': 'kokoro-v1_0.pth', 'sha256': '496dba118d1a58f5f3db2efc88dbdc216e0483fc89fe6e47ee1f2c53f18ad1e4'}`.
 
 License statement:
 
 ```text
 This is an Apache-licensed model, and Kokoro has been deployed in numerous projects and commercial APIs.
 ```
-Full license text: https://github.com/hexgrad/kokoro/blob/dfb907a02bba8152ca444717ca5d78747ccb4bec/LICENSE
-License SHA-256: `c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4`.
+
+- License source: https://github.com/hexgrad/kokoro/blob/dfb907a02bba8152ca444717ca5d78747ccb4bec/LICENSE
+- Source revision or version: `dfb907a02bba8152ca444717ca5d78747ccb4bec`.
+- File or scope: `Repository license text SHA-256 c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4. Context for the blocked weights chain.`.
+
+License statement:
+
+```text
+Apache License
+                           Version 2.0, January 2004
+```
 
 ### `kokoro-code`
 
@@ -118,15 +130,16 @@ Attribution or stop cause:
 ```text
 Not distributed. The packaged Python requirement excludes the server interpreter.
 ```
-- License source: https://pypi.org/pypi/kokoro/0.9.4/json
+- License source: https://files.pythonhosted.org/packages/ea/cc/75f41633c75224ba820a4533163bc8b070b6bf25416014074c63284c2d4e/kokoro-0.9.4-py3-none-any.whl#kokoro-0.9.4.dist-info/licenses/LICENSE
+- Source revision or version: `0.9.4`.
+- File or scope: `{'path': 'kokoro-0.9.4-py3-none-any.whl', 'sha256': 'a129dc6364a286bd6a92c396e9862459d3d3e45f2c15596ed5a94dcee5789efd'}`.
 
 License statement:
 
 ```text
-Apache License Version 2.0, January 2004
+Apache License
+                           Version 2.0, January 2004
 ```
-Source `installed_file`: `kokoro-0.9.4.dist-info/licenses/LICENSE`.
-Source `sha256`: `c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4`.
 
 ### `kokoro-config`
 
@@ -141,8 +154,15 @@ Attribution or stop cause:
 ```text
 Not distributed. Model configuration and vocabulary have no explicit file-scoped license approval.
 ```
+- License source: https://huggingface.co/hexgrad/Kokoro-82M/blob/f3ff3571791e39611d31c381e3a41a3af07b4987/README.md
+- Source revision or version: `f3ff3571791e39611d31c381e3a41a3af07b4987`.
+- File or scope: `Context only. No file-scoped license grant for this candidate is approved.`.
 
-No file-scoped license statement has project approval.
+License statement:
+
+```text
+license: apache-2.0
+```
 
 ### `kokoro-voice-af-heart`
 
@@ -157,8 +177,15 @@ Attribution or stop cause:
 ```text
 Not selected. The voice table names af_heart and its short hash but supplies no voice-specific license statement.
 ```
+- License source: https://huggingface.co/hexgrad/Kokoro-82M/blob/f3ff3571791e39611d31c381e3a41a3af07b4987/VOICES.md
+- Source revision or version: `f3ff3571791e39611d31c381e3a41a3af07b4987`.
+- File or scope: `Context only. No file-scoped license grant for this candidate is approved.`.
 
-No file-scoped license statement has project approval.
+License statement:
+
+```text
+af\_heart
+```
 
 ### `kokoro-misaki`
 
@@ -173,15 +200,16 @@ Attribution or stop cause:
 ```text
 Not distributed. The Python floor and the actual transitive fallback stop runtime inclusion.
 ```
-- License source: https://pypi.org/pypi/misaki/0.9.4/json
+- License source: https://files.pythonhosted.org/packages/82/ec/0ee4110ddb54278b8f21c40a140370ae8f687036c4edf578316602697c56/misaki-0.9.4-py3-none-any.whl#misaki-0.9.4.dist-info/licenses/LICENSE
+- Source revision or version: `0.9.4`.
+- File or scope: `{'path': 'misaki-0.9.4-py3-none-any.whl', 'sha256': '90e2eeb169786c014c429e5058d2ea6bcd02d651f2a24450ba6c9ffc0f8da15a'}`.
 
 License statement:
 
 ```text
-Apache License Version 2.0, January 2004
+Apache License
+                           Version 2.0, January 2004
 ```
-Source `installed_file`: `misaki-0.9.4.dist-info/licenses/LICENSE`.
-Source `sha256`: `c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4`.
 
 ### `kokoro-us-gold`
 
@@ -196,14 +224,16 @@ Attribution or stop cause:
 ```text
 Not distributed. Dictionary rights use the attached package license, not an independent upstream-data approval.
 ```
-- License source: https://pypi.org/pypi/misaki/0.9.4/json
+- License source: https://files.pythonhosted.org/packages/82/ec/0ee4110ddb54278b8f21c40a140370ae8f687036c4edf578316602697c56/misaki-0.9.4-py3-none-any.whl#misaki-0.9.4.dist-info/licenses/LICENSE
+- Source revision or version: `0.9.4`.
+- File or scope: `{'path': 'misaki/data/us_gold.json', 'sha256': 'dc414872a49a28ae6c141463d502fd945f3b2fde040484fdc47d00cc4612686f'}`.
 
 License statement:
 
 ```text
-Apache License Version 2.0, January 2004
+Apache License
+                           Version 2.0, January 2004
 ```
-Source `scope`: `Packaged dictionary under the wheel's attached license; no separate dictionary notice is present.`.
 Archive member: `misaki/data/us_gold.json`.
 
 ### `kokoro-us-silver`
@@ -219,14 +249,16 @@ Attribution or stop cause:
 ```text
 Not distributed. Dictionary rights use the attached package license, not an independent upstream-data approval.
 ```
-- License source: https://pypi.org/pypi/misaki/0.9.4/json
+- License source: https://files.pythonhosted.org/packages/82/ec/0ee4110ddb54278b8f21c40a140370ae8f687036c4edf578316602697c56/misaki-0.9.4-py3-none-any.whl#misaki-0.9.4.dist-info/licenses/LICENSE
+- Source revision or version: `0.9.4`.
+- File or scope: `{'path': 'misaki/data/us_silver.json', 'sha256': 'de8f67be911bb6c659187b4a65fd966b6a30e56350e0f790d763210b053ac475'}`.
 
 License statement:
 
 ```text
-Apache License Version 2.0, January 2004
+Apache License
+                           Version 2.0, January 2004
 ```
-Source `scope`: `Packaged dictionary under the wheel's attached license; no separate dictionary notice is present.`.
 Archive member: `misaki/data/us_silver.json`.
 
 ### `kokoro-phonemizer-fork`
@@ -242,16 +274,26 @@ Attribution or stop cause:
 ```text
 Not distributed. GPL runtime components do not satisfy the Apache image policy.
 ```
-- License source: https://pypi.org/pypi/phonemizer-fork/3.3.2/json
+- License source: https://files.pythonhosted.org/packages/64/f1/0dcce21b0ae16a82df4b6583f8f3ad8e55b35f7e98b6bf536a4dd225fa08/phonemizer_fork-3.3.2-py3-none-any.whl#phonemizer/__init__.py
+- Source revision or version: `3.3.2`.
+- File or scope: `{'path': 'phonemizer_fork-3.3.2-py3-none-any.whl', 'sha256': '97305c76f4183b3825dae8f4c032265fe78c9946ce58c47d4b62161349264b74'}`.
 
 License statement:
 
 ```text
-either version 3 of the License, or (at your option) any later version.
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
 ```
-Source `installed_file`: `phonemizer/__init__.py`.
-Source `license_file`: `phonemizer_fork-3.3.2.dist-info/licenses/LICENSE`.
-Source `sha256`: `d62f065830aa3739cc031156b9690805c7b2e811b4a178c8b4acd8725d561c94`.
+
+- License source: https://files.pythonhosted.org/packages/64/f1/0dcce21b0ae16a82df4b6583f8f3ad8e55b35f7e98b6bf536a4dd225fa08/phonemizer_fork-3.3.2-py3-none-any.whl#phonemizer_fork-3.3.2.dist-info/licenses/LICENSE
+- Source revision or version: `3.3.2`.
+- File or scope: `Attached license file SHA-256 d62f065830aa3739cc031156b9690805c7b2e811b4a178c8b4acd8725d561c94. The source header states GPL-3.0-or-later.`.
+
+License statement:
+
+```text
+GNU GENERAL PUBLIC LICENSE
+```
 
 ### `kokoro-espeak-loader`
 
@@ -267,13 +309,24 @@ Attribution or stop cause:
 Not distributed. The wheel contains no license file and bundles a GPL library and data. MIT for the loader does not cover those parts.
 ```
 - License source: https://github.com/thewh1teagle/espeakng-loader/blob/0ddc87adf77e5850d7eeb542ac8a87d421b64daa/LICENSE
+- Source revision or version: `0ddc87adf77e5850d7eeb542ac8a87d421b64daa`.
+- File or scope: `{'path': 'espeakng_loader-0.2.4-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl', 'sha256': '08721baf27d13d461f6be6eed9a65277e70d68234ff484fd8b9897b222cdcb6d'}`.
 
 License statement:
 
 ```text
 Permission is hereby granted, free of charge, to any person obtaining a copy
 ```
-Source `scope`: `Loader source only. The installed __init__.py exactly matches this commit; its SHA-256 is 3900f0b174feebccb8991fd6f3888f037c7bfa23d9a3bdec480e894f75b03f3f.`.
+
+- License source: https://github.com/thewh1teagle/espeakng-loader/blob/0ddc87adf77e5850d7eeb542ac8a87d421b64daa/LICENSE
+- Source revision or version: `0ddc87adf77e5850d7eeb542ac8a87d421b64daa`.
+- File or scope: `Loader source only. The installed __init__.py exactly matches this commit; its SHA-256 is 3900f0b174feebccb8991fd6f3888f037c7bfa23d9a3bdec480e894f75b03f3f.`.
+
+License statement:
+
+```text
+Permission is hereby granted, free of charge, to any person obtaining a copy
+```
 
 ### `kokoro-espeak-ng`
 
@@ -289,13 +342,25 @@ Attribution or stop cause:
 Not distributed. Actual loaded version is 1.52.0. The loader source references this eSpeak source commit.
 ```
 - License source: https://github.com/espeak-ng/espeak-ng/blob/4870adfa25b1a32b4361592f1be8a40337c58d6c/README.md
+- Source revision or version: `4870adfa25b1a32b4361592f1be8a40337c58d6c`.
+- File or scope: `{'path': 'espeakng_loader/libespeak-ng.so', 'sha256': 'b15ce0803b26254e8a0d088c6b9281a2637b2b02613147cc320cfdefaf2c3ccf'}`.
 
 License statement:
 
 ```text
-eSpeak NG Text-to-Speech is released under the GPL version 3 or later license.
+eSpeak NG Text-to-Speech is released under the [GPL version 3](COPYING) or
+later license.
 ```
-Full license text: https://github.com/espeak-ng/espeak-ng/blob/4870adfa25b1a32b4361592f1be8a40337c58d6c/COPYING
+
+- License source: https://github.com/espeak-ng/espeak-ng/blob/4870adfa25b1a32b4361592f1be8a40337c58d6c/COPYING
+- Source revision or version: `4870adfa25b1a32b4361592f1be8a40337c58d6c`.
+- File or scope: `Complete GPL license text for the blocked runtime source.`.
+
+License statement:
+
+```text
+GNU GENERAL PUBLIC LICENSE
+```
 Archive member: `espeakng_loader/libespeak-ng.so`.
 
 ### `kokoro-espeak-data`
@@ -312,18 +377,25 @@ Attribution or stop cause:
 Not distributed. The active bundled data includes GPL and Unicode notices, not the loader's MIT license.
 ```
 - License source: https://github.com/espeak-ng/espeak-ng/blob/4870adfa25b1a32b4361592f1be8a40337c58d6c/README.md
+- Source revision or version: `4870adfa25b1a32b4361592f1be8a40337c58d6c`.
+- File or scope: `Bundled eSpeak data tree and Unicode notices; see the recorded tree and individual file digests.`.
 
 License statement:
 
 ```text
-eSpeak NG Text-to-Speech is released under the GPL version 3 or later license.
+eSpeak NG Text-to-Speech is released under the [GPL version 3](COPYING) or
+later license.
 ```
+
 - License source: https://github.com/espeak-ng/espeak-ng/blob/4870adfa25b1a32b4361592f1be8a40337c58d6c/COPYING.UCD
+- Source revision or version: `4870adfa25b1a32b4361592f1be8a40337c58d6c`.
+- File or scope: `Bundled eSpeak data tree and Unicode notices; see the recorded tree and individual file digests.`.
 
 License statement:
 
 ```text
-Permission is hereby granted, free of charge, to any person obtaining a copy of the Unicode data files and any associated documentation
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of the Unicode data files and any associated documentation
 ```
 
 Individual file digests:
@@ -351,16 +423,25 @@ Attribution or stop cause:
 ```text
 Not distributed. LGPL components do not satisfy the Apache image policy.
 ```
-- License source: https://pypi.org/pypi/num2words/0.5.14/json
+- License source: https://files.pythonhosted.org/packages/d6/5b/545e9267a1cc080c8a1be2746113a063e34bcdd0f5173fd665a5c13cb234/num2words-0.5.14-py3-none-any.whl#num2words/__init__.py
+- Source revision or version: `0.5.14`.
+- File or scope: `{'path': 'num2words-0.5.14-py3-none-any.whl', 'sha256': '1c8e5b00142fc2966fd8d685001e36c4a9911e070d1b120e1beb721fa1edb33d'}`.
 
 License statement:
 
 ```text
 version 2.1 of the License, or (at your option) any later version.
 ```
-Source `installed_file`: `num2words/__init__.py`.
-Source `license_file`: `num2words-0.5.14.dist-info/COPYING`.
-Source `sha256`: `1457a03d928aeb06af3ea75ef065c517e915d7e41283d550dd4fa18ab20cda12`.
+
+- License source: https://files.pythonhosted.org/packages/d6/5b/545e9267a1cc080c8a1be2746113a063e34bcdd0f5173fd665a5c13cb234/num2words-0.5.14-py3-none-any.whl#num2words-0.5.14.dist-info/COPYING
+- Source revision or version: `0.5.14`.
+- File or scope: `Attached license file SHA-256 1457a03d928aeb06af3ea75ef065c517e915d7e41283d550dd4fa18ab20cda12. The source header states LGPL-2.1-or-later.`.
+
+License statement:
+
+```text
+GNU Lesser General Public License
+```
 
 ### `kokoro-spacy-english-model`
 
@@ -375,15 +456,25 @@ Attribution or stop cause:
 ```text
 Not distributed. The model has MIT and source-data notices. It is part of the blocked English chain.
 ```
-- License source: https://github.com/explosion/spacy-models/releases/tag/en_core_web_sm-3.8.0
+- License source: https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl#en_core_web_sm/en_core_web_sm-3.8.0/LICENSE
+- Source revision or version: `3.8.0`.
+- File or scope: `{'path': 'en_core_web_sm-3.8.0-py3-none-any.whl', 'sha256': '1932429db727d4bff3deed6b34cfc05df17794f4a52eeb26cf8928f7c1a0fb85'}`.
 
 License statement:
 
 ```text
 Permission is hereby granted, free of charge, to any person obtaining a copy
 ```
-Source `installed_file`: `en_core_web_sm/en_core_web_sm-3.8.0/LICENSE`.
-Source `sha256`: `3933c176979b68bc6d0bcc902c7d6c130f1d127f476f17ba5cdba8d99cfd0012`.
+
+- License source: https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl#en_core_web_sm/en_core_web_sm-3.8.0/LICENSE
+- Source revision or version: `3.8.0`.
+- File or scope: `Model license file SHA-256 3933c176979b68bc6d0bcc902c7d6c130f1d127f476f17ba5cdba8d99cfd0012. Source-data notice LICENSES_SOURCES SHA-256 20d9dfacd215112251f15341edd1a47b1f98bf393a212f10f194ffdc7ee98a90.`.
+
+License statement:
+
+```text
+Permission is hereby granted, free of charge, to any person obtaining a copy
+```
 
 ## Other package declarations
 
@@ -403,8 +494,15 @@ NumPy has the same license expression as the recorded probe dependency in the no
 - License file for inspection: `torch-2.6.0+cpu.dist-info/LICENSE`.
 - License-file SHA-256: `6ecc267746f8c2b9c1faa1facc857c6f0d26db9bd00e6f43017da06f06120313`.
 
+- License source: https://github.com/pytorch/pytorch/blob/1eba9b3aa3c43f86f4a2c807ac8e12c4a7767340/LICENSE
+- Source revision or version: `1eba9b3aa3c43f86f4a2c807ac8e12c4a7767340`.
+- File or scope: `Supporting package torch 2.6.0+cpu; not a release selection.`.
+
+License statement:
+
 ```text
-Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
 ```
 
 ### `transformers==4.51.3`
@@ -415,8 +513,15 @@ Redistribution and use in source and binary forms, with or without modification,
 - License file for inspection: `transformers-4.51.3.dist-info/LICENSE`.
 - License-file SHA-256: `77fd4710def9ec3c0f6225800e0235f15a425abd4a8b03559127fcd782612049`.
 
+- License source: https://files.pythonhosted.org/packages/a9/b6/5257d04ae327b44db31f15cce39e6020cc986333c715660b1315a9724d82/transformers-4.51.3-py3-none-any.whl#transformers-4.51.3.dist-info/LICENSE
+- Source revision or version: `4.51.3`.
+- File or scope: `Supporting package transformers 4.51.3; not a release selection.`.
+
+License statement:
+
 ```text
-Apache License Version 2.0, January 2004
+Apache License
+                           Version 2.0, January 2004
 ```
 
 ### `spacy==3.8.16`
@@ -426,6 +531,12 @@ Apache License Version 2.0, January 2004
 - Source: https://pypi.org/pypi/spacy/3.8.16/json
 - License file for inspection: `spacy-3.8.16.dist-info/licenses/LICENSE`.
 - License-file SHA-256: `3f4378e67708fecacd3e27651c8bc0f977cf20789e19da0d81a2840e7cf573a2`.
+
+- License source: https://files.pythonhosted.org/packages/e3/d1/ca928dde89792ba589c973d7c120ec791ccbd18d539edb3d05dc738ab4e7/spacy-3.8.16-cp310-cp310-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl#spacy-3.8.16.dist-info/licenses/LICENSE
+- Source revision or version: `3.8.16`.
+- File or scope: `Supporting package spacy 3.8.16; not a release selection.`.
+
+License statement:
 
 ```text
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -439,6 +550,12 @@ Permission is hereby granted, free of charge, to any person obtaining a copy
 - License file for inspection: `spacy_curated_transformers-0.3.1.dist-info/licenses/LICENSE`.
 - License-file SHA-256: `e4f2431f403ea0d20d108bbe1f0615a4ca3b6b765e2dbafae93908d3986d153a`.
 
+- License source: https://files.pythonhosted.org/packages/42/d8/f053d43125ae4ad14f3e2a12a475a656128233f1f40a272c6e09a05c73e8/spacy_curated_transformers-0.3.1-py2.py3-none-any.whl#spacy_curated_transformers-0.3.1.dist-info/licenses/LICENSE
+- Source revision or version: `0.3.1`.
+- File or scope: `Supporting package spacy-curated-transformers 0.3.1; not a release selection.`.
+
+License statement:
+
 ```text
 Permission is hereby granted, free of charge, to any person obtaining a copy
 ```
@@ -451,6 +568,12 @@ Permission is hereby granted, free of charge, to any person obtaining a copy
 - License file for inspection: `curated_transformers-0.1.1.dist-info/LICENSE`.
 - License-file SHA-256: `e4f2431f403ea0d20d108bbe1f0615a4ca3b6b765e2dbafae93908d3986d153a`.
 
+- License source: https://files.pythonhosted.org/packages/d6/67/3b72b3fdfcadab61bc8f59c17e63770e526ffabd583ed32f174a7c01af85/curated_transformers-0.1.1-py2.py3-none-any.whl#curated_transformers-0.1.1.dist-info/LICENSE
+- Source revision or version: `0.1.1`.
+- File or scope: `Supporting package curated-transformers 0.1.1; not a release selection.`.
+
+License statement:
+
 ```text
 Permission is hereby granted, free of charge, to any person obtaining a copy
 ```
@@ -462,6 +585,12 @@ Permission is hereby granted, free of charge, to any person obtaining a copy
 - Source: https://pypi.org/pypi/curated-tokenizers/0.0.10/json
 - License file for inspection: `curated_tokenizers-0.0.10.dist-info/licenses/LICENSE`.
 - License-file SHA-256: `49d8fef96cd92719cb5242ef4c4f954edc008a46fcf7caabecae14dbcc444b50`.
+
+- License source: https://files.pythonhosted.org/packages/c3/bf/94fbdeaa195a896ff06ae49e85de6a65c47b18c580e869ed4025de6f9e05/curated_tokenizers-0.0.10-cp310-cp310-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl#curated_tokenizers-0.0.10.dist-info/licenses/LICENSE
+- Source revision or version: `0.0.10`.
+- File or scope: `Supporting package curated-tokenizers 0.0.10; not a release selection.`.
+
+License statement:
 
 ```text
 Permission is hereby granted, free of charge, to any person obtaining a copy

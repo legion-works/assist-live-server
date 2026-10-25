@@ -20,6 +20,9 @@ def asset():
             {
                 "kind": "model_card",
                 "url": "https://example.com/models/" + "a" * 40 + "/README.md",
+                "quote": "Synthetic test voice uses CC-BY-4.0.",
+                "revision_or_version": "a" * 40,
+                "file_binding": {"path": "voice.bin", "sha256": "b" * 64},
             }
         ],
         "redistribution": True,
@@ -220,3 +223,114 @@ def test_malformed_inputs_return_errors(tmp_path):
         path = tmp_path / "manifest.json"
         path.write_text(value)
         assert check_assets(path, release=True)
+
+
+@pytest.mark.parametrize("status", ["confirmed_included", "confirmed_blocked_absent"])
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize(
+    "missing",
+    ["license_sources", "quote", "url", "revision_or_version", "file_binding"],
+)
+def test_every_source_field_is_required_in_both_decisions(
+    tmp_path, status, nested, missing
+):
+    from tools.check_assets import check_assets, main
+
+    record = asset()
+    target = deepcopy(record) if nested else record
+    if nested:
+        target["id"] = "child-asset"
+        record["components"] = [target]
+    target.update(status=status, download="none" if "blocked" in status else "startup")
+    if missing == "license_sources":
+        del target[missing]
+    else:
+        del target["license_sources"][0][missing]
+    path = write_manifest(tmp_path, [record], download_plan=[])
+    errors = check_assets(path, release=True)
+    assert any(target["id"] in e and "license source" in e for e in errors)
+    assert main(["--manifest", str(path), "--release"]) == 1
+
+
+@pytest.mark.parametrize("field", ["evidence", "license_claims"])
+@pytest.mark.parametrize("nested", [False, True])
+def test_parallel_rights_lists_are_rejected_by_the_shared_gate(tmp_path, field, nested):
+    from tools.check_assets import check_assets
+
+    record = asset()
+    target = deepcopy(record) if nested else record
+    if nested:
+        target["id"] = "nested"
+        record["components"] = [target]
+    target[field] = []
+    assert any(
+        field in e for e in check_assets(write_manifest(tmp_path, [record]), True)
+    )
+
+
+@pytest.mark.parametrize("binding", [None, {"path": "voice.bin", "sha256": "c" * 64}])
+def test_included_source_must_bind_the_downloaded_file_digest(tmp_path, binding):
+    from tools.check_assets import check_assets
+
+    record = asset()
+    source = record["license_sources"][0]
+    if binding is None:
+        del source["file_binding"]
+        source["scope"] = "Repository code only, not model weights."
+    else:
+        source["file_binding"] = binding
+    assert any(
+        "file binding" in e
+        for e in check_assets(write_manifest(tmp_path, [record]), True)
+    )
+
+
+@pytest.mark.parametrize("value", [None, "", "   "])
+@pytest.mark.parametrize("status", ["confirmed_included", "confirmed_blocked_absent"])
+def test_empty_license_quote_is_a_named_failure(tmp_path, capsys, value, status):
+    from tools.check_assets import main
+
+    record = asset()
+    record.update(status=status, download="none" if "blocked" in status else "startup")
+    record["license_sources"][0]["quote"] = value
+    path = write_manifest(tmp_path, [record], download_plan=[])
+    assert main(["--manifest", str(path), "--release"]) == 1
+    assert (
+        "FAIL asset licenses: test-voice: license source quote required"
+        in capsys.readouterr().out
+    )
+
+
+@pytest.mark.parametrize("packages", [None, {}, [None]])
+def test_malformed_supporting_sources_return_named_failures(tmp_path, capsys, packages):
+    from tools.check_assets import main
+
+    record = asset()
+    record["inspection"] = {"supporting_packages": packages}
+    path = write_manifest(tmp_path, [record])
+    assert main(["--manifest", str(path), "--release"]) == 1
+    assert (
+        "FAIL asset licenses: test-voice: supporting package" in capsys.readouterr().out
+    )
+
+
+@pytest.mark.parametrize(
+    "probe", ["probe_smart_turn", "probe_kokoro_licenses", "probe_silero_license"]
+)
+def test_every_probe_renders_all_manifest_records(probe):
+    from importlib import import_module
+
+    from tools.check_assets import flatten
+    from tools.probe_kokoro_licenses import permitted
+
+    module = import_module("tools." + probe)
+    records = flatten(
+        json.loads((ROOT / "assets/manifest.json").read_text())["assets"], []
+    )
+    for record in records:
+        text = module.render_report(record)
+        assert (
+            record["sha256"] in text if record.get("sha256") else record["id"] in text
+        )
+        assert record["status"] in text
+        assert permitted(record) == (record["status"] == "confirmed_included")

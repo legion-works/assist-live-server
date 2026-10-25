@@ -42,13 +42,14 @@ def source_statements(sources: list[dict[str, Any]]) -> list[str]:
         ]
         if re.search(r"\bCC[ -]+BY[ -]+NC[ -]+4\.0\b", quote):
             identifiers.append("CC-BY-NC-4.0")
-        if not identifiers and source["kind"] != "badge_link":
+        if not identifiers and source["kind"] not in ("badge_link", "license_pointer"):
             identifiers.append("NOASSERTION")
         statements.extend(identifiers)
     return statements
 
 
 def check_decision(manifest: Path, *, allow_blocked: bool) -> dict[str, Any]:
+    from tools.asset_rights import license_sources
     from tools.check_assets import check_assets, https_url
 
     errors = check_assets(manifest, release=True)
@@ -72,34 +73,9 @@ def check_decision(manifest: Path, *, allow_blocked: bool) -> dict[str, Any]:
         or package.get("model_sha256") != digest
     ):
         raise ValueError("invalid model or package pin")
-    if any(name in record for name in ("evidence", "license_claims")):
-        raise ValueError("use license_sources only for rights statements")
-    sources = record.get("license_sources")
-    if not isinstance(sources, list) or not sources:
-        raise ValueError("license source records required")
+    sources = license_sources(record)
     for source in sources:
-        if (
-            not isinstance(source, dict)
-            or set(source)
-            != {"kind", "url", "quote", "revision_or_version", "file_binding"}
-            or not isinstance(source.get("kind"), str)
-            or not source["kind"].strip()
-            or not isinstance(source.get("quote"), str)
-            or not source["quote"].strip()
-            or not https_url(source.get("url"))
-            or not (
-                (
-                    revision in source["url"]
-                    and source["revision_or_version"] == revision
-                )
-                or (
-                    source["url"].split("#", 1)[0] == package["url"]
-                    and source["revision_or_version"] == package["version"]
-                )
-            )
-            or not isinstance(source.get("file_binding"), dict)
-            or source["file_binding"] != {"path": MODEL_PATH, "sha256": digest}
-        ):
+        if source.get("file_binding") != {"path": MODEL_PATH, "sha256": digest}:
             raise ValueError("invalid or unpinned license source record")
     resolved = resolve_license(source_statements(sources))
     file_scoped = any(
@@ -125,9 +101,14 @@ def check_decision(manifest: Path, *, allow_blocked: bool) -> dict[str, Any]:
 
 
 def render_report(record: dict[str, Any]) -> str:
+    from tools.asset_rights import license_sources, render_record
+
+    if record.get("id") != ASSET_ID:
+        return render_record(record)
     package = record["package"]
+    model_path = license_sources(record)[0]["file_binding"]["path"]
     sources = []
-    for source in record["license_sources"]:
+    for source in license_sources(record):
         statement = ", ".join(source_statements([source])) or "navigation only"
         sources.append(
             f"### `{source['kind']}` at `{urlparse(source['url']).fragment}`\n\n"
@@ -197,7 +178,7 @@ A badge supplies no file-license approval.
 
 - Tag: `{record["tag"]}`.
 - Commit: `{record["revision"]}`.
-- File: `src/silero_vad/data/silero_vad.onnx`.
+- File: `{model_path}`.
 - Source: {record["url"]}
 - SHA-256: `{record["sha256"]}`.
 - Size: `{record["bytes"]}` bytes.
@@ -244,7 +225,7 @@ The model metadata has no license statement:
 
 The package and selected model directory have no `model card`.
 The investigation examined all textual package members for license statements.
-The six license-related lines are in `METADATA` and its attached `LICENSE`.
+The six license statements are in `METADATA` and its attached `LICENSE`.
 The statements below include the complete license text and each badge part.
 
 ## License statements
@@ -310,7 +291,7 @@ The current conflict stays unresolved in the file-license policy.
 This investigation sent no upstream message and opened no issue.
 Do not send this proposed question without operator approval:
 
-What license applies to `src/silero_vad/data/silero_vad.onnx` at `{record["tag"]}`,
+What license applies to `{model_path}` at `{record["tag"]}`,
 commit `{record["revision"]}`, SHA-256 `{record["sha256"]}`?
 
 The PyPI `silero-vad=={package["version"]}` wheel contains the same model bytes.

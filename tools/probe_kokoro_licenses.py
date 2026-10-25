@@ -3,12 +3,10 @@
 import argparse
 import json
 import os
-import re
 import sys
 import tempfile
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSET_ID = "kokoro-82m"
@@ -18,44 +16,9 @@ if __package__ in (None, ""):
 
 
 def permitted(record: dict[str, Any]) -> bool:
-    from tools.check_assets import ALLOWED, https_url
+    from tools.asset_rights import permitted as confirmed
 
-    revision = record.get("revision")
-    digest = record.get("sha256")
-    if (
-        record.get("status") != "confirmed_included"
-        or not isinstance(record.get("license"), str)
-        or record["license"] not in ALLOWED
-        or not isinstance(revision, str)
-        or not re.fullmatch(r"[a-fA-F0-9]{40,64}", revision)
-        or not isinstance(digest, str)
-        or not re.fullmatch(r"[a-fA-F0-9]{64}", digest)
-        or not https_url(record.get("url"))
-        or revision not in record["url"]
-        or not isinstance(record.get("attribution"), str)
-        or not record["attribution"].strip()
-    ):
-        return False
-    evidence = record.get("evidence")
-    if not isinstance(evidence, list) or not evidence:
-        return False
-    for source in evidence:
-        if (
-            not isinstance(source, dict)
-            or not https_url(source.get("url"))
-            or revision not in source["url"]
-            or "badge" in source["url"].lower()
-            or "shields.io" in urlparse(source["url"]).netloc.lower()
-            or not isinstance(source.get("quote"), str)
-            or not source["quote"].strip()
-            or source.get("applies_to") != record.get("id")
-            or source.get("sha256") != digest
-        ):
-            return False
-    components = record.get("components")
-    return isinstance(components, list) and all(
-        isinstance(child, dict) and permitted(child) for child in components
-    )
+    return confirmed(record)
 
 
 def voice_allowlist(record: dict[str, Any]) -> list[dict[str, str]]:
@@ -92,10 +55,30 @@ def check_decision(
     return record, defaults
 
 
-def render_report(record: dict[str, Any], defaults: list[dict[str, str]]) -> str:
+def render_report(
+    record: dict[str, Any], defaults: list[dict[str, str]] | None = None
+) -> str:
+    from tools.asset_rights import render_record, render_sources
     from tools.check_assets import flatten
 
+    if record.get("id") != ASSET_ID:
+        return render_record(record)
+    if defaults is None:
+        defaults = voice_allowlist(record)
     records = flatten([record], [])
+    parts = {item["id"]: item for item in records}
+    inspection = record["inspection"]
+    code = parts["kokoro-code"]
+    misaki = parts["kokoro-misaki"]
+    data = parts["kokoro-espeak-data"]
+    spacy = parts["kokoro-spacy-english-model"]
+    versions = f"kokoro=={code['version']}` with `misaki=={misaki['version']}"
+    voice_record = next(item for item in records if item["kind"] == "voice")
+    voice_path = voice_record["url"].split(f"/resolve/{voice_record['revision']}/", 1)[
+        -1
+    ]
+    voice_shape = tuple(inspection["voice_shape"])
+    config_name = parts["kokoro-config"]["url"].rsplit("/", 1)[-1]
     components = []
     for item in records:
         lines = [
@@ -113,35 +96,9 @@ def render_report(record: dict[str, Any], defaults: list[dict[str, str]]) -> str
             item["attribution"],
             "```",
         ]
-        for source in item["license_sources"]:
-            lines.extend(
-                [
-                    f"- License source: {source['url']}",
-                    "",
-                    "License statement:",
-                    "",
-                    "```text",
-                    source["quote"],
-                    "```",
-                ]
-            )
-            if source.get("full_text"):
-                lines.append(f"Full license text: {source['full_text']}")
-            for key in ("installed_file", "license_file", "sha256", "scope"):
-                if source.get(key):
-                    lines.append(f"Source `{key}`: `{source[key]}`.")
-        if not item["license_sources"]:
-            lines.extend(["", "No file-scoped license statement has project approval."])
+        lines.append(render_sources(item))
         if item.get("archive_path"):
             lines.append(f"Archive member: `{item['archive_path']}`.")
-        if item.get("upstream_project"):
-            project = item["upstream_project"]
-            lines.extend(
-                [
-                    f"Full license text: {project['license_url']}",
-                    f"License SHA-256: `{project['license_sha256']}`.",
-                ]
-            )
         if item.get("file_digests"):
             lines.extend(
                 [
@@ -163,7 +120,7 @@ def render_report(record: dict[str, Any], defaults: list[dict[str, str]]) -> str
             f"- Source: {item['source']}\n"
             f"- License file for inspection: `{item['license_file']}`.\n"
             f"- License-file SHA-256: `{item['license_sha256']}`.\n\n"
-            f"```text\n{item['quote']}\n```"
+            + render_sources(item)
         )
     decision = (
         "Stop Kokoro runtime inclusion and its release."
@@ -191,11 +148,11 @@ The recorded stop causes are:
         + "```json\n"
         + json.dumps(record["stop_causes"], indent=2)
         + "\n```"
-        + """
+        + f"""
 
 ## Actual first-use inspection
 
-The candidate is `kokoro==0.9.4` with `misaki==0.9.4` in scratch Python `3.12`.
+The candidate is `{versions}` in scratch Python `3.12`.
 No candidate package is a repository dependency.
 The client and server package dependencies stay unchanged.
 All caches and downloaded files stayed in scratch storage.
@@ -204,20 +161,21 @@ The tool uses the standard library only.
 It does not install or download runtime components.
 
 The inspection used `KPipeline(lang_code="a", trf=False, device="cpu")`.
-The candidate voice was `af_heart`.
+The candidate voice was `{inspection["candidate_voice"]}`.
 The Hugging Face download calls used the pinned revision in the records below.
 The upstream example uses that voice.
 It is an inspection candidate, not an approved default.
 The first-use download list was:
 
-- `config.json` with vocabulary and model configuration.
-- `kokoro-v1_0.pth` with the model weights.
-- `en_core_web_sm-3.8.0-py3-none-any.whl` for English tagging.
-- `voices/af_heart.pt`, with tensor shape `(510, 1, 256)`.
+- `{config_name}` with vocabulary and model configuration.
+- `{record["url"].rsplit("/", 1)[-1]}` with the model weights.
+- `{spacy["url"].rsplit("/", 1)[-1]}` for English tagging.
+- `{voice_path}`, with tensor shape `{voice_shape}`.
 
 The inspection loaded the model and voice but made no voice output or audio file.
 It tested English G2P and the eSpeak fallback on a synthetic out-of-dictionary word.
-The fallback used the bundled `libespeak-ng.so`, which reported version `1.52.0`.
+The fallback used the bundled `libespeak-ng.so`, which
+reported version `{inspection["espeak_version"]}`.
 `misaki/espeak.py` sets the library and data paths from `espeakng_loader` explicitly.
 The English path loads `us_gold.json`, `us_silver.json`, and `num2words`.
 It also loads the spaCy tagger.
@@ -225,8 +183,8 @@ It also loads the spaCy tagger.
 The package supplies dictionaries and eSpeak data.
 They are not first-use network downloads.
 
-The eSpeak data bundle contains 364 files.
-Its tree digest is `bfc761d924f35641b0c124dfb9def58ae433113d6c3f118b859169fbec2335da`.
+The eSpeak data bundle contains {data["file_count"]} files.
+Its tree digest is `{data["tree_sha256"]}`.
 The digest includes sorted relative paths and individual SHA-256 values.
 The format is compact, key-sorted JSON.
 The complete file inventory stays in scratch storage.
