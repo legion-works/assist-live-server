@@ -14,7 +14,7 @@ MAX_DEVICE = 4096
 DUMMY_DEVICE_SECRET = bytes(32)
 DEVICE_AUTH_TIMEOUT = 2.0
 DEVICE_RESULT_TIMEOUT = 2.0
-DEVICE_CLOSE_TIMEOUT = 0.1
+WS_CLOSE_TIMEOUT = 0.1
 MAX_DEVICE_CONNECTIONS = 64
 MAX_DEVICE_PER_DEVICE = 4
 
@@ -157,7 +157,7 @@ class WebSocketTransport:
             return True
 
         ws = web.WebSocketResponse(
-            max_msg_size=MAX_DEVICE, compress=False, timeout=DEVICE_CLOSE_TIMEOUT
+            max_msg_size=MAX_DEVICE, compress=False, timeout=WS_CLOSE_TIMEOUT
         )
         try:
             await ws.prepare(request)

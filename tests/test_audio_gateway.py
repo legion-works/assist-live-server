@@ -1,4 +1,6 @@
 import asyncio
+import subprocess
+import sys
 import threading
 
 import numpy as np
@@ -7,6 +9,35 @@ from assist_live_server.providers.parakeet import ParakeetSession
 from assist_live_server.turn.detector import TurnDetector
 
 TURN = "01900000-0000-7000-8000-000000000001"
+
+
+def test_gateway_uses_provider_audio_bound():
+    code = """
+import asyncio
+from assist_live_server.providers import parakeet
+parakeet.MAX_AUDIO_BYTES = 1024
+from assist_live_server.audio_gateway import AudioGateway
+from assist_live_server.turn.detector import TurnDetector
+async def run():
+    gateway = AudioGateway(
+        lambda _: parakeet.ParakeetSession(lambda pcm: str(len(pcm))),
+        detector_factory=lambda: TurnDetector(
+            vad_probability=lambda _: 1, turn_probability=lambda _: 0
+        ),
+    )
+    async def audio():
+        yield bytes(1024)
+        raise AssertionError("gateway read beyond provider bound")
+    replies = [r async for r in gateway.stt(
+        "01900000-0000-7000-8000-000000000001", audio()
+    )]
+    assert [r["text"] for r in replies if r["type"] == "final"] == ["1024"]
+asyncio.run(run())
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, timeout=10
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def detector():

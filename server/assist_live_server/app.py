@@ -26,6 +26,7 @@ from .audio_gateway import AudioGateway
 from .auth import Registry
 from .event_gateway import EventGateway
 from .protocol import (
+    WS_CLOSE_TIMEOUT,
     AudioBackend,
     TimingIngress,
     TurnExistsError,
@@ -54,6 +55,8 @@ def create_app(
 ) -> web.Application:
     active_auth = 0
     auth_connections: dict[bytes, int] = {}
+    active_audio_turns: set[str] = set()
+    audio_store_errors_total = 0
 
     @web.middleware
     async def connections(
@@ -222,6 +225,7 @@ def create_app(
                     "device_connections": device_transport.active,
                     "device_worker_errors_total": timing.worker_errors,
                     "authenticated_connections": active_auth,
+                    "audio_store_errors_total": audio_store_errors_total,
                 }
             ),
             headers={"Content-Type": "text/plain; version=0.0.4; charset=utf-8"},
@@ -293,7 +297,9 @@ def create_app(
     async def events(request: web.Request) -> web.WebSocketResponse:
         satellites = allowed(request)
         target = storage()
-        ws = web.WebSocketResponse(max_msg_size=MAX_CONTROL, compress=False)
+        ws = web.WebSocketResponse(
+            max_msg_size=MAX_CONTROL, compress=False, timeout=WS_CLOSE_TIMEOUT
+        )
         await ws.prepare(request)
         try:
             first = await ws.receive(timeout=MESSAGE_DEADLINE)
@@ -359,9 +365,12 @@ def create_app(
         if backend is None and audio_gateway is None:
             raise web.HTTPServiceUnavailable(text="audio unavailable")
         # aiohttp refuses equality. The protocol maximum is inclusive.
-        ws = web.WebSocketResponse(max_msg_size=MAX_AUDIO + 1, compress=False)
+        ws = web.WebSocketResponse(
+            max_msg_size=MAX_AUDIO + 1, compress=False, timeout=WS_CLOSE_TIMEOUT
+        )
         await ws.prepare(request)
         tasks: list[asyncio.Task[None]] = []
+        claimed_turn: str | None = None
         try:
             first = await ws.receive(timeout=MESSAGE_DEADLINE)
             if first.type != WSMsgType.TEXT:
@@ -375,6 +384,11 @@ def create_app(
             turn_value = await target.get_turn(turn_id)
             if turn_value is None or turn_value["satellite"] not in satellites:
                 raise ValueError("turn refused")
+            if turn_id in active_audio_turns:
+                await ws.close(code=1008, message=b"audio turn active")
+                return ws
+            active_audio_turns.add(turn_id)
+            claimed_turn = turn_id
             await ws.send_json(
                 encode_control(
                     "negotiated", turn_id, capabilities=negotiation["capabilities"]
@@ -385,6 +399,7 @@ def create_app(
             input_stopped = asyncio.Event()
 
             async def record(stage: str, data: dict[str, object]) -> None:
+                nonlocal audio_store_errors_total
                 if stage == "end_decision":
                     input_stopped.set()
                     while not queue.empty():
@@ -403,7 +418,14 @@ def create_app(
                 transcript = bool(
                     record_transcripts and turn_value["record_transcripts"]
                 )
-                await target.append(replace(event, data=safe_data(event, transcript)))
+                try:
+                    await target.append(
+                        replace(event, data=safe_data(event, transcript))
+                    )
+                except Exception:
+                    audio_store_errors_total += 1
+                    LOGGER.error("audio timing write failed")
+                    raise
 
             async def send(value: dict[str, Any]) -> None:
                 async with lock:
@@ -434,7 +456,7 @@ def create_app(
                         ended = True
                         await queue.put(None)
                         continue
-                    if input_stopped.is_set() and message.type in {
+                    if (ended or input_stopped.is_set()) and message.type in {
                         WSMsgType.BINARY,
                         WSMsgType.TEXT,
                     }:
@@ -491,31 +513,47 @@ def create_app(
                             kind = reply["type"]
                             if terminal and kind != "speaker_result":
                                 continue
-                            if kind in {"final", "error"}:
-                                terminal = True
                             metadata: dict[str, object] = {}
                             if audio_gateway is not None:
                                 metadata = {
                                     "part": "stt",
                                     "provider": audio_gateway.provider,
                                 }
-                            if kind in {"partial", "final"}:
-                                await record(
-                                    "stt_final" if kind == "final" else "stt_partial",
-                                    {**metadata, "transcript": reply["text"]},
-                                )
-                            elif kind == "speaker_result":
-                                if speaker or not terminal:
-                                    continue
-                                speaker = True
-                                await record("speaker_result", reply)
-                            elif kind == "error":
-                                await record("stt_failed", metadata)
+                            try:
+                                if kind in {"partial", "final"}:
+                                    await record(
+                                        "stt_final"
+                                        if kind == "final"
+                                        else "stt_partial",
+                                        {**metadata, "transcript": reply["text"]},
+                                    )
+                                elif kind == "speaker_result":
+                                    if speaker or not terminal:
+                                        continue
+                                    speaker = True
+                                    await record("speaker_result", reply)
+                                elif kind == "error":
+                                    await record("stt_failed", metadata)
+                            except Exception:
+                                # A published final must stay the only terminal result.
+                                if not terminal:
+                                    with contextlib.suppress(Exception):
+                                        await record("stt_failed", metadata)
+                                    await send(
+                                        encode_control(
+                                            "error", turn_id, code="stt_failed"
+                                        )
+                                    )
+                                    terminal = True
+                                break
                             await send(reply)
+                            if kind in {"final", "error"}:
+                                terminal = True
                             if kind == "error":
                                 break
                         if not terminal:
-                            await record("stt_failed", {})
+                            with contextlib.suppress(Exception):
+                                await record("stt_failed", {})
                             await send(
                                 encode_control("error", turn_id, code="stt_failed")
                             )
@@ -562,10 +600,14 @@ def create_app(
         except ValueError, KeyError, TypeError, TimeoutError, ConnectionError:
             await ws.close(code=1008, message=b"audio refused")
         finally:
-            for task in tasks:
-                task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
-            await ws.close()
+            try:
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                await ws.close()
+            finally:
+                if claimed_turn is not None:
+                    active_audio_turns.discard(claimed_turn)
         return ws
 
     app.router.add_get("/health", health)

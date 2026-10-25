@@ -5,6 +5,44 @@ import pytest
 from aiohttp import WSMsgType, WSServerHandshakeError
 
 
+@pytest.mark.parametrize("route", ["/v1/audio", "/v1/events", "/v1/device"])
+def test_nonreplying_peer_releases_slot_with_shared_short_close_timeout(
+    service, monkeypatch, route
+):
+    from aiohttp import web
+    from assist_live_server import app
+
+    monkeypatch.setattr(app, "MAX_AUTH_CONNECTIONS", 1)
+
+    async def run():
+        closed = asyncio.Event()
+        original = web.WebSocketResponse.close
+
+        async def close(ws, *args, **kwargs):
+            result = await original(ws, *args, **kwargs)
+            closed.set()
+            return result
+
+        monkeypatch.setattr(web.WebSocketResponse, "close", close)
+        async with service() as (_, state):
+            ws = await state.session.ws_connect(
+                state.url + route, headers=state.headers, autoclose=False
+            )
+            try:
+                await ws.send_str("invalid")
+                message = await ws.receive()
+                assert message.type == WSMsgType.CLOSE and message.data == 1008
+                await asyncio.wait_for(closed.wait(), 0.5)
+                other = await state.session.ws_connect(
+                    state.url + route, headers=state.headers
+                )
+                await other.close()
+            finally:
+                await ws.close()
+
+    asyncio.run(run())
+
+
 def test_device_result_wait_is_bounded(service, monkeypatch):
     from assist_live_server import protocol
     from assist_live_server.auth import sign_event

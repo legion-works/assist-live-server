@@ -1,4 +1,5 @@
 import asyncio
+import sqlite3
 import threading
 from contextlib import asynccontextmanager
 from uuid import uuid7
@@ -8,7 +9,7 @@ import pytest
 from aiohttp import ClientSession, UnixConnector, WSMsgType, web
 from assist_live_client import AssistLiveClient
 from assist_live_client.models import TurnOpen
-from assist_live_client.protocol import encode_audio, encode_control
+from assist_live_client.protocol import ProtocolError, encode_audio, encode_control
 from assist_live_server.app import create_app
 from assist_live_server.audio_gateway import AudioGateway
 from assist_live_server.auth import Registry
@@ -184,6 +185,259 @@ def test_inclusive_audio_maximum_and_one_byte_above_it(tmp_path):
                     message = await ws.receive()
             assert message.type == WSMsgType.CLOSE and message.data == 1009
             await ws.close()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("extra", [0, 1])
+def test_client_receives_inclusive_tts_maximum_and_refuses_one_more_byte(
+    tmp_path, extra
+):
+    async def run():
+        closed = asyncio.Event()
+        close_codes = []
+        pcm = bytes(32000)
+
+        async def peer(request):
+            ws = web.WebSocketResponse(timeout=0.1)
+            await ws.prepare(request)
+            negotiation = await ws.receive_json()
+            turn_id = negotiation["turn_id"]
+            await ws.send_json(
+                encode_control("negotiated", turn_id, capabilities=["tts"])
+            )
+            while (await ws.receive_json())["type"] != "end":
+                pass
+            await ws.send_json(
+                encode_control(
+                    "format",
+                    turn_id,
+                    codec="pcm_s16le",
+                    rate=16000,
+                    channels=1,
+                    width=2,
+                )
+            )
+            await ws.send_bytes(encode_audio(turn_id, 0, pcm) + bytes(extra))
+            if not extra:
+                await ws.send_json(encode_control("end", turn_id))
+            await ws.receive()
+            close_codes.append(ws.close_code)
+            await ws.close()
+            closed.set()
+            return ws
+
+        app = web.Application()
+        app.router.add_get("/v1/audio", peer)
+        runner = web.AppRunner(app, access_log=None)
+        await runner.setup()
+        path = tmp_path / "tts-boundary.sock"
+        await web.UnixSite(runner, path).start()
+        try:
+            async with ClientSession(connector=UnixConnector(path=path)) as session:
+                async with AssistLiveClient(
+                    "http://service.invalid", "synthetic-token", session=session
+                ) as client:
+
+                    async def text():
+                        yield "synthetic text"
+
+                    stream = client.tts(str(uuid7()), text(), "test-voice")
+                    if extra:
+                        with pytest.raises(ProtocolError):
+                            _ = [part async for part in stream]
+                    else:
+                        assert [part async for part in stream] == [pcm]
+                    await asyncio.wait_for(closed.wait(), 2)
+                    assert close_codes == [1009 if extra else 1000]
+        finally:
+            await runner.cleanup()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("stage", ["stt_partial", "stt_final", "speaker_result"])
+@pytest.mark.parametrize("failure_record_fails", [False, True])
+def test_store_write_failure_preserves_one_terminal(
+    tmp_path, monkeypatch, caplog, stage, failure_record_fails
+):
+    class Gateway(AudioGateway):
+        async def stt(self, turn_id, audio, *, record=None):
+            yield encode_control("partial", turn_id, text="synthetic partial")
+            yield encode_control("final", turn_id, text="synthetic final")
+            yield encode_control(
+                "speaker_result", turn_id, name="", distance=0.0, destination="local"
+            )
+
+    async def run():
+        async with service(tmp_path, gateway=Gateway(lambda _: None)) as (
+            _,
+            session,
+            turn,
+            store,
+        ):
+            original = store.append
+
+            async def append(event):
+                if event.stage == stage or (
+                    event.stage == "stt_failed" and failure_record_fails
+                ):
+                    raise sqlite3.OperationalError("synthetic sensitive store text")
+                await original(event)
+
+            monkeypatch.setattr(store, "append", append)
+            ws = await connect(session, turn)
+            replies = [m.json() async for m in ws]
+            terminal = [r["type"] for r in replies if r["type"] in {"final", "error"}]
+            assert terminal == ["final" if stage == "speaker_result" else "error"]
+            assert replies[-1]["type"] == "end"
+            stages = [
+                e["stage"] for e in (await store.get_turn(turn.turn_id))["events"]
+            ]
+            terminal_stages = [s for s in stages if s in {"stt_final", "stt_failed"}]
+            assert len(terminal_stages) <= 1
+            if stage == "speaker_result":
+                assert terminal_stages == ["stt_final"]
+            elif failure_record_fails:
+                assert terminal_stages == []
+            else:
+                assert terminal_stages == ["stt_failed"]
+            async with session.get(
+                "http://service.invalid/metrics",
+                headers={"Authorization": "Bearer synthetic-token"},
+            ) as response:
+                metrics = await response.text()
+                count = 2 if failure_record_fails and stage != "speaker_result" else 1
+                assert f"assist_live_audio_store_errors_total {count}\n" in metrics
+            assert "audio timing write failed" in caplog.text
+            assert "synthetic sensitive store text" not in caplog.text
+            assert "synthetic partial" not in caplog.text
+            assert "synthetic final" not in caplog.text
+
+    asyncio.run(run())
+
+
+def test_late_frame_after_idle_deadline_is_dropped_before_decision(
+    tmp_path, monkeypatch
+):
+    import assist_live_server.app as module
+
+    monkeypatch.setattr(module, "MESSAGE_DEADLINE", 0.03)
+
+    async def run():
+        ended = asyncio.Event()
+        release = asyncio.Event()
+        late_received = asyncio.Event()
+        consumed = []
+        late_frame = None
+        original = web.WebSocketResponse.receive
+
+        async def receive(ws, *args, **kwargs):
+            message = await original(ws, *args, **kwargs)
+            if message.type == WSMsgType.BINARY and message.data == late_frame:
+                late_received.set()
+            return message
+
+        monkeypatch.setattr(web.WebSocketResponse, "receive", receive)
+
+        class Gateway(AudioGateway):
+            async def stt(self, turn_id, audio, *, record=None):
+                async for chunk in audio:
+                    consumed.append(chunk)
+                ended.set()
+                await release.wait()
+                await record("end_decision", {})
+                yield encode_control("end_decision", turn_id)
+                yield encode_control("final", turn_id, text="complete")
+
+        async with service(tmp_path, gateway=Gateway(lambda _: None)) as (
+            _,
+            session,
+            turn,
+            _,
+        ):
+            ws = await connect(session, turn)
+            pcm = b"\x01\x00" * 16
+            await ws.send_bytes(encode_audio(turn.turn_id, 0, pcm))
+            await asyncio.wait_for(ended.wait(), 2)
+            late_frame = encode_audio(turn.turn_id, 1, pcm)
+            await ws.send_bytes(late_frame)
+            try:
+                await asyncio.wait_for(late_received.wait(), 2)
+            finally:
+                release.set()
+            replies = [m.json() async for m in ws]
+            assert [r["type"] for r in replies if r["type"] != "heartbeat"] == [
+                "end_decision",
+                "final",
+                "end",
+            ]
+            assert consumed == [pcm]
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("exit_path", ["normal", "error", "disconnect", "invalid"])
+def test_one_active_stream_per_turn_and_slot_reuse(tmp_path, exit_path):
+    async def run():
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        cancelled = asyncio.Event()
+        calls = []
+
+        class Gateway(AudioGateway):
+            async def stt(self, turn_id, audio, *, record=None):
+                calls.append(turn_id)
+                entered.set()
+                try:
+                    await release.wait()
+                    if exit_path == "error" and len(calls) == 1:
+                        yield encode_control("error", turn_id, code="stt_failed")
+                    else:
+                        yield encode_control("final", turn_id, text="complete")
+                finally:
+                    cancelled.set()
+
+        async with service(tmp_path, gateway=Gateway(lambda _: None)) as (
+            _,
+            session,
+            turn,
+            store,
+        ):
+            first = await connect(session, turn)
+            await asyncio.wait_for(entered.wait(), 2)
+            for _ in range(2):
+                second = await session.ws_connect(
+                    "http://service.invalid/v1/audio",
+                    headers={"Authorization": "Bearer synthetic-token"},
+                )
+                await second.send_json(
+                    encode_control(
+                        "negotiate", turn.turn_id, mode="stt", capabilities=["stt"]
+                    )
+                )
+                message = await second.receive()
+                assert message.type == WSMsgType.CLOSE and message.data == 1008
+                assert message.extra == "audio turn active"
+                await second.close()
+            assert calls == [turn.turn_id]
+            assert (await store.get_turn(turn.turn_id))["events"] == []
+            if exit_path == "disconnect":
+                await first.close()
+            elif exit_path == "invalid":
+                await first.send_str("invalid")
+                assert (await first.receive()).type == WSMsgType.CLOSE
+                await first.close()
+            else:
+                release.set()
+                replies = [m.json() async for m in first]
+                assert sum(r["type"] in {"final", "error"} for r in replies) == 1
+            await asyncio.wait_for(cancelled.wait(), 2)
+            release.set()
+            third = await connect(session, turn)
+            replies = [m.json() async for m in third]
+            assert [r["type"] for r in replies] == ["final", "end"]
+            assert calls == [turn.turn_id, turn.turn_id]
 
     asyncio.run(run())
 

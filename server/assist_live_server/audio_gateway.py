@@ -6,10 +6,10 @@ from typing import Any
 
 from assist_live_client.protocol import encode_control
 
+from .providers.parakeet import MAX_AUDIO_BYTES
 from .providers.stt import STTSession
 from .turn.detector import TurnDetector
 
-MAX_AUDIO_BYTES = 480000
 TURN_TIMEOUT = 15.0
 STALL_INTERVAL = 0.1
 

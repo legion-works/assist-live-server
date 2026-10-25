@@ -211,7 +211,8 @@ class AssistLiveClient:
             async with self._connection().ws_connect(
                 self.url + "/v1/audio",
                 headers=self._headers,
-                max_msg_size=MAX_AUDIO,
+                # aiohttp refuses equality. The protocol maximum is inclusive.
+                max_msg_size=MAX_AUDIO + 1,
                 compress=0,
             ) as ws:
                 fields: dict[str, object] = {

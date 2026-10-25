@@ -1857,3 +1857,75 @@ The non-SQLite acceptance task refuses a store failure.
 A typed `TurnExistsError`, not error text, selects HTTP `409` for concurrent opens of the same turn.
 The `feature.yml` template tells users not to include secrets or household recordings.
 The project is experimental and has no release. No device trial, cloud call, publication, or commit is part of these checks.
+
+## Audio stream boundary checks
+
+Date: 2026-10-25 (UTC).
+
+The client and server accept the inclusive 32,021-byte audio-frame maximum.
+The client TTS test also checks that a 32,022-byte frame closes with code `1009`.
+The STT gateway imports its audio-byte bound from the provider. There is one definition.
+
+The tests use `sqlite3.OperationalError` to stop `stt_partial`, `stt_final`, and `speaker_result` writes.
+Before a `final` result, the server tries to write a `stt_failed` record and sends one error.
+The error stays available if the server cannot write that record.
+After a `final` result, a speaker-write failure adds no error message or terminal timing event.
+The metrics endpoint counts that failure. A log entry contains no error text or transcript text.
+
+A barrier test sends a late frame after the input deadline and before the endpoint record.
+The receiver drops that frame. The stream completes with one `final` result.
+
+The server refuses a second active stream for the same turn with code `1008` and `reason` `audio turn active`.
+That stream writes no timing rows and does not release the first stream's slot.
+Tests check the same slot after a complete result, provider error, malformed input, and disconnect.
+Sequential streams follow the turn-existence and satellite-access rules. They can add different STT records to the same stored ID.
+
+The device, audio, and subscription routes use one 100 ms close timeout.
+Tests with peers that do not reply to close frames check slot release on all three routes.
+
+Commands from the server repository:
+
+```sh
+uv run pytest tests/test_audio_gateway.py tests/contract/test_streaming_stt.py -q
+task check
+UV_LINK_MODE=copy UV_PROJECT_ENVIRONMENT="$CHECK_ENVIRONMENT" uv run --locked --python 3.14.2 pytest tests/ -q
+unshare -rn sh -c 'ip link set lo up && UV_OFFLINE=1 uv run --locked pytest -q'
+uv run python "$REPLAY_PROBE"
+uv run python "$MUTATION_PROBE"
+uv run --project "$WORKSPACE/assist-live" python "$WORKSPACE/assist-live/tools/check_public_tree.py" --history --root . --private-denylist "$PRIVATE_DENYLIST"
+```
+
+The new regression tests initially gave `15 failed, 2 passed, 22 deselected`.
+The same tests then gave `17 passed, 22 deselected`.
+The two initial satisfactory tests checked the oversized frame and the device close timeout.
+Set `ASSIST_LIVE_MODEL_CACHE` to the external turn-model cache before these commands.
+
+The complete checks gave these results:
+
+```text
+Gateway tests: 32 passed in 44.93s
+Python 3.14.3: 545 passed in 96.29s
+Python 3.14.2: 545 passed in 130.42s
+No external network, loopback up: 545 passed in 129.12s
+Ruff: All checks passed!
+Mypy: Success: no issues found in 35 source files
+PASS server bootstrap
+PASS isolated client and server packages
+PASS asset licenses
+PASS own Git root
+PASS public data matches=0
+PASS real Parakeet and real detector: 5 replay clips
+PASS finding mutations: 9/9 killed; sources parse; worktree unchanged
+```
+
+The history secret check and the two Gitleaks checks also gave `PASS`.
+The relative public-tree step reported `NOT CHECKED public tree` because the worktree has no sibling integration checkout.
+The explicit canonical checker supplied that check with history and the private denylist.
+
+The replay used the same five source WAV digests in the streaming verification section above.
+Each stream sent one `final`, followed by `speaker_result` and `end`. Its `final.text` equaled the provider's `finish()` result.
+All five streams kept transcript text out of the timing store.
+
+The nine mutations remove each boundary guard, the post-final error guard, slot release, or slot ownership.
+Each changed source parsed before its target test gave an unsatisfactory result. No mutant changed the working source.
+The project is experimental and has no release. No device trial, cloud call, publication, or commit is part of these checks.

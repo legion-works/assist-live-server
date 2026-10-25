@@ -238,6 +238,14 @@ The `/v1/audio` WebSocket checks the integration token.
 The `/v1/audio` and `/v1/events` routes share 64 connection slots, with a maximum of 16 for each integration token.
 The server refuses upgrades above these limits with HTTP `503`. A closed connection releases its slot.
 
+Only one active audio stream can use a turn ID. This rule applies to STT and TTS.
+A second active stream closes with code `1008` and `reason` `audio turn active`. It writes no timing rows.
+The first stream keeps its slot until its handler exits, also on error and disconnect paths.
+
+After that handler exits, a different stream can use the same stored turn ID if the token can access it.
+The audio route checks turn existence and satellite access, not turn status or previous STT records.
+Sequential streams can add different STT records to that ID. This rule does not keep a permanent stream lock.
+
 Open a turn first with `POST /v1/turns` and a complete `TurnOpen` record.
 The initial control message selects version `1`, mode `stt` or `tts`, and functions.
 The `capabilities` functions are `stt`, `tts`, `events`, and `speaker_result`.
@@ -259,6 +267,19 @@ The parser refuses unknown fields and mismatched turn identifiers.
 `end_decision`, `heartbeat`, and `end` have no more fields.
 `error` contains `code`, without private error information.
 The client sends `end` after its audio or text input ends.
+
+The server uses these close frames for control refusals:
+
+| Path | Code | `reason` |
+|---|---:|---|
+| `/v1/audio`, malformed input or refused turn | `1008` | `audio refused` |
+| `/v1/audio`, a stream holds the turn | `1008` | `audio turn active` |
+| `/v1/events`, refused subscription | `1008` | `subscription refused` |
+| `/v1/device`, refused event or slot | `1008` | `event refused` |
+| `/v1/device`, authentication or acceptance deadline | `1008` | `event timeout` |
+
+All three WebSocket routes use one close timeout of 100 ms.
+If the peer does not reply to a close frame, the server closes the transport and releases its slot after that timeout.
 
 Each audio frame has a constant 21-byte header:
 
@@ -324,6 +345,15 @@ The store keeps `stt_partial` timing events without transcript text. The two tra
 Disconnect cancels the session and awaits the gateway tasks.
 CPU work can finish in its `thread` after cancellation, but it cannot write a socket or store event.
 
+Before the server sends `final`, a timing-store failure sends one terminal `error`.
+The server tries to write a `stt_failed` record. If it cannot write that record, it sends the error without a timing row.
+After `final`, a speaker-write error does not send a second terminal message or add `stt_failed`.
+
+The server does not send that speaker result. It sends `end`. The complete transcript stays correct.
+
+The metrics endpoint counts audio timing write errors in `assist_live_audio_store_errors_total`.
+Each error makes an `audio timing write failed` log entry. The entry contains no error text or transcript text.
+
 ## Heartbeats and limits
 
 Each open audio turn has one heartbeat task, with an interval of 100 ms.
@@ -332,6 +362,7 @@ The client stops after 600 ms without a message.
 
 The streaming STT gateway stops input after 600 ms without input, flushes received samples, and finishes recognition.
 It does not add audio samples during that wait. The heartbeat continues during input and result waits.
+After input ends, the receiver drops late audio and control frames while STT finishes.
 The legacy backend path closes after 600 ms without input until it gets `end`.
 
 The TTS text path has a different limit of 30 seconds without text, before its first part and between parts.
@@ -347,7 +378,7 @@ Close cancels and awaits the heartbeat, input, output, and client sender tasks.
 | Subscription or export record | 16,384 bytes | One record at a time |
 
 WebSocket compression is off. The frame parser has a set message limit before JSON decoding.
-The audio maximum is inclusive. The server accepts a correct 32,021-byte frame.
+The audio maximum is inclusive. The server and client accept a correct 32,021-byte frame.
 A 32,022-byte frame closes with code `1009`.
 
 The UDP stack supplies one bounded datagram. The adapter checks its length before JSON decoding or queue allocation.
