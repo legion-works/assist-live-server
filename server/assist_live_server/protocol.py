@@ -11,6 +11,10 @@ from assist_live_client.protocol import parse_json
 from .auth import Registry, verify_event
 
 MAX_DEVICE = 4096
+DUMMY_DEVICE_SECRET = bytes(32)
+DEVICE_AUTH_TIMEOUT = 2.0
+DEVICE_CLOSE_TIMEOUT = 0.1
+MAX_DEVICE_CONNECTIONS = 64
 
 
 class TurnStore(Protocol):
@@ -65,7 +69,9 @@ class TimingIngress:
             event = parse_json(packet, MAX_DEVICE)
             tag = event.pop("tag")
             credentials = self.registry.device_snapshot(event["device"])
-            if credentials is None or not verify_event(event, tag, credentials[1]):
+            secret = credentials[1] if credentials is not None else DUMMY_DEVICE_SECRET
+            verified = verify_event(event, tag, secret)
+            if not verified or credentials is None:
                 return False
             satellite = credentials[0]
             if event["data"].get("satellite", satellite) != satellite:
@@ -99,21 +105,49 @@ class UDPTransport(asyncio.DatagramProtocol):
 class WebSocketTransport:
     def __init__(self, ingress: TimingIngress) -> None:
         self.ingress = ingress
+        self.active = 0
 
     def accept(self, packet: bytes) -> bool:
         return self.ingress.accept(packet)
 
     async def handle(self, request: web.Request) -> web.WebSocketResponse:
-        ws = web.WebSocketResponse(max_msg_size=MAX_DEVICE, compress=False)
-        await ws.prepare(request)
-        async for message in ws:
-            if message.type not in {WSMsgType.TEXT, WSMsgType.BINARY}:
-                break
-            packet = (
-                message.data.encode() if isinstance(message.data, str) else message.data
-            )
-            result = asyncio.get_running_loop().create_future()
-            if not self.ingress.accept(packet, result=result) or not await result:
-                await ws.close(code=1008, message=b"event refused")
-                break
+        if self.active >= MAX_DEVICE_CONNECTIONS:
+            refused = web.HTTPServiceUnavailable(text="device connection limit")
+            refused.force_close()
+            raise refused
+        self.active += 1
+        ws = web.WebSocketResponse(
+            max_msg_size=MAX_DEVICE, compress=False, timeout=DEVICE_CLOSE_TIMEOUT
+        )
+        try:
+            await ws.prepare(request)
+            authenticated = False
+            while True:
+                async with asyncio.timeout(
+                    None if authenticated else DEVICE_AUTH_TIMEOUT
+                ):
+                    message = await ws.receive()
+                if message.type not in {WSMsgType.TEXT, WSMsgType.BINARY}:
+                    break
+                packet = (
+                    message.data.encode()
+                    if isinstance(message.data, str)
+                    else message.data
+                )
+                result = asyncio.get_running_loop().create_future()
+                if not self.ingress.accept(packet, result=result):
+                    await ws.close(code=1008, message=b"event refused")
+                    break
+                authenticated = True
+                if not await result:
+                    await ws.close(code=1008, message=b"event refused")
+                    break
+        except TimeoutError:
+            await ws.close(code=1008, message=b"authentication timeout")
+        finally:
+            try:
+                if ws.prepared:
+                    await ws.close()
+            finally:
+                self.active -= 1
         return ws

@@ -11,7 +11,7 @@ from assist_live_client.protocol import ProtocolError, encode_control
 
 
 @asynccontextmanager
-async def service(tmp_path, policy=False, udp=False, malformed=False):
+async def service(tmp_path, policy=False, udp=False, malformed=False, queue_size=128):
     from assist_live_server.app import UDP_ADDRESS, create_app
     from assist_live_server.auth import Registry
     from assist_live_server.protocol import TimingIngress
@@ -23,7 +23,7 @@ async def service(tmp_path, policy=False, udp=False, malformed=False):
     for satellite in ["satellite-a", "satellite-b"]:
         registry.bind(satellite, satellite, b"synthetic-device-key")
     registry.add_token("synthetic-integration-token", ["satellite-a"])
-    ingress = TimingIngress(registry)
+    ingress = TimingIngress(registry, queue_size=queue_size)
 
     class Backend:
         async def stt(self, turn_id, audio):
@@ -53,7 +53,9 @@ async def service(tmp_path, policy=False, udp=False, malformed=False):
     socket = tmp_path / "service.sock"
     await web.UnixSite(runner, socket).start()
     try:
-        async with ClientSession(connector=UnixConnector(path=socket)) as session:
+        async with ClientSession(
+            connector=UnixConnector(path=socket, limit=0)
+        ) as session:
             async with AssistLiveClient(
                 "http://service.invalid", "synthetic-integration-token", session=session
             ) as client:
@@ -336,5 +338,200 @@ def test_invalid_backend_final_is_not_stored(tmp_path):
                 p.read_bytes() for p in tmp_path.iterdir() if p.is_file()
             )
             assert b"synthetic final text" not in written
+
+    asyncio.run(run())
+
+
+def test_queue_full_drops_are_exposed_in_metrics(tmp_path):
+    async def run():
+        async with service(tmp_path, queue_size=2) as (client, session, _, ingress, _):
+            assert ingress.accept(packet(0))
+            assert ingress.accept(packet(1))
+            assert not ingress.accept(packet(2))
+            assert ingress.queue.qsize() == 2
+            await ingress.queue.join()
+            async with session.get(
+                "http://service.invalid/metrics", headers=client._headers
+            ) as response:
+                assert response.status == 200
+                text = await response.text()
+                assert "assist_live_device_dropped_total 1\n" in text
+                assert "assist_live_device_accepted_total 2\n" in text
+                assert "assist_live_sequence_gaps 0\n" in text
+
+    asyncio.run(run())
+
+
+def test_unauthenticated_device_expires_without_event(tmp_path):
+    from aiohttp import WSMsgType
+
+    async def run():
+        async with service(tmp_path) as (_, session, _, _, _):
+            async with session.ws_connect("http://service.invalid/v1/device") as ws:
+                closed = await ws.receive(timeout=2.8)
+                assert closed.type == WSMsgType.CLOSE and closed.data == 1008
+
+    asyncio.run(run())
+
+
+def test_150_idle_device_connections_are_capped_and_memory_bounded(tmp_path, capsys):
+    import tracemalloc
+
+    from aiohttp import WSMsgType, WSServerHandshakeError
+
+    async def run():
+        async with service(tmp_path) as (_, session, store, ingress, _):
+            baseline, _ = tracemalloc.get_traced_memory()
+            clients = []
+
+            async def connect():
+                try:
+                    ws = await session.ws_connect("http://service.invalid/v1/device")
+                    clients.append(ws)
+                    return 101
+                except WSServerHandshakeError as error:
+                    return error.status
+
+            try:
+                statuses = await asyncio.gather(*(connect() for _ in range(150)))
+                assert 0 < statuses.count(101) <= 64
+                assert statuses.count(503) >= 86
+                _, peak = tracemalloc.get_traced_memory()
+                assert peak - baseline < 32 * 1024 * 1024
+                with capsys.disabled():
+                    print(
+                        f"\nPASS idle connection bound accepted={statuses.count(101)} "
+                        f"refused={statuses.count(503)} peak_bytes={peak - baseline}"
+                    )
+                async with asyncio.timeout(3):
+                    messages = await asyncio.gather(*(ws.receive() for ws in clients))
+                assert all(
+                    m.type == WSMsgType.CLOSE and m.data == 1008 for m in messages
+                )
+                async with session.ws_connect(
+                    "http://service.invalid/v1/device"
+                ) as replacement:
+                    await replacement.send_bytes(packet(0))
+                    async with asyncio.timeout(1):
+                        await store.changed.wait()
+                        await ingress.queue.join()
+                    assert ingress.accepted == 1
+            finally:
+                await asyncio.gather(*(ws.close() for ws in clients))
+
+    tracemalloc.start()
+    try:
+        asyncio.run(run())
+    finally:
+        tracemalloc.stop()
+
+
+def test_failed_device_handshake_does_not_consume_slot(tmp_path, caplog):
+    async def run():
+        async with service(tmp_path) as (client, session, _, _, _):
+            async with session.get("http://service.invalid/v1/device") as response:
+                assert response.status == 400
+            async with session.get(
+                "http://service.invalid/metrics", headers=client._headers
+            ) as response:
+                assert "assist_live_device_connections 0\n" in await response.text()
+            assert not [record for record in caplog.records if record.exc_info]
+
+    asyncio.run(run())
+
+
+def test_authenticated_device_outlives_first_event_deadline(tmp_path, monkeypatch):
+    from assist_live_server import protocol
+
+    monkeypatch.setattr(protocol, "DEVICE_AUTH_TIMEOUT", 0.05)
+
+    async def run():
+        async with service(tmp_path) as (_, session, store, ingress, _):
+            async with session.ws_connect("http://service.invalid/v1/device") as ws:
+                await ws.send_bytes(packet(0))
+                async with asyncio.timeout(1):
+                    await store.changed.wait()
+                    await ingress.queue.join()
+                store.changed.clear()
+                loop = asyncio.get_running_loop()
+                elapsed = loop.create_future()
+                loop.call_later(0.1, elapsed.set_result, None)
+                await elapsed
+                await ws.send_bytes(packet(1))
+                async with asyncio.timeout(1):
+                    await store.changed.wait()
+                    await ingress.queue.join()
+                assert ingress.accepted == 2
+
+    asyncio.run(run())
+
+
+def test_device_deadline_releases_slot_without_peer_close_reply(tmp_path, monkeypatch):
+    from assist_live_server import protocol
+
+    monkeypatch.setattr(protocol, "DEVICE_AUTH_TIMEOUT", 0.05)
+
+    async def run():
+        async with service(tmp_path) as (client, session, _, _, _):
+            ws = await session.ws_connect(
+                "http://service.invalid/v1/device", autoclose=False
+            )
+            try:
+                loop = asyncio.get_running_loop()
+                elapsed = loop.create_future()
+                loop.call_later(0.25, elapsed.set_result, None)
+                await elapsed
+                async with session.get(
+                    "http://service.invalid/metrics", headers=client._headers
+                ) as response:
+                    assert "assist_live_device_connections 0\n" in await response.text()
+            finally:
+                await ws.close()
+
+    asyncio.run(run())
+
+
+def test_unauthenticated_pings_cannot_extend_first_event_deadline(
+    tmp_path, monkeypatch
+):
+    from aiohttp import WSMsgType
+    from assist_live_server import protocol
+
+    monkeypatch.setattr(protocol, "DEVICE_AUTH_TIMEOUT", 0.3)
+
+    async def run():
+        async with service(tmp_path) as (_, session, _, _, _):
+            async with session.ws_connect("http://service.invalid/v1/device") as ws:
+
+                async def ping():
+                    while True:
+                        await asyncio.sleep(0.05)
+                        await ws.ping()
+
+                sender = asyncio.create_task(ping())
+                try:
+                    async with asyncio.timeout(0.45):
+                        closed = await ws.receive()
+                    assert closed.type == WSMsgType.CLOSE and closed.data == 1008
+                finally:
+                    sender.cancel()
+                    await asyncio.gather(sender, return_exceptions=True)
+
+    asyncio.run(run())
+
+
+def test_connection_cap_refusal_closes_http_transport(tmp_path, monkeypatch):
+    from aiohttp import WSServerHandshakeError
+    from assist_live_server import protocol
+
+    monkeypatch.setattr(protocol, "MAX_DEVICE_CONNECTIONS", 1)
+
+    async def run():
+        async with service(tmp_path) as (_, session, _, _, _):
+            async with session.ws_connect("http://service.invalid/v1/device"):
+                with pytest.raises(WSServerHandshakeError) as refused:
+                    await session.ws_connect("http://service.invalid/v1/device")
+                assert refused.value.status == 503
+                assert refused.value.headers["Connection"].lower() == "close"
 
     asyncio.run(run())

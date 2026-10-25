@@ -113,10 +113,8 @@ class Registry:
     def bind(self, device: str, satellite: str, secret: bytes) -> None:
         identifier(device)
         identifier(satellite)
-        if (
-            device != satellite
-            or device in self.devices
-            or any(row["satellite"] == satellite for row in self.devices.values())
+        if device in self.devices or any(
+            row["satellite"] == satellite for row in self.devices.values()
         ):
             raise ValueError("duplicate or mismatched mapping")
         if not secret or any(
@@ -136,7 +134,10 @@ class Registry:
         if (
             not token
             or not satellites
-            or any(s not in self.devices for s in satellites)
+            or any(
+                s not in {row["satellite"] for row in self.devices.values()}
+                for s in satellites
+            )
         ):
             raise ValueError("invalid integration credential")
         if any(
@@ -164,14 +165,27 @@ class Registry:
         row = self.devices[device]
         if hmac.compare_digest(bytes.fromhex(row["secret"]), secret):
             raise ValueError("new device credential required")
-        if not secret or any(
-            hmac.compare_digest(t.encode(), secret) for t in self.tokens
+        if (
+            not secret
+            or any(hmac.compare_digest(t.encode(), secret) for t in self.tokens)
+            or any(
+                other != device and hmac.compare_digest(value[1], secret)
+                for other, value in self.credentials.items()
+            )
         ):
             raise ValueError("invalid device credential")
-        row.update(secret=secret.hex())
-        self.save()
+        previous = self.replay[device]
         if self.replay_store is not None:
             self.replay_store.clear_replay(device)
+        old_secret = row["secret"]
+        row.update(secret=secret.hex())
+        try:
+            self.save()
+        except OSError:
+            row["secret"] = old_secret
+            if self.replay_store is not None:
+                self.replay_store.save_replay(device, previous)
+            raise
         self.replay[device] = ReplayState()
         self.credential_epochs[device] = self.credential_epochs.get(device, 0) + 1
         self.credentials[device] = (

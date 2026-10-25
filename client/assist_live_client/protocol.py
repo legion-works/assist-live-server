@@ -38,6 +38,25 @@ def parse_json(raw: str | bytes, maximum: int) -> dict[str, Any]:
     if isinstance(raw, str) and len(raw.encode()) > maximum:
         raise ValueError("message too large")
     try:
+        text = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+        depth = 0
+        quoted = escaped = False
+        for character in text:
+            if quoted:
+                if escaped:
+                    escaped = False
+                elif character == "\\":
+                    escaped = True
+                elif character == '"':
+                    quoted = False
+            elif character == '"':
+                quoted = True
+            elif character in "{[":
+                depth += 1
+                if depth > 32:
+                    raise ValueError("JSON depth limit")
+            elif character in "}]":
+                depth -= 1
         value = json.loads(raw, object_pairs_hook=_pairs, parse_constant=_constant)
         if not isinstance(value, dict):
             raise ValueError("JSON object required")

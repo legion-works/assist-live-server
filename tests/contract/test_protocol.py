@@ -108,3 +108,64 @@ def test_client_audio_and_speaker_round_trip(service, turn_id):
             assert chunks == [b"\x01\x00"]
 
     asyncio.run(run())
+
+
+def test_valid_control_rejects_a_different_expected_turn(turn_id):
+    from uuid import uuid7
+
+    from assist_live_client.protocol import decode_control
+    from jsonschema import Draft202012Validator
+
+    other = str(uuid7())
+    assert other != turn_id
+    message = {"type": "heartbeat", "version": 1, "turn_id": other}
+    root = Path(__file__).resolve().parents[2]
+    validator = Draft202012Validator(
+        json.loads((root / "protocol/control.schema.json").read_text())
+    )
+    assert not list(validator.iter_errors(message))
+    assert decode_control(json.dumps(message), other) == message
+    with pytest.raises(ValueError, match="turn identifier mismatch"):
+        decode_control(json.dumps(message), turn_id)
+
+
+def test_json_depth_bound_ignores_quoted_delimiters():
+    from assist_live_client.protocol import parse_json
+
+    allowed = '{"a":' * 32 + "0" + "}" * 32
+    assert isinstance(parse_json(allowed, 4096), dict)
+    deeper = '{"a":' + allowed + "}"
+    with pytest.raises(ValueError, match="depth"):
+        parse_json(deeper, 4096)
+    allowed_array = '{"a":' + "[" * 31 + "0" + "]" * 31 + "}"
+    assert isinstance(parse_json(allowed_array, 4096), dict)
+    deeper_array = '{"a":' + "[" * 32 + "0" + "]" * 32 + "}"
+    with pytest.raises(ValueError, match="depth"):
+        parse_json(deeper_array, 4096)
+    value = {"text": '[{\\"' * 80}
+    assert parse_json(json.dumps(value), 4096) == value
+
+
+def test_canonical_json_firmware_strings_and_numbers():
+    from assist_live_server.auth import canonical_event
+
+    data = {
+        "unicode": "é",
+        "quote": '"\n\\\x01',
+        "numbers": [0, 1.0, -0.0, 1e-7, 1e20],
+        "array": [True, False, None],
+    }
+    value = {
+        "version": 1,
+        "device": "device-a",
+        "boot": 1,
+        "seq": 0,
+        "device_ms": 1,
+        "stage": "mic_open",
+        "data": data,
+    }
+    expected = (
+        r'{"array":[true,false,null],"numbers":[0,1.0,-0.0,1e-07,1e+20],'
+        r'"quote":"\"\n\\\u0001","unicode":"é"}'
+    ).encode()
+    assert canonical_event(value).endswith(expected)

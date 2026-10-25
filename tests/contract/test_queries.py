@@ -187,3 +187,54 @@ def test_write_and_subscription_isolation(service, turn_id):
             assert not state.store.rows
 
     asyncio.run(run())
+
+
+def test_slow_body_has_clean_bad_request_response(service, caplog, monkeypatch):
+    from assist_live_server import app
+
+    monkeypatch.setattr(app, "MESSAGE_DEADLINE", 0.05)
+
+    async def run():
+        async with service() as (_, state):
+            release = asyncio.Event()
+
+            async def body():
+                yield b"{"
+                await release.wait()
+                yield b"}"
+
+            try:
+                async with state.session.post(
+                    state.url + "/v1/turns", headers=state.headers, data=body()
+                ) as response:
+                    assert response.status == 400
+                    assert await response.text() == "invalid request"
+            finally:
+                release.set()
+            assert not [record for record in caplog.records if record.exc_info]
+            assert "Traceback" not in caplog.text
+
+    asyncio.run(run())
+
+
+def test_other_satellite_turn_has_same_response_as_missing(service, turn_id):
+    from uuid import uuid7
+
+    from assist_live_client import TurnOpen
+
+    async def run():
+        async with service() as (_, state):
+            await state.store.open_turn(
+                TurnOpen(turn_id, "satellite-b", "voice", None, None)
+            )
+            results = []
+            for selected in [turn_id, str(uuid7())]:
+                async with state.session.get(
+                    state.url + "/v1/turns/" + selected, headers=state.headers
+                ) as response:
+                    results.append(
+                        (response.status, await response.text(), response.content_type)
+                    )
+            assert results == [(404, "turn not found", "text/plain")] * 2
+
+    asyncio.run(run())

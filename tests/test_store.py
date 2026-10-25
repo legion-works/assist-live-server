@@ -394,3 +394,54 @@ def test_credential_rotation_refuses_already_queued_old_key(tmp_path):
             store.close()
 
     asyncio.run(run())
+
+
+def test_rotation_credential_write_failure_keeps_replay_and_key(tmp_path, monkeypatch):
+    from assist_live_server.auth import Registry
+    from assist_live_server.event_gateway import EventGateway
+    from assist_live_server.protocol import DeviceEvent
+    from assist_live_server.store import SQLiteStore
+
+    async def run():
+        path = tmp_path / "credentials"
+        registry = Registry(path)
+        registry.bind("satellite-a", "satellite-a", b"old-key")
+        store = SQLiteStore(tmp_path / "timing.db")
+        await store.configure_registry(registry)
+        gateway = EventGateway(store)
+        device = DeviceEvent(
+            "satellite-a",
+            {
+                "device": "satellite-a",
+                "boot": 1,
+                "seq": 0,
+                "device_ms": 1000,
+                "stage": "wake_detected",
+                "data": {},
+            },
+            True,
+            store.now_ns(),
+        )
+
+        def fail():
+            raise OSError("synthetic credential-write failure")
+
+        try:
+            assert await store.accept_device(registry, device, gateway.convert)
+            original = path.read_bytes()
+            monkeypatch.setattr(registry, "save", fail)
+            with pytest.raises(OSError, match="credential-write"):
+                await store.rotate(registry, "satellite-a", b"new-key")
+            assert path.read_bytes() == original
+            assert registry.device("satellite-a") == ("satellite-a", b"old-key")
+            assert (
+                bytes.fromhex(registry.devices["satellite-a"]["secret"]) == b"old-key"
+            )
+            assert (
+                await store._call(store.replay.load_replay, "satellite-a")
+            ).high == 0
+            assert not await store.accept_device(registry, device, gateway.convert)
+        finally:
+            store.close()
+
+    asyncio.run(run())

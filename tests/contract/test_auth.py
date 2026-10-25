@@ -257,6 +257,12 @@ def test_adapter_receive_boundary(adapter, service):
             changed["stage"] = "playback_end"
             await send(json.dumps(changed).encode(), False)
             await send(b"x" * 4097, False, close_code=1009)
+            await send(
+                packet(boot=2, seq=1, data={"padding": "x" * 4200}),
+                False,
+                close_code=1009,
+            )
+            await send(packet(boot=2, seq=1), True)
 
     asyncio.run(run())
 
@@ -355,5 +361,261 @@ def test_adapter_stale_is_not_duplicate(adapter, tmp_path):
             assert await send(1)
         finally:
             store.close()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("adapter", ["udp", "websocket"])
+def test_valid_signed_oversized_device_event_is_refused(adapter):
+    from assist_live_server.auth import Registry, sign_event, verify_event
+    from assist_live_server.protocol import (
+        TimingIngress,
+        UDPTransport,
+        WebSocketTransport,
+    )
+
+    registry = Registry()
+    registry.bind("satellite-a", "satellite-a", b"test-key")
+    ingress = TimingIngress(registry)
+    receiver = (
+        UDPTransport(ingress) if adapter == "udp" else WebSocketTransport(ingress)
+    )
+    value = event(data={"padding": "x" * 4200})
+    tag = sign_event(value, b"test-key")
+    raw = json.dumps({**value, "tag": tag}).encode()
+    assert len(raw) > 4096
+    assert json.loads(raw)["data"]["padding"] == "x" * 4200
+    assert verify_event(value, tag, b"test-key")
+    assert not receiver.accept(raw)
+    assert ingress.queue.empty()
+    if adapter == "udp":
+        good = event(seq=1)
+        assert receiver.accept(
+            json.dumps({**good, "tag": sign_event(good, b"test-key")}).encode()
+        )
+        assert ingress.queue.qsize() == 1
+
+
+def test_unknown_device_and_wrong_tag_use_hmac_and_constant_compare(monkeypatch):
+    from assist_live_server import auth, protocol
+
+    registry = auth.Registry()
+    registry.bind("satellite-a", "satellite-a", b"test-key")
+    ingress = protocol.TimingIngress(registry)
+    verified, comparisons = [], []
+    original_verify = protocol.verify_event
+    original_compare = auth.hmac.compare_digest
+
+    def verify(value, tag, secret):
+        verified.append(value["device"])
+        return original_verify(value, tag, secret)
+
+    def compare(left, right):
+        comparisons.append((len(left), len(right)))
+        return original_compare(left, right)
+
+    monkeypatch.setattr(protocol, "verify_event", verify)
+    monkeypatch.setattr(auth.hmac, "compare_digest", compare)
+    for device in ["satellite-a", "satellite-x"]:
+        value = event(device=device)
+        raw = json.dumps(
+            {**value, "tag": auth.sign_event(value, b"wrong-key")}
+        ).encode()
+        assert not ingress.accept(raw)
+    assert verified == ["satellite-a", "satellite-x"]
+    assert comparisons == [(64, 64), (64, 64)]
+    assert ingress.queue.empty()
+    unknown = event(device="satellite-x")
+    assert not ingress.accept(
+        json.dumps({**unknown, "tag": auth.sign_event(unknown, bytes(32))}).encode()
+    )
+    known = event()
+    assert ingress.accept(
+        json.dumps({**known, "tag": auth.sign_event(known, b"test-key")}).encode()
+    )
+
+
+def test_device_identity_and_credentials_plan_binding(tmp_path, store, replay_store):
+    from aiohttp import (
+        ClientSession,
+        UnixConnector,
+        WSMsgType,
+        WSServerHandshakeError,
+        web,
+    )
+    from assist_live_server.app import create_app
+    from assist_live_server.auth import Registry, sign_event
+    from assist_live_server.protocol import TimingIngress
+
+    async def run():
+        registry = Registry(replay_store=replay_store)
+        secret = b"device-test-key"
+        token = "integration-test-token"
+        registry.bind("device-a", "satellite-a", secret)
+        registry.add_token(token, ["satellite-a"])
+        ingress = TimingIngress(registry)
+        runner = web.AppRunner(
+            create_app(registry, store, ingress=ingress), access_log=None
+        )
+        await runner.setup()
+        path = tmp_path / "mapping.sock"
+        await web.UnixSite(runner, path).start()
+        try:
+            async with ClientSession(connector=UnixConnector(path=path)) as session:
+                async with session.get(
+                    "http://service.invalid/v1/bindings",
+                    headers={"Authorization": "Bearer " + token},
+                ) as response:
+                    assert response.status == 200
+                    assert await response.json() == [{"satellite": "satellite-a"}]
+                for value, key in [
+                    (
+                        event(device="device-a", data={"satellite": "satellite-b"}),
+                        secret,
+                    ),
+                    (event(device="device-a"), token.encode()),
+                ]:
+                    async with session.ws_connect(
+                        "http://service.invalid/v1/device"
+                    ) as ws:
+                        await ws.send_json({**value, "tag": sign_event(value, key)})
+                        result = await ws.receive(timeout=1)
+                        assert result.type == WSMsgType.CLOSE and result.data == 1008
+                with pytest.raises(WSServerHandshakeError) as refused:
+                    await session.ws_connect(
+                        "http://service.invalid/v1/audio",
+                        headers={"Authorization": "Bearer " + secret.decode()},
+                    )
+                assert refused.value.status == 401
+                value = event(device="device-a", seq=1)
+                async with session.ws_connect("http://service.invalid/v1/device") as ws:
+                    await ws.send_json({**value, "tag": sign_event(value, secret)})
+                    async with asyncio.timeout(1):
+                        await store.changed.wait()
+                        await ingress.queue.join()
+                assert store.rows[-1]["event"]["satellite"] == "satellite-a"
+                assert store.rows[-1]["event"]["seq"] == 1
+        finally:
+            await runner.cleanup()
+
+    asyncio.run(run())
+
+
+def test_rotation_failure_does_not_publish_new_credential(tmp_path, monkeypatch):
+    from assist_live_server.auth import Registry
+    from assist_live_server.replay_store import SQLiteReplayStore
+
+    path = tmp_path / "credentials"
+    replay = SQLiteReplayStore(tmp_path / "replay.db")
+    registry = Registry(path, replay_store=replay)
+    registry.bind("satellite-a", "satellite-a", b"old-key")
+    assert registry.accept_sequence("satellite-a", 1, 0)
+    original = path.read_bytes()
+
+    def fail(_):
+        raise OSError("synthetic replay-clear failure")
+
+    monkeypatch.setattr(replay, "clear_replay", fail)
+    try:
+        with pytest.raises(OSError, match="replay-clear"):
+            registry.rotate("satellite-a", b"new-key")
+        assert path.read_bytes() == original
+        assert registry.device("satellite-a") == ("satellite-a", b"old-key")
+        assert replay.load_replay("satellite-a").high == 0
+    finally:
+        replay.close()
+
+
+def test_rotation_refuses_another_devices_secret():
+    from assist_live_server.auth import Registry
+
+    registry = Registry()
+    registry.bind("satellite-a", "satellite-a", b"key-a")
+    registry.bind("satellite-b", "satellite-b", b"key-b")
+    with pytest.raises(ValueError):
+        registry.rotate("satellite-a", b"key-b")
+    assert registry.device("satellite-a") == ("satellite-a", b"key-a")
+
+
+@pytest.mark.parametrize(
+    "method,path",
+    [
+        ("GET", "/health"),
+        ("GET", "/metrics"),
+        ("GET", "/v1/bindings"),
+        ("POST", "/v1/turns"),
+        ("POST", "/v1/event"),
+        ("GET", "/v1/turns/{turn_id}"),
+        ("GET", "/v1/export?satellite=satellite-a"),
+        ("WS", "/v1/audio"),
+        ("WS", "/v1/events"),
+    ],
+)
+def test_device_secret_refused_on_every_integration_route(
+    service, turn_id, caplog, method, path
+):
+    from dataclasses import asdict
+
+    from aiohttp import WSServerHandshakeError
+    from assist_live_client import TimingEvent, TurnOpen
+
+    async def run():
+        async with service() as (client, state):
+            turn = TurnOpen(turn_id, "satellite-a", "voice", None, None)
+            await client.open_turn(turn)
+            headers = {"Authorization": "Bearer test-device-secret"}
+            url = state.url + path.format(turn_id=turn_id)
+            if method == "WS":
+                with pytest.raises(WSServerHandshakeError) as refused:
+                    await state.session.ws_connect(url, headers=headers)
+                assert refused.value.status == 401
+            else:
+                payload = (
+                    asdict(turn)
+                    if path == "/v1/turns"
+                    else asdict(
+                        TimingEvent(
+                            turn_id,
+                            "satellite-a",
+                            "integration",
+                            "mic_open",
+                            1,
+                            "measured",
+                            None,
+                        )
+                    )
+                )
+                async with state.session.request(
+                    method,
+                    url,
+                    headers=headers,
+                    json=payload if method == "POST" else None,
+                ) as response:
+                    assert response.status == 401
+                    assert "test-device-secret" not in await response.text()
+            assert "test-device-secret" not in caplog.text
+            assert "integration-test-token" not in caplog.text
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("transport", ["websocket", "udp"])
+def test_device_ingress_requires_replay_hooks(service, transport):
+    from aiohttp import WSServerHandshakeError
+    from assist_live_server.app import create_app
+
+    async def run():
+        async with service(replay=False) as (client, state):
+            if transport == "websocket":
+                with pytest.raises(WSServerHandshakeError) as refused:
+                    await state.session.ws_connect(state.url + "/v1/device")
+                assert refused.value.status == 503
+            else:
+                with pytest.raises(ValueError, match="replay"):
+                    create_app(
+                        state.registry, state.store, udp_address=("127.0.0.1", 0)
+                    )
+            assert not await client.health()
+            assert state.ingress.queue.empty()
 
     asyncio.run(run())

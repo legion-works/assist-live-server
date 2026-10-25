@@ -75,9 +75,15 @@ def store():
 
 
 @pytest.fixture
-def service(tmp_path):
+def service(tmp_path, replay_store):
     @asynccontextmanager
-    async def start(*, record_transcripts=False, block_backend=False):
+    async def start(
+        *,
+        record_transcripts=False,
+        block_backend=False,
+        tts_parts=("test text",),
+        replay=True,
+    ):
         from aiohttp import ClientSession, UnixConnector, web
         from assist_live_client import AssistLiveClient
         from assist_live_client.protocol import encode_control
@@ -109,11 +115,11 @@ def service(tmp_path):
 
             async def tts(self, turn_id, text, voice):
                 assert voice == "test-voice"
-                assert [chunk async for chunk in text] == ["test text"]
+                assert [chunk async for chunk in text] == list(tts_parts)
                 yield b"\x01\x00"
                 yield encode_control("sentence_end", turn_id, sentence=0)
 
-        registry = Registry()
+        registry = Registry(replay_store=replay_store if replay else None)
         registry.bind("satellite-a", "satellite-a", b"test-device-secret")
         registry.add_token("integration-test-token", ["satellite-a"])
         state.registry = registry

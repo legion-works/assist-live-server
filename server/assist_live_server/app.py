@@ -32,6 +32,7 @@ from .protocol import (
 from .store import SQLiteStore, safe_data
 
 UDP_ADDRESS = web.AppKey("udp_address", tuple[str, int])
+TEXT_IDLE_TIMEOUT = 30.0
 
 
 def create_app(
@@ -50,7 +51,7 @@ def create_app(
     ) -> web.StreamResponse:
         try:
             return await handler(request)
-        except ValueError, TypeError, KeyError:
+        except ValueError, TypeError, KeyError, TimeoutError:
             raise web.HTTPBadRequest(text="invalid request") from None
 
     app = web.Application(client_max_size=MAX_CONTROL, middlewares=[errors])
@@ -58,8 +59,12 @@ def create_app(
     if timing.registry is not registry:
         raise ValueError("ingress registry mismatch")
     gateway = EventGateway(store) if store is not None else None
-    if udp_address is not None and store is None:
-        raise ValueError("timing store required")
+    device_transport = WebSocketTransport(timing)
+    if udp_address is not None and (
+        store is None
+        or (not isinstance(store, SQLiteStore) and registry.replay_store is None)
+    ):
+        raise ValueError("timing and replay stores required")
 
     async def lifecycle(application: web.Application) -> AsyncIterator[None]:
         transport = None
@@ -135,7 +140,12 @@ def create_app(
     async def health(request: web.Request) -> web.Response:
         allowed(request)
         return web.json_response(
-            {"version": 1, "healthy": store is not None and backend is not None}
+            {
+                "version": 1,
+                "healthy": store is not None
+                and backend is not None
+                and registry.replay_store is not None,
+            }
         )
 
     async def bindings(request: web.Request) -> web.Response:
@@ -159,6 +169,7 @@ def create_app(
                     "device_accepted_total": timing.accepted,
                     "device_refused_total": timing.refused,
                     "device_dropped_total": timing.dropped,
+                    "device_connections": device_transport.active,
                 }
             ),
             headers={"Content-Type": "text/plain; version=0.0.4; charset=utf-8"},
@@ -166,7 +177,9 @@ def create_app(
 
     async def device(request: web.Request) -> web.WebSocketResponse:
         storage()
-        return await WebSocketTransport(timing).handle(request)
+        if registry.replay_store is None:
+            raise web.HTTPServiceUnavailable(text="replay store unavailable")
+        return await device_transport.handle(request)
 
     async def open_turn(request: web.Request) -> web.Response:
         allowed(request)
@@ -179,11 +192,10 @@ def create_app(
         return web.json_response({"version": 1})
 
     async def turn(request: web.Request) -> web.Response:
-        allowed(request)
+        satellites = allowed(request)
         value = await storage().get_turn(request.match_info["turn_id"])
-        if value is None:
+        if value is None or value["satellite"] not in satellites:
             raise web.HTTPNotFound(text="turn not found")
-        allowed(request, value["satellite"])
         return web.json_response(value)
 
     async def append(request: web.Request) -> web.Response:
@@ -327,7 +339,13 @@ def create_app(
                 ended = False
                 while True:
                     message = await ws.receive(
-                        timeout=None if ended else MESSAGE_DEADLINE
+                        timeout=None
+                        if ended
+                        else (
+                            TEXT_IDLE_TIMEOUT
+                            if negotiation["mode"] == "tts"
+                            else MESSAGE_DEADLINE
+                        )
                     )
                     if ended:
                         raise ValueError("input already ended")

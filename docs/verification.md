@@ -1071,3 +1071,67 @@ PASS public data matches=0
 The file self-check reports 0 private terms, 0 home paths, and 0 private addresses.
 Workspace diagnostics cannot identify the isolated worktree root. Configured Mypy and pytest supply the type and execution checks.
 Device timing and transport selection stay open because no test device is available.
+
+## Device gateway limits and credential checks
+
+Date: 2026-10-25 (UTC).
+
+Initial command: `uv run --locked pytest tests/contract -q`.
+Result before the corrections: `12 failed, 49 passed`.
+The failures include missing HMAC work, identity-only device mapping, credential-write order, connection expiry, text deadlines, JSON depth, and HTTP errors.
+
+Command: `uv run --locked pytest tests/test_clock.py tests/test_store.py tests/test_pending_events.py tests/contract -q`.
+Result: `89 passed`.
+The output includes `PASS event-to-store-to-client`, `PASS identity isolation`, and `PASS transcript opt-in`.
+New tests also check a mismatched correct UUIDv7, correctly signed oversized events on the two adapters, and credentials on all integration routes.
+
+Command: `task check`.
+
+```text
+51 files already formatted
+All checks passed!
+PASS CI boundaries
+Success: no issues found in 21 source files
+238 passed
+PASS server bootstrap
+PASS isolated client and server packages
+PASS asset licenses
+no leaks found
+```
+
+The image inventory stays unchecked because there is no image inventory.
+
+Command: `UV_LINK_MODE=copy UV_PROJECT_ENVIRONMENT="$FLOOR_ENV" uv run --locked --python 3.14.2 pytest tests/ -q`.
+Result: `238 passed`.
+
+Command: `UV_OFFLINE=1 unshare -rn sh -c 'ip link set lo up && .venv/bin/python -m pytest tests/ -q'`.
+Result: `238 passed`.
+
+The device route has a limit of 64 concurrent connections and a two-second first-event deadline.
+Ping frames cannot extend that deadline. A peer has 100 ms to reply to a close frame before the transport closes.
+The 150-connection test accepts 64, refuses 86, and checks expiry and slot recovery.
+Its traced-memory peak increases by less than 32 MiB.
+
+A client/server RSS probe uses two groups of 150 connections in one process.
+Each group accepts 64, refuses 86, and has no open device connections after the deadline.
+The maximum RSS increase is 4,792 KiB. This is a synthetic local trial, not a hardware capacity recommendation.
+
+The unknown-key and wrong-tag paths each run HMAC and `hmac.compare_digest`.
+A 10,000-pair trial gives median times of 11,841 ns for a known key and 11,821 ns for an unknown key.
+The ratio is 1.001692. These measurements check for the previous HMAC omission, not a constant-time guarantee for the complete HTTP stack.
+
+The new 10,000-event writer trial has no queue drops or replay refusals. SQLite uses WAL with `synchronous=NORMAL`.
+
+| Measurement | Samples | p50 ms | p99 ms | Maximum ms |
+|---|---:|---:|---:|---:|
+| Event-loop lag, 1 ms probe | 9,067 | 0.375385 | 1.059113 | 1.976853 |
+| Heartbeat lag, 100 ms interval | 91 | 0.354328 | 1.068698 | 1.068698 |
+| Arrival to transaction commit | 10,000 | 18.230015 | 100.250800 | 255.152572 |
+
+The event-loop p99 is below the 10 ms target.
+The durable server-restart test refuses a duplicate and a previous boot before the next correct event.
+Device routes without replay hooks refuse the WebSocket upgrade and a configured UDP listener.
+
+Mutation results: `35/35 behavioral mutants killed` for the gateway checks, and `15/15 behavioral mutants killed` for the timing store.
+All source copies parse before the test runs. The tests import the changed copy, not the installed source tree.
+The ASD-STE100, secret, and public-tree checks examine the changed files. No hardware or cloud test ran.

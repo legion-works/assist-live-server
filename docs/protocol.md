@@ -12,7 +12,9 @@ It also states: "The first message selects the protocol version and functions."
 ## Credentials and identity
 
 Each satellite has an anonymous `satellite_key`.
-Use that same key in the firmware `device` field and the turn `satellite` field.
+The registry maps an anonymous firmware `device` key to that satellite key.
+The device and satellite keys can be different. Each device and satellite has one mapping only.
+
 HA entity names stay in a local mapping. An entity rename does not change the key.
 The registry refuses duplicate mappings and unknown devices.
 It does not use arrival order or display names to select a satellite.
@@ -44,6 +46,19 @@ Use TLS or an isolated network. HMAC authenticates events but does not encrypt t
 Each UDP datagram or WebSocket message contains one UTF-8 JSON object.
 The WebSocket route is `/v1/device`.
 The two adapters call the same `TimingIngress.accept` path.
+
+The device WebSocket has a global limit of 64 concurrent connections for each server instance, across all source addresses.
+The server refuses a connection above this limit with HTTP `503`, before the WebSocket upgrade.
+That refusal also closes the HTTP transport. The HTTP connection does not stay open.
+
+Each connection must send its first authenticated device event in less than two seconds. If it does not, the server closes it with code `1008`.
+An authenticated connection does not use that first-event deadline for subsequent events.
+Ping and pong frames do not restart the authentication deadline.
+The server gives a peer 100 ms to reply to a close frame, then closes the transport and releases its connection slot.
+
+One refused event closes `/v1/device` with code `1008`. A frame above 4,096 bytes closes it with code `1009`.
+The firmware must make a new connection for subsequent events after a close.
+UDP has no connection close or error reply. The listener drops a refused or oversized datagram and continues with subsequent datagrams.
 
 `create_app(..., udp_address=None)` opens no UDP listener by default.
 Set `udp_address` to an explicit address and port to enable the UDP adapter.
@@ -86,6 +101,36 @@ Canonical JSON sorts object keys, uses compact separators, keeps UTF-8 character
 The `tag` field is not part of the signed bytes.
 Do not use pipe-separated fields, comma-separated data, hexadecimal boot strings, or native integer byte order.
 
+### Canonical JSON bytes for firmware
+
+The canonical `data` encoding is the UTF-8 output of Python `json.dumps` with these options:
+`sort_keys=True`, `separators=(",", ":")`, `ensure_ascii=False`, and `allow_nan=False`.
+This encoding is not RFC 8785. Do not use a different JSON canonicalization algorithm.
+
+- Object keys sort by Unicode code point. Array elements keep their order. Duplicate keys are not permitted.
+- The output has no spaces between values and no byte-order mark. Input whitespace does not change the signed canonical bytes.
+- Strings keep their Unicode values without normalization. Non-ASCII characters use UTF-8, not `\u` encoding.
+- A quotation mark uses `\"`. A backslash uses `\\`. A slash stays `/`.
+- Control characters use `\b`, `\t`, `\n`, `\f`, and `\r` for `U+0008`, `U+0009`, `U+000A`, `U+000C`, and `U+000D`.
+- Other characters from `U+0000` to `U+001F` use `\u00xx` with lowercase hexadecimal digits. UTF-8 cannot encode lone Unicode surrogates.
+- Booleans and null use `true`, `false`, and `null`.
+- Integers use decimal digits, with no positive sign or padding. Integer `-0` becomes `0`.
+- Numbers with a decimal point or exponent use IEEE-754 binary64 and the shortest `repr()` value from Python.
+  Finite floats keep `.0` when the fixed-point value is an integer.
+- The exponent encoding uses lowercase `e`, a sign, and a minimum of two digits. Floating-point `0.0` and `-0.0` stay unchanged.
+
+Examples of canonical numeric values are `[0,1.0,-0.0,1e-07,1e+20]`.
+Firmware must use integers or strings for timing metadata if it does not use the same float encoding.
+The canonical-vector tests and the string/number test supply byte-level examples.
+
+The server uses HMAC and `hmac.compare_digest` for known and unknown device keys.
+An unknown key uses the constant `DUMMY_DEVICE_SECRET`. A dummy-key tag cannot authenticate an unknown device.
+
+All device, control, and HTTP JSON paths have a maximum nesting depth of 32, with the root object at depth 1.
+Delimiters in strings do not increase the depth. Byte-size limits also apply.
+
+### Replay acceptance
+
 The adapter captures UTC arrival time, then checks size, JSON, tag, mapping, and queue capacity.
 It does not wait for queue space. A full queue drops the event and increases a counter.
 Queue admission is not replay acceptance.
@@ -106,6 +151,7 @@ The algorithm follows the sliding-window rule in [RFC 4303 section 3.4.3](https:
 Each active boot keeps the highest accepted sequence and a 4,096-bit bitmap.
 
 A new high sequence moves the window forward. A large jump clears the bitmap without a large allocation.
+
 There is no event-count limit. Sequential traffic can continue for the full secret lifetime.
 
 In the window, the gateway accepts an unseen sequence and a set bit identifies a duplicate.
@@ -123,6 +169,9 @@ The active-boot traffic can continue at this limit.
 
 `ReplayStore` supplies the synchronous `load_replay`, `save_replay`, and `clear_replay` hooks in the SQLite writer.
 The server loads replay state before it starts the acceptance task.
+Without a replay store, the device WebSocket refuses the upgrade with HTTP `503` and health is `false`.
+For a configured UDP listener, replay hooks are necessary before startup. `SQLiteStore` supplies these hooks automatically.
+
 The writer commits the replay update and its device-event row in one SQLite transaction.
 An unsuccessful transaction refuses the event and keeps the previous in-memory window.
 The unique `(device, boot, seq)` key supplies a second duplicate check.
@@ -135,6 +184,9 @@ Each transaction keeps or removes its replay update and event together.
 If SQLite removes the two rows, acceptance of that event again adds the removed row. It does not duplicate a row that SQLite keeps.
 Use `await store.rotate(registry, device, secret)` to change credentials in an active service.
 This method clears the previous secret's replay rows in the SQLite writer.
+It clears replay state before it writes the new credential. A replay-clear error keeps the previous credential and its file unchanged.
+
+Credential-write errors put the previous in-memory credential and replay state back. The `rotate` method refuses a secret that a different device uses.
 
 Queue entries keep an immutable credential-generation snapshot. The writer refuses an entry from a revoked generation.
 The [SQLite WAL documentation](https://sqlite.org/wal.html) gives the checkpoint and `synchronous` rules.
@@ -214,7 +266,11 @@ The protocol does not select a provider or tune the `safe` and `fast` settings.
 Each open audio turn has one heartbeat task, with an interval of 100 ms.
 The task also runs while the backend waits for a result.
 The client stops after 600 ms without a message.
-The server stops input after 600 ms without a message until it gets `end`.
+
+The server stops STT input after 600 ms without a message until it gets `end`.
+The TTS text path has a different limit of 30 seconds without text, before its first part and between parts.
+Heartbeats continue during text waits. The client's 600 ms server-message deadline does not change.
+
 Close cancels and awaits the heartbeat, input, output, and client sender tasks.
 
 | Path | Maximum message or record | Queue |
