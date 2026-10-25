@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "vectors": [
+    {
+      "key_hex": "746573742d6b6579",
+      "event": {"version": 1, "device": "satellite-a", "boot": 1, "seq": 0, "device_ms": 100, "stage": "mic_open", "data": {}},
+      "canonical_hex": "010000000b736174656c6c6974652d61000000000000000100000000000000000000000000000064000000086d69635f6f70656e000000027b7d",
+      "tag": "f14a2a4efefa8c26d0f7b6e836464d2f7e6b0d9bf5326afe6ee8a3a0de118a35"
+    },
+    {
+      "key_hex": "746573742d6b6579",
+      "event": {"version": 1, "device": "satellite-a", "boot": 72623859790382856, "seq": 4328719365, "device_ms": 34477573380, "stage": "wake_detected", "data": {"z": 1, "a": "é"}},
+      "canonical_hex": "010000000b736174656c6c6974652d610102030405060708000000010203040500000008070605040000000d77616b655f6465746563746564000000107b2261223a22c3a9222c227a223a317d",
+      "tag": "09eb0dd54991a6d0e73c89eb8eaea6feb377510b4c218cabaac30282cdbace2e"
+    }
+  ]
+}

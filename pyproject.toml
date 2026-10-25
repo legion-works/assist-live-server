@@ -17,6 +17,7 @@ assist-live-client = { workspace = true }
 
 [dependency-groups]
 dev = [
+    "jsonschema==4.26.0",
     "pytest>=8",
     "ruff>=0.14",
     "mypy>=1.18",

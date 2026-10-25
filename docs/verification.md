@@ -937,3 +937,65 @@ The filesystem check examines all 53 publishable files.
 It finds 0 current retired-decision words, with 18 occurrences in the historical record.
 The full historical prefix agrees byte-for-byte with `04372a7`.
 There is one new dated section, with the current commands, counts, and rules.
+
+## Protocol and authenticated gateways
+
+Date: 2026-10-25 (UTC).
+
+Initial command: `uv run --locked pytest tests/contract -q`.
+The initial result included `ModuleNotFoundError: No module named 'assist_live_server.auth'`.
+More RED tests reported a missing replay-store argument and a missing replay-window constant.
+The arrival-time test reported `AttributeError: 'DeviceEvent' object has no attribute 'arrival_ns'` before implementation.
+
+Command: `uv run --locked pytest tests/contract -q`.
+Result: `25 passed`.
+The two timing adapters use the same tag, mapping, replay, restart, and size tests.
+The service tests use Unix sockets and synthetic PCM bytes.
+
+Command: `task check`.
+
+```text
+42 files already formatted
+All checks passed!
+PASS CI boundaries
+Success: no issues found in 16 source files
+174 passed
+PASS server bootstrap
+PASS isolated client and server packages
+NOT CHECKED image inventory: no image inventory exists
+PASS asset licenses
+no leaks found
+```
+
+Command: `uv run --locked --python 3.14.2 pytest tests/ -q` in an isolated temporary environment.
+Result: `174 passed`.
+The complete gate uses the CI version, Python `3.14.3`.
+
+Command: `unshare -rn .venv/bin/python -m pytest tests/ -q`.
+Result: `174 passed` with the network namespace disabled.
+
+The numbered mutation tests change one guard at a time in external source copies.
+Each copy has a satisfactory Python parse check before pytest runs.
+Result: `22/22 behavioral mutants killed`.
+The guards include signed fields, byte order, duplicates, reordered events, previous boots, message limits, credentials, satellite access, queues, and heartbeats.
+They also include transcript policy, reboot limits, long-running traffic, stale classes, bitmap size, replay persistence failures, and window boundaries.
+The unmodified long-run test accepts 200,000 sequential events with a bounded bitmap.
+
+The ASD-STE100 checker reports 0 findings in `docs/protocol.md`, `STRUCTURE.md`, and this record.
+The public-tree check with `--history` reports:
+
+```text
+PASS own Git root
+PASS history secrets commits=7
+PASS public data matches=0
+```
+
+The file self-check reports 0 private terms, 0 home paths, and 0 private addresses.
+Workspace diagnostics are unavailable because the analyzer does not recognize the isolated worktree root.
+Configured Mypy and pytest supply the type and execution checks.
+
+Replay persistence and device-clock conversion have interfaces but no production store in this module.
+The timing store must supply durable replay hooks before the service accepts device traffic.
+The server's client-version pin must equal the client package version in release configuration.
+The device trial did not run because no test device is available.
+Transport selection stays open.

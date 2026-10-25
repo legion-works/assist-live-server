@@ -7,6 +7,32 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_server_wheel_requires_client(tmp_path):
+    import email
+    import subprocess
+    import tomllib
+    import zipfile
+
+    subprocess.run(
+        ["uv", "build", "--package", "assist-live-server", "--out-dir", str(tmp_path)],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+    )
+    wheel_path = next(tmp_path.glob("*.whl"))
+    with zipfile.ZipFile(wheel_path) as wheel:
+        metadata_path = next(
+            n for n in wheel.namelist() if n.endswith(".dist-info/METADATA")
+        )
+        metadata = email.message_from_bytes(wheel.read(metadata_path))
+    client_version = tomllib.loads((ROOT / "client/pyproject.toml").read_text())[
+        "project"
+    ]["version"]
+    assert f"assist-live-client=={client_version}" in metadata.get_all(
+        "Requires-Dist", []
+    )
+
+
 def test_ci_structure_and_pins():
     from tools.check_ci import check_ci
 

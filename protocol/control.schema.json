@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Assist Live control version 1",
+  "type": "object",
+  "properties": {
+    "type": {"type": "string"},
+    "version": {"type": "integer", "const": 1},
+    "turn_id": {"type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"}
+  },
+  "required": ["type", "version", "turn_id"],
+  "unevaluatedProperties": false,
+  "$defs": {
+    "capabilities": {"type": "array", "uniqueItems": true, "maxItems": 4, "items": {"enum": ["stt", "tts", "events", "speaker_result"]}},
+    "text": {"type": "string"},
+    "u32": {"type": "integer", "minimum": 0, "maximum": 4294967295}
+  },
+  "oneOf": [
+    {"properties": {"type": {"const": "negotiate"}, "mode": {"enum": ["stt", "tts"]}, "capabilities": {"$ref": "#/$defs/capabilities"}, "voice": {"$ref": "#/$defs/text"}}, "required": ["mode", "capabilities"], "allOf": [{"if": {"properties": {"mode": {"const": "stt"}}}, "then": {"properties": {"capabilities": {"contains": {"const": "stt"}}}}, "else": {"properties": {"capabilities": {"contains": {"const": "tts"}}}}}]},
+    {"properties": {"type": {"const": "negotiated"}, "capabilities": {"$ref": "#/$defs/capabilities"}}, "required": ["capabilities"]},
+    {"properties": {"type": {"enum": ["partial", "final", "text"]}, "text": {"$ref": "#/$defs/text"}}, "required": ["text"]},
+    {"properties": {"type": {"enum": ["end_decision", "heartbeat", "end"]}}},
+    {"properties": {"type": {"const": "error"}, "code": {"$ref": "#/$defs/text"}}, "required": ["code"]},
+    {"properties": {"type": {"const": "speaker_result"}, "name": {"$ref": "#/$defs/text"}, "distance": {"type": "number", "minimum": 0}, "destination": {"enum": ["local", "cloud"]}}, "required": ["name", "distance", "destination"]},
+    {"properties": {"type": {"const": "format"}, "codec": {"const": "pcm_s16le"}, "rate": {"type": "integer", "const": 16000}, "channels": {"type": "integer", "const": 1}, "width": {"type": "integer", "const": 2}}, "required": ["codec", "rate", "channels", "width"]},
+    {"properties": {"type": {"const": "sentence_end"}, "sentence": {"$ref": "#/$defs/u32"}}, "required": ["sentence"]}
+  ]
+}

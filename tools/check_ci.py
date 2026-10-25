@@ -81,7 +81,9 @@ def check_packages(
         prefix="assist-live-packages-", dir=os.environ.get("RUNNER_TEMP")
     ) as directory:
         scratch = Path(directory)
-        for package in packages:
+        built: dict[str, Path] = {}
+        build_packages = ("client", "server") if "server" in packages else packages
+        for package in build_packages:
             output = scratch / package
             subprocess.run(
                 [
@@ -104,13 +106,16 @@ def check_packages(
                     name.startswith("assist_live_server/") for name in wheel.namelist()
                 ):
                     raise ValueError("server module in client wheel")
+            built[package] = wheels[0]
+        for package in packages:
             venv = scratch / f"{package}-venv"
             subprocess.run(
                 ["uv", "venv", str(venv)], cwd=scratch, env=environment, check=True
             )
             python = venv / "bin/python"
             subprocess.run(
-                ["uv", "pip", "install", "--python", str(python), str(wheels[0])],
+                ["uv", "pip", "install", "--python", str(python), str(built[package])]
+                + ([str(built["client"])] if package == "server" else []),
                 cwd=scratch,
                 env=environment,
                 check=True,
