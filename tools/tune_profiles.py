@@ -241,7 +241,10 @@ def replay(
         events = detector.push(pcm[offset : offset + 1024], partial)
         if events:
             return events
-    return []
+    while upcoming is not None and upcoming["audio_ms"] <= len(pcm) / 32:
+        partial = upcoming["text"]
+        upcoming = next(partials, None)
+    return detector.flush(partial)
 
 
 def errors(
@@ -425,6 +428,27 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--provider-config-sha256")
     args = parser.parse_args(argv)
     try:
+        if args.fetch_models and any(
+            (
+                args.freeze,
+                args.check_held_out,
+                args.disable_safe_early,
+                args.validate_partials,
+                args.split,
+                args.profile,
+                args.labels,
+                args.partials,
+                args.audio_root,
+                args.output,
+                args.profiles_file,
+                args.stt_model_id,
+                args.stt_revision,
+                args.provider_config_sha256,
+            )
+        ):
+            raise ValueError(
+                "model fetch cannot combine with other actions or evidence options"
+            )
         if args.disable_safe_early:
             if (
                 not args.profiles_file

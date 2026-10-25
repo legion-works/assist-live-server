@@ -3,6 +3,7 @@ import hashlib
 import json
 import wave
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 from assist_live_server.turn.detector import TurnDetector
@@ -505,3 +506,67 @@ def test_replay_rows_cannot_fill_pause_denominator(tmp_path):
     ]
     with pytest.raises(ValueError, match="300"):
         freeze_profiles(PROFILES, rows, tmp_path / "profiles.json", {}, {})
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        ["--freeze"],
+        ["--check-held-out"],
+        ["--validate-partials"],
+        ["--disable-safe-early"],
+        ["--profile", "safe"],
+        ["--split", "tuning"],
+        ["--labels", "unused.jsonl"],
+    ],
+)
+def test_fetch_models_refuses_other_actions_before_side_effects(
+    tmp_path, options, capsys
+):
+    from tools.tune_profiles import main
+
+    cache = tmp_path / "unused-cache"
+    assert main(["--fetch-models", "--model-cache", str(cache), *options]) == 1
+    assert "model fetch cannot combine" in capsys.readouterr().out
+    assert not cache.exists()
+
+
+def test_profile_documentation_records_particle_cost_without_fixed_ref_counts():
+    import re
+
+    root = Path(__file__).resolve().parents[2]
+    documentation = root / "docs/profiles.md"
+    assert documentation.is_file()
+    assert "turn the lights on" in documentation.read_text()
+    record = (
+        (root / "docs/verification.md")
+        .read_text()
+        .split("## Guarded turn detection\n", 1)[1]
+    )
+    assert not re.search(r"commits=\d+", record)
+    for value in (
+        "assist-live-server/docs/reports/q6-partials.jsonl",
+        "750c5aa56d8ec7ace237b8a5816f1f9a7fa3f9f7ef6a937ff4435813dc0ae186",
+        "assist-live/tests/data/labels.jsonl",
+        "nvidia/parakeet-tdt-0.6b-v2",
+        "0bbb45a3365852604aef28b538a8f066f4ccaa85",
+        "b4ede9e1a2e15e6dafd8e40680691d40760ad11904a9496edc2afe653a331eab",
+    ):
+        assert value in record
+
+
+def test_replay_flushes_received_final_silence():
+    import os
+
+    from tools.tune_profiles import replay
+
+    root = Path(__file__).resolve().parents[2]
+    cache = os.environ.get("ASSIST_LIVE_MODEL_CACHE")
+    assert cache, "FAIL model cache: set ASSIST_LIVE_MODEL_CACHE"
+    row = {"pcm": bytes(1500 * 32), "partials": [{"audio_ms": 0, "text": "the"}]}
+    assert (
+        replay(row, Profile(), Path(cache), root / "assets/manifest.json")[0][
+            "audio_ms"
+        ]
+        == 1500
+    )

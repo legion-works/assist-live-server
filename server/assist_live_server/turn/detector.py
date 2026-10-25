@@ -22,6 +22,7 @@ Samples = NDArray[np.float32]
 Probability = Callable[[Samples], float]
 MODEL_IDS = ("silero-vad", "smart-turn-v3.2-cpu")
 WINDOW = 128000
+SMART_TURN_INTERVAL_SAMPLES = 2560
 
 
 def model_records(manifest: Path | str | None = None) -> dict[str, dict[str, Any]]:
@@ -33,6 +34,8 @@ def model_records(manifest: Path | str | None = None) -> dict[str, dict[str, Any
         raise ValueError("model download plan must contain objects")
     plan = {entry["id"]: entry for entry in entries}
     records = {row["id"]: row for row in document["assets"]}
+    if len(records) != len(document["assets"]):
+        raise ValueError("duplicate asset records")
     if any(name not in plan or name not in records for name in MODEL_IDS):
         raise ValueError("both turn models must be in the download plan")
     selected = {}
@@ -155,6 +158,9 @@ class ModelRuntime:
             sess_options=options,
             providers=["CPUExecutionProvider"],
         )
+        self.reset_vad()
+
+    def reset_vad(self) -> None:
         self.state = np.zeros((2, 1, 128), dtype=np.float32)
         self.context = np.zeros((1, 64), dtype=np.float32)
 
@@ -184,7 +190,8 @@ class TurnDetector:
     """One turn per instance. Input is mono 16 kHz little-endian int16 PCM.
 
     Events use the consumed audio clock, not the wall clock. A final event stops
-    this instance. Construct a new instance and model state for the next turn.
+    this instance. A new detector resets its model state. Share a runtime only
+    between sequential turns, not concurrent turns.
     """
 
     def __init__(
@@ -195,6 +202,8 @@ class TurnDetector:
         turn_probability: Probability | None = None,
         models: ModelRuntime | None = None,
     ) -> None:
+        if isinstance(profile, str) and profile not in PROFILES:
+            raise ValueError("unknown turn profile")
         self.profile = PROFILES[profile] if isinstance(profile, str) else profile
         if vad_probability is None or turn_probability is None:
             if vad_probability is not None or turn_probability is not None:
@@ -204,6 +213,7 @@ class TurnDetector:
                 if not cache:
                     raise ValueError("set ASSIST_LIVE_MODEL_CACHE")
                 models = ModelRuntime(cache)
+            models.reset_vad()
             vad_probability = models.vad_probability
             turn_probability = models.turn_probability
         self.vad_probability = vad_probability
@@ -213,6 +223,8 @@ class TurnDetector:
         self.samples = 0
         self.silent_samples = 0
         self.done = False
+        self.last_turn_samples = -SMART_TURN_INTERVAL_SAMPLES
+        self.last_turn_partial: str | None = None
 
     def candidate(self, silence_ms: int, probability: float, partial: str) -> bool:
         return (
@@ -230,11 +242,23 @@ class TurnDetector:
         if self.done:
             return []
         self.pending.extend(pcm)
+        return self._process(partial)
+
+    def flush(self, partial: str) -> list[dict[str, Any]]:
+        """Consume received samples at a stream stall, without adding audio time."""
+        if self.done:
+            return []
+        return self._process(partial, flush=True)
+
+    def _process(self, partial: str, *, flush: bool = False) -> list[dict[str, Any]]:
         while (
             len(self.pending) >= 1024
+            or (flush and self.pending)
             or self.samples + len(self.pending) // 2 >= HARD_ENDPOINT_MS * 16
         ):
-            count = min(512, HARD_ENDPOINT_MS * 16 - self.samples)
+            count = min(
+                512, len(self.pending) // 2, HARD_ENDPOINT_MS * 16 - self.samples
+            )
             block = self.pending[: count * 2]
             del self.pending[: count * 2]
             self.samples += count
@@ -247,7 +271,8 @@ class TurnDetector:
                 samples = np.frombuffer(block, dtype="<i2").astype(
                     np.float32
                 ) / np.float32(32768)
-                voice = self.vad_probability(samples)
+                # Silero input must contain 512 samples. Padding must not change time.
+                voice = self.vad_probability(np.pad(samples, (0, 512 - len(samples))))
                 if not math.isfinite(voice) or not 0 <= voice <= 1:
                     raise ValueError("invalid VAD probability")
                 self.silent_samples = self.silent_samples + count if voice < 0.5 else 0
@@ -258,10 +283,17 @@ class TurnDetector:
                     self.profile.early_enabled
                     and silence_ms >= self.profile.min_silence_ms
                     and complete_partial(partial)
+                    and (
+                        partial != self.last_turn_partial
+                        or self.samples - self.last_turn_samples
+                        >= SMART_TURN_INTERVAL_SAMPLES
+                    )
                 ):
                     audio = np.frombuffer(self.audio, dtype="<i2").astype(
                         np.float32
                     ) / np.float32(32768)
+                    self.last_turn_partial = partial
+                    self.last_turn_samples = self.samples
                     if self.candidate(
                         int(silence_ms), self.turn_probability(audio), partial
                     ):

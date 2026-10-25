@@ -39,10 +39,12 @@ tasks:
   public-tree:
     cmds:
       - |
-        if [ -n "${PRIVATE_DENYLIST:-}" ]; then
-          uv run --locked python tools/check_public_tree.py --history --root . --private-denylist "$PRIVATE_DENYLIST"
+        if [ ! -f ../assist-live/tools/check_public_tree.py ]; then
+          printf 'NOT CHECKED public tree\n'
+        elif [ -n "${PRIVATE_DENYLIST:-}" ]; then
+          uv run --no-project --python 3.14 python ../assist-live/tools/check_public_tree.py --history --root . --private-denylist "$PRIVATE_DENYLIST"
         else
-          uv run --locked python tools/check_public_tree.py --history --root .
+          uv run --no-project --python 3.14 python ../assist-live/tools/check_public_tree.py --history --root .
         fi
   check:
     cmds:

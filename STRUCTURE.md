@@ -55,8 +55,9 @@ The root Python project is a uv workspace. It installs the two Python packages f
 - `server/assist_live_server/turn/profiles.py`: unmeasured defaults and `Profile` limits.
 - `tools/tune_profiles.py`: partial-trajectory schema, replay, tuning, and held-out checks.
 - `tests/turn/`: synthetic policy tests and pinned-model inference tests.
-- `tools/check_public_tree.py`: private paths, private addresses, and history checks.
-- `tests/test_public_tree.py`: synthetic public-tree failure tests.
+- `docs/profiles.md`: defaults, particle-ending cost, inference throttle, and stream-stall contract.
+
+Privacy checks use the canonical `assist-live/tools/check_public_tree.py`, not a server copy.
 
 Model files stay in an external cache. They are not in the Python packages.
 The client package has no model runtime or asset manifest.

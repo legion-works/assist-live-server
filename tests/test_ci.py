@@ -92,6 +92,12 @@ def test_public_tree_is_in_local_and_ci_gates(tmp_path, use_denylist):
     task = yaml.safe_load((ROOT / "Taskfile.yml").read_text())
     assert {"task": "public-tree"} in task["tasks"]["check"]["cmds"]
     command = task["tasks"]["public-tree"]["cmds"][0]
+    workspace = tmp_path / "workspace"
+    server = workspace / "server"
+    server.mkdir(parents=True)
+    checker = workspace / "assist-live/tools/check_public_tree.py"
+    checker.parent.mkdir(parents=True)
+    checker.write_text("# Synthetic command-path fixture\n")
     script = tmp_path / "uv"
     script.write_text(
         f"#!{sys.executable}\nimport json, os, sys\n"
@@ -107,16 +113,32 @@ def test_public_tree_is_in_local_and_ci_gates(tmp_path, use_denylist):
         "PATH": str(tmp_path) + os.pathsep + os.environ["PATH"],
         "CALLS": str(log),
         "PRIVATE_DENYLIST": str(denylist) if use_denylist else "",
+        "RUNNER_TEMP": str(tmp_path / "runner"),
     }
+    Path(env["RUNNER_TEMP"]).mkdir()
+    curl = tmp_path / "curl"
+    curl.write_text(
+        f"#!{sys.executable}\nimport os, pathlib, sys\n"
+        "if os.environ.get('FAIL_CURL'): sys.exit(22)\n"
+        "pathlib.Path(sys.argv[-1]).write_text('# fixture\\n')\n"
+    )
+    curl.chmod(0o755)
     subprocess.run(
         ["bash", "-e", "-c", command],
-        cwd=tmp_path,
+        cwd=server,
         env=env,
         check=True,
         capture_output=True,
     )
     args = json.loads(log.read_text())
-    assert args[:4] == ["run", "--locked", "python", "tools/check_public_tree.py"]
+    assert args[:6] == [
+        "run",
+        "--no-project",
+        "--python",
+        "3.14",
+        "python",
+        "../assist-live/tools/check_public_tree.py",
+    ]
     assert "--history" in args and args[args.index("--root") + 1] == "."
     assert ("--private-denylist" in args) == use_denylist
     if use_denylist:
@@ -130,6 +152,59 @@ def test_public_tree_is_in_local_and_ci_gates(tmp_path, use_denylist):
         if step.get("uses", "").startswith("actions/checkout@")
     )
     assert checkout["with"]["fetch-depth"] == 0
+    assert (
+        len(
+            [
+                step
+                for step in checks["steps"]
+                if step.get("uses", "").startswith("actions/checkout@")
+            ]
+        )
+        == 1
+    )
+    public = next(
+        step for step in checks["steps"] if step.get("name") == "Check public tree"
+    )
+    assert public["if"] == "matrix.check == 'public-tree'"
+    assert (
+        "curl -fsSL https://raw.githubusercontent.com/legion-works/assist-live/main/"
+        'tools/check_public_tree.py -o "$RUNNER_TEMP/check_public_tree.py"'
+        in public["run"]
+    )
+    log.unlink()
+    subprocess.run(
+        ["bash", "-e", "-c", public["run"]],
+        cwd=server,
+        env=env,
+        check=True,
+        capture_output=True,
+    )
+    ci_args = json.loads(log.read_text())
+    assert ci_args[:5] == args[:5]
+    assert ci_args[5] == str(Path(env["RUNNER_TEMP"]) / "check_public_tree.py")
+    assert ci_args[6:] == args[6:]
+    log.unlink()
+    failed = subprocess.run(
+        ["bash", "-e", "-c", public["run"]],
+        cwd=server,
+        env={**env, "FAIL_CURL": "1"},
+        capture_output=True,
+    )
+    assert failed.returncode == 22
+    assert not log.exists()
+    checker.unlink()
+    result = subprocess.run(
+        ["bash", "-e", "-c", command],
+        cwd=server,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.stdout.strip() == "NOT CHECKED public tree"
+    assert not log.exists()
+    assert not (ROOT / "tools/check_public_tree.py").exists()
+    assert not (ROOT / "tests/test_public_tree.py").exists()
     install = next(
         step for step in checks["steps"] if step.get("name") == "Install Gitleaks"
     )
@@ -138,6 +213,24 @@ def test_public_tree_is_in_local_and_ci_gates(tmp_path, use_denylist):
         "79a3ab579b53f71efd634f3aaf7e04a0fa0cf206b7ed434638d1547a2470a66e"
         in install["run"]
     )
+
+
+def test_ci_matches_shared_workflow_tool_versions():
+    workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+    steps = workflow["jobs"]["checks"]["steps"]
+    task = next(
+        step for step in steps if step.get("uses", "").startswith("go-task/setup-task@")
+    )
+    assert task["with"]["version"] == "3.51.1"
+    actionlint = next(
+        step for step in steps if step.get("name") == "Install actionlint"
+    )
+    assert "actionlint_1.7.12_linux_amd64.tar.gz" in actionlint["run"]
+    assert (
+        "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+        in actionlint["run"]
+    )
+    assert "sha256sum -c -" in actionlint["run"]
 
 
 def test_ci_and_task_fetch_pinned_turn_models(tmp_path):

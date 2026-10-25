@@ -229,3 +229,101 @@ def test_cache_symlink_cannot_escape(tmp_path):
     }
     with pytest.raises(ValueError, match="path"):
         verified_model(cache, record)
+
+
+def test_unchanged_partial_limits_full_smart_turn_inferences():
+    calls = []
+    d = TurnDetector(
+        vad_probability=lambda _: 0,
+        turn_probability=lambda audio: calls.append(len(audio)) or 0,
+    )
+    assert d.push(pcm(1472), "set volume to 50") == []
+    assert calls == [ms * 16 for ms in (416, 576, 736, 896, 1056, 1216, 1376)]
+
+
+def test_changed_partial_bypasses_audio_growth_throttle():
+    calls = []
+    d = TurnDetector(
+        vad_probability=lambda _: 0,
+        turn_probability=lambda audio: calls.append(len(audio)) or 0,
+    )
+    assert d.push(pcm(416), "turn on lights") == []
+    assert d.push(pcm(32), "stop") == []
+    assert calls == [416 * 16, 448 * 16]
+    assert d.push(pcm(128), "stop") == []
+    assert len(calls) == 2
+    assert d.push(pcm(32), "stop") == []
+    assert calls[-1] == 608 * 16
+
+
+def test_unknown_profile_raises_value_error():
+    with pytest.raises(ValueError, match="profile"):
+        TurnDetector(
+            "unknown", vad_probability=lambda _: 0, turn_probability=lambda _: 0
+        )
+
+
+def test_flush_handles_residual_silence_without_adding_audio():
+    sizes = []
+    d = TurnDetector(
+        vad_probability=lambda audio: sizes.append(len(audio)) or 0,
+        turn_probability=lambda _: 0,
+    )
+    assert d.push(pcm(1500), "turn on the") == []
+    events = d.flush("turn on the")
+    assert events == [
+        {
+            "type": "end_decision",
+            "reason": "max_silence",
+            "audio_ms": 1500.0,
+            "silence_ms": 1500.0,
+        }
+    ]
+    assert set(sizes) == {512}
+    assert d.flush("turn on the") == []
+
+
+def test_empty_flush_does_not_invent_silence():
+    d = TurnDetector(vad_probability=lambda _: 0, turn_probability=lambda _: 0)
+    assert d.push(pcm(1499), "the") == []
+    assert d.flush("the") == []
+    assert d.samples == 1499 * 16
+    assert d.flush("the") == []
+    assert d.samples == 1499 * 16
+    assert d.push(pcm(1), "the") == []
+    assert d.flush("the")[0]["audio_ms"] == 1500
+
+
+def test_sequential_turns_reset_shared_real_vad_runtime():
+    cache = os.environ.get("ASSIST_LIVE_MODEL_CACHE")
+    assert cache, "FAIL model cache: set ASSIST_LIVE_MODEL_CACHE"
+    shared = ModelRuntime(cache)
+    rng = np.random.default_rng(123)
+    audio = [rng.integers(-12000, 12000, 512, dtype=np.int16).tobytes(), pcm(1600)]
+
+    def run(runtime):
+        d = TurnDetector(models=runtime)
+        assert not runtime.state.any()
+        assert not runtime.context.any()
+        events = [event for block in audio for event in d.push(block, "the")]
+        return events, runtime.state.copy(), runtime.context.copy()
+
+    for _ in range(2):
+        actual = run(shared)
+        expected = run(ModelRuntime(cache))
+        assert len(actual[0]) == 1 and actual[0][0]["reason"] == "max_silence"
+        assert actual[0] == expected[0]
+        np.testing.assert_array_equal(actual[1], expected[1])
+        np.testing.assert_array_equal(actual[2], expected[2])
+
+
+@pytest.mark.parametrize("name", ["silero-vad", "piper-runtime"])
+def test_duplicate_asset_records_are_rejected(tmp_path, name):
+    document = json.loads((ROOT / "assets/manifest.json").read_text())
+    document["assets"].append(
+        next(dict(row) for row in document["assets"] if row["id"] == name)
+    )
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps(document))
+    with pytest.raises(ValueError, match="duplicate asset"):
+        model_records(path)

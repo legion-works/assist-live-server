@@ -17,5 +17,5 @@ INCOMPLETE_ENDINGS = frozenset(
 def complete_partial(partial: str, *, language: str = "en") -> bool:
     if language != "en":
         return False
-    words = re.findall(r"[^\W\d_]+(?:['’][^\W\d_]+)*", partial.casefold())
+    words = re.findall(r"[^\W_]+(?:['’][^\W_]+)*", partial.casefold())
     return bool(words) and words[-1] not in INCOMPLETE_ENDINGS

@@ -1498,7 +1498,7 @@ Initial command: `uv run --locked pytest tests/turn -q`.
 Initial result: `ModuleNotFoundError: No module named 'assist_live_server.turn'`.
 
 Command: `uv run --locked pytest tests/turn -q` with a prefilled external model cache.
-Result: `102 passed`.
+Result: `125 passed`.
 The tests use synthetic PCM and `vad_probability` and `turn_probability` inputs for policy checks.
 The inference test uses the two pinned models. A missing cache is a named failure, not a skipped test.
 Four NumPy `feature` tests agree with the locked Transformers probe to a tolerance of `2e-5`.
@@ -1536,7 +1536,7 @@ Tuning uses tuning rows only. For freeze, a minimum of 300 different held-out hu
 The frozen record checks the held-out recording identities and trajectories with SHA-256.
 The held-out command does not tune or rewrite `Profile` values.
 
-18 numbered behavioral mutations cause test failures:
+12 numbered behavioral mutations cause test failures in the review repair:
 
 1. Disable the transcript guard in `fast`: the candidate test accepts `turn on the`.
 2. Let `turn on the` cause an endpoint: the push test gets an endpoint at 416 ms.
@@ -1545,17 +1545,11 @@ The held-out command does not tune or rewrite `Profile` values.
 5. Accept a model hash mismatch: the CI fetch test gets exit code 0, not 1.
 6. Remove the maximum-silence endpoint: the fallback test gets no event.
 7. Remove the endpoint at 15 s: the continuous-speech test gets no event.
-8. Remove `gitleaks git`: the shell test does not get that command.
-9. Use a shallow checkout: the CI test gets `fetch-depth=1`, not 0.
-10. Remove the floor Python matrix member: the CI test does not find `3.14.2`.
-11. Remove the public-tree task from the complete check: the CI test reports the missing task.
-12. Disable private-path detection: the checker accepts a private path.
-13. Disable private-address detection: the checker accepts a private address.
-14. Accept download pins different from the asset record: the plan test does not get an error.
-15. Accept a symlink external to the cache: the path test does not get an error.
-16. Ignore the frozen STT revision: the trajectory test does not get an error.
-17. Accept missing pause and prefix interval fields: the interval tests do not get the named errors.
-18. Count a `human` Boolean as source type: the synthetic-input test supplies an incorrect pause denominator.
+8. Drop digits from the last token: the guard does not accept complete number endings.
+9. Run Smart Turn each 32 ms frame: the inference count is more than seven.
+10. Keep the previous turn's VAD state: the two-turn test disagrees with new runtimes.
+11. Change the canonical privacy-checker URL: the CI assertion rejects it.
+12. Remove `--history` from the CI privacy command: the shell test sees the missing argument.
 
 The code contains no mutations after the tests. The repository has no frozen `Profile` file.
 
@@ -1566,14 +1560,14 @@ The acceptance status check reports `silero-vad=included smart-turn-v3.2-cpu=inc
 Files stay below the external cache path specified by the manifest, with symlink checks.
 
 Command: `task check`, with the optional private denylist supplied and no manifest override.
-Result: `420 passed`, `PASS server bootstrap`, `PASS isolated client and server packages`, and `PASS asset licenses`.
+Result: `455 passed`, `PASS server bootstrap`, `PASS isolated client and server packages`, and `PASS asset licenses`.
 The directory and Git-history secret checks report `no leaks found`.
 The earlier four asset/probe test failures do not occur. No asset check changed.
 
 Command: `uv run --locked --python 3.14.2 pytest tests/ -q` in an isolated temporary environment.
-Result: `420 passed`.
+Result: `455 passed`.
 Command: `unshare -rn sh -c 'ip link set lo up && .venv/bin/python -m pytest tests/ -q'` with the cache prefilled.
-Result: `420 passed`.
+Result: `455 passed`.
 
 A concurrent floor/offline test showed a Hatchling index request in the isolated network.
 The package tests use `uv build --offline` to use the build backend cached by workspace sync.
@@ -1582,17 +1576,34 @@ This prevents network requests, not source builds. Three concurrent floor/offlin
 Command: `uv run --locked mypy`.
 Result: `Success: no issues found in 30 source files`.
 Python workspace diagnostics are unavailable for the isolated worktree.
-The public-tree check with `--history` reports `PASS history secrets commits=17` and `PASS public data matches=0`.
-The source has one deliberate public-URL test vector with a user-path component. The public-tree checker accepts that URL.
+
+The public-tree check with `--history` reports `PASS history secrets` and `PASS public data matches=0`.
+Its count can change with the reachable Git state. It is not a constant verification value.
 
 CI runs unit tests on Python `3.14.3` and the declared floor, `3.14.2`.
 Secret and public-tree tasks use a full checkout. CI checks the Gitleaks archive SHA-256 before installation.
-The complete local check and CI run `tools/check_public_tree.py` for private paths and addresses, with history.
+
+The only privacy checker is `assist-live/tools/check_public_tree.py`.
+CI downloads that file from the canonical repository's `main` branch into `RUNNER_TEMP`.
+The download must succeed before the checker runs with Python 3.14 and `--history --root .`.
+
+There is no second checkout or nested Git root.
+The canonical file imports only the standard library. Its external commands are Git and Gitleaks, which CI supplies.
+
+The local task uses `../assist-live/tools/check_public_tree.py` when that file is available.
+If it is missing, the task prints `NOT CHECKED public tree`.
+An explicit canonical check supplies the privacy result for isolated worktrees.
 Without an external private denylist, the checker prints `NOT CHECKED private denylist` and continues the public-pattern checks.
 
 The ASD-STE100 checker reports 0 findings in `STRUCTURE.md` and this record.
 
 The selected STT export has a satisfactory `--validate-partials` result: `rows=250 tuning=50 held_out=200`.
+The export path is `assist-live-server/docs/reports/q6-partials.jsonl`, relative to the workspace.
+The corpus path is `assist-live/tests/data/labels.jsonl`.
+The export file SHA-256 is `750c5aa56d8ec7ace237b8a5816f1f9a7fa3f9f7ef6a937ff4435813dc0ae186`.
+The declared STT model is `nvidia/parakeet-tdt-0.6b-v2`, revision `0bbb45a3365852604aef28b538a8f066f4ccaa85`.
+The declared provider-configuration SHA-256 is `b4ede9e1a2e15e6dafd8e40680691d40760ad11904a9496edc2afe653a331eab`.
+
 The command checks corpus recording IDs, corpus audio hashes, `split` values, ordered timestamps, and declared frozen STT identity.
 It does not check audio bytes in this metadata-only mode. The input export stays unchanged.
 
@@ -1626,3 +1637,25 @@ uv run --locked python tools/tune_profiles.py --disable-safe-early \
 
 Then run the held-out command with that output as `--profiles-file`.
 The two turn-model statuses are `included` in the landed manifest.
+
+### Review repairs
+
+The guard keeps digits in the last token. Number endings such as "set volume to 50" can end a command.
+
+The mandatory word-class list causes a longer wait for complete particle endings such as "turn the lights on".
+This is a known latency cost. Keep the word-class list unchanged before measurements.
+The human pause and prefix measurements will quantify that cost. See `profiles.md`.
+
+Smart Turn runs for a changed complete `partial`, or after 160 ms of new audio with an unchanged `partial`.
+The low-score test counts seven inferences from 416 through 1376 ms, not one inference for each 32 ms frame.
+
+The maximum-silence and hard endpoints do not wait for this throttle.
+A new detector sets shared VAD state and context to their initial values. Runtime sharing is for sequential turns only.
+
+Call `flush(partial)` at a stream stall or end to consume the received sub-block samples.
+VAD padding does not change the audio clock. Empty flush calls do not add time without voice.
+The replay tool calls flush after the last received samples.
+Unknown `Profile` names and duplicate asset records give `ValueError`.
+Model fetch refuses other CLI modes and inputs before side effects.
+
+CI uses the same SHA-256-checked actionlint 1.7.12 archive and Task 3.51.1 as the sibling repositories.
