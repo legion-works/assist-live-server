@@ -1498,7 +1498,7 @@ Initial command: `uv run --locked pytest tests/turn -q`.
 Initial result: `ModuleNotFoundError: No module named 'assist_live_server.turn'`.
 
 Command: `uv run --locked pytest tests/turn -q` with a prefilled external model cache.
-Result: `80 passed`.
+Result: `102 passed`.
 The tests use synthetic PCM and `vad_probability` and `turn_probability` inputs for policy checks.
 The inference test uses the two pinned models. A missing cache is a named failure, not a skipped test.
 Four NumPy `feature` tests agree with the locked Transformers probe to a tolerance of `2e-5`.
@@ -1518,9 +1518,16 @@ The client does not have these dependencies. The server does not install PyTorch
 
 The `TRAJECTORY_SCHEMA` constant in `tools/tune_profiles.py` gives the partial-trajectory format.
 Each row has a recording ID, `split`, audio hash, frozen STT identity, provider-configuration digest, and timestamped `partials`.
-The `labels` have the same identity fields and an `audio_path` relative to the external audio root.
-They also have a `human` Boolean and two interval lists: `pause_intervals_ms` and `executable_prefix_intervals_ms`.
-Each interval has a start and an end in milliseconds.
+The corpus `labels` use `id`, `split`, `audio_sha256`, and an `audio_path` relative to the external audio root.
+The tool reads the source type from `speaker_type`, or from the documented `speaker_id` prefix when `speaker_type` is missing.
+The STT identity comes from the trajectory rows and must agree with the declared frozen identity, not with corpus-label fields.
+
+Interval fields are not necessary for `set=replay` rows.
+For rows with `set=pause`, `pause_intervals_ms` is necessary. For rows with `executable_prefix=true`, `executable_prefix_intervals_ms` is also necessary.
+Each interval is a two-item array of start and end milliseconds. The time window does not include its end.
+
+The corpus must add these two interval fields for those rows before pause and prefix tuning can run.
+The named failures are `pause interval labels missing` and `prefix interval labels missing`.
 
 The tool rejects unknown `split` values, mismatched hashes or revisions, missing recordings, duplicate recordings, and timestamps that decrease.
 It checks actual WAV bytes and reads only `partials` with timestamps at or before the current audio time.
@@ -1529,7 +1536,7 @@ Tuning uses tuning rows only. For freeze, a minimum of 300 different held-out hu
 The frozen record checks the held-out recording identities and trajectories with SHA-256.
 The held-out command does not tune or rewrite `Profile` values.
 
-Seven numbered behavioral mutations cause test failures:
+18 numbered behavioral mutations cause test failures:
 
 1. Disable the transcript guard in `fast`: the candidate test accepts `turn on the`.
 2. Let `turn on the` cause an endpoint: the push test gets an endpoint at 416 ms.
@@ -1538,29 +1545,62 @@ Seven numbered behavioral mutations cause test failures:
 5. Accept a model hash mismatch: the CI fetch test gets exit code 0, not 1.
 6. Remove the maximum-silence endpoint: the fallback test gets no event.
 7. Remove the endpoint at 15 s: the continuous-speech test gets no event.
+8. Remove `gitleaks git`: the shell test does not get that command.
+9. Use a shallow checkout: the CI test gets `fetch-depth=1`, not 0.
+10. Remove the floor Python matrix member: the CI test does not find `3.14.2`.
+11. Remove the public-tree task from the complete check: the CI test reports the missing task.
+12. Disable private-path detection: the checker accepts a private path.
+13. Disable private-address detection: the checker accepts a private address.
+14. Accept download pins different from the asset record: the plan test does not get an error.
+15. Accept a symlink external to the cache: the path test does not get an error.
+16. Ignore the frozen STT revision: the trajectory test does not get an error.
+17. Accept missing pause and prefix interval fields: the interval tests do not get the named errors.
+18. Count a `human` Boolean as source type: the synthetic-input test supplies an incorrect pause denominator.
 
 The code contains no mutations after the tests. The repository has no frozen `Profile` file.
 
-Command: `task check` with an external scratch manifest for model fetch.
-Result: `FAIL silero-vad: blocked asset reference in release source`.
-Four asset and probe tests reject the base manifest's absent-component status.
-The same four tests give failures on Python `3.14.2` and with the network namespace disabled.
+Command: `uv run --locked python tools/tune_profiles.py --fetch-models` with no manifest override.
+Result: `PASS pinned turn models fetched with SHA-256 checks`.
+The loader uses the landed download-plan objects: `id`, `url`, `sha256`, and `path`.
+The acceptance status check reports `silero-vad=included smart-turn-v3.2-cpu=included`.
+Files stay below the external cache path specified by the manifest, with symlink checks.
 
-The result in each complete test run is `4 failed, 253 passed`.
-The asset-status change must land before the complete checks can have satisfactory results.
-Production-manifest fetch is pending until that change lands.
+Command: `task check`, with the optional private denylist supplied and no manifest override.
+Result: `420 passed`, `PASS server bootstrap`, `PASS isolated client and server packages`, and `PASS asset licenses`.
+The directory and Git-history secret checks report `no leaks found`.
+The earlier four asset/probe test failures do not occur. No asset check changed.
+
+Command: `uv run --locked --python 3.14.2 pytest tests/ -q` in an isolated temporary environment.
+Result: `420 passed`.
+Command: `unshare -rn sh -c 'ip link set lo up && .venv/bin/python -m pytest tests/ -q'` with the cache prefilled.
+Result: `420 passed`.
+
+A concurrent floor/offline test showed a Hatchling index request in the isolated network.
+The package tests use `uv build --offline` to use the build backend cached by workspace sync.
+This prevents network requests, not source builds. Three concurrent floor/offline pairs then give satisfactory results.
 
 Command: `uv run --locked mypy`.
-Result: `Success: no issues found in 23 source files`.
+Result: `Success: no issues found in 30 source files`.
 Python workspace diagnostics are unavailable for the isolated worktree.
-The public-tree check with `--history` reports `PASS history secrets commits=8` and `PASS public data matches=0`.
-The file self-check reports 0 private terms, 0 home paths, and 0 private addresses.
+The public-tree check with `--history` reports `PASS history secrets commits=17` and `PASS public data matches=0`.
+The source has one deliberate public-URL test vector with a user-path component. The public-tree checker accepts that URL.
+
+CI runs unit tests on Python `3.14.3` and the declared floor, `3.14.2`.
+Secret and public-tree tasks use a full checkout. CI checks the Gitleaks archive SHA-256 before installation.
+The complete local check and CI run `tools/check_public_tree.py` for private paths and addresses, with history.
+Without an external private denylist, the checker prints `NOT CHECKED private denylist` and continues the public-pattern checks.
 
 The ASD-STE100 checker reports 0 findings in `STRUCTURE.md` and this record.
 
-Human pause recordings, executable-prefix recordings, and frozen STT `partials` are not available.
-The tuning and human safety acceptance steps are pending. The project is experimental and has no release.
-Run these commands only when those inputs are available:
+The selected STT export has a satisfactory `--validate-partials` result: `rows=250 tuning=50 held_out=200`.
+The command checks corpus recording IDs, corpus audio hashes, `split` values, ordered timestamps, and declared frozen STT identity.
+It does not check audio bytes in this metadata-only mode. The input export stays unchanged.
+
+Human pause recordings and executable-prefix interval records are not available.
+The 250 replay trajectories do not supply the 300-command held-out pause denominator.
+The tuning and human safety acceptance steps stay pending. No freeze command ran.
+The project is experimental and has no release.
+Run the tuning and held-out commands only when the pause and prefix inputs are available:
 
 ```sh
 uv run --locked python tools/tune_profiles.py --fetch-models
@@ -1585,4 +1625,4 @@ uv run --locked python tools/tune_profiles.py --disable-safe-early \
 ```
 
 Then run the held-out command with that output as `--profiles-file`.
-The acceptance check must also make sure that status is `included` for the two turn models in the landed manifest.
+The two turn-model statuses are `included` in the landed manifest.

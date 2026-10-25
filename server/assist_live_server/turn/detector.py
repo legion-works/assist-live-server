@@ -26,19 +26,57 @@ WINDOW = 128000
 
 def model_records(manifest: Path | str | None = None) -> dict[str, dict[str, Any]]:
     document = load_asset_manifest(manifest)
-    plan = document["download_plan"]
+    entries = document["download_plan"]
+    if not isinstance(entries, list) or any(
+        not isinstance(entry, dict) for entry in entries
+    ):
+        raise ValueError("model download plan must contain objects")
+    plan = {entry["id"]: entry for entry in entries}
     records = {row["id"]: row for row in document["assets"]}
     if any(name not in plan or name not in records for name in MODEL_IDS):
         raise ValueError("both turn models must be in the download plan")
+    selected = {}
     for name in MODEL_IDS:
         row = records[name]
-        if not row.get("revision") or len(row.get("sha256", "")) != 64:
-            raise ValueError("model download plan needs revision and SHA-256")
-    return {name: records[name] for name in MODEL_IDS}
+        entry = plan[name]
+        if sum(item["id"] == name for item in entries) != 1 or set(entry) != {
+            "id",
+            "url",
+            "sha256",
+            "path",
+        }:
+            raise ValueError("invalid or duplicate model download plan entry")
+        if (
+            not isinstance(row.get("revision"), str)
+            or not row["revision"]
+            or not isinstance(entry["sha256"], str)
+            or len(entry["sha256"]) != 64
+            or any(char not in "0123456789abcdef" for char in entry["sha256"])
+            or any(entry[key] != row.get(key) for key in ("url", "sha256"))
+        ):
+            raise ValueError("model download plan pins differ from asset record")
+        path = entry["path"]
+        if (
+            not isinstance(path, str)
+            or not Path(path).parts
+            or Path(path).is_absolute()
+            or ".." in Path(path).parts
+        ):
+            raise ValueError("model download path must be relative to cache")
+        selected[name] = {**row, **entry}
+    return selected
+
+
+def model_path(cache: Path, record: dict[str, Any]) -> Path:
+    root = cache.resolve()
+    path = (root / record["path"]).resolve()
+    if not path.is_relative_to(root):
+        raise ValueError("model download path must stay inside cache")
+    return path
 
 
 def verified_model(cache: Path, record: dict[str, Any]) -> Path:
-    path = cache / f"{record['id']}.onnx"
+    path = model_path(cache, record)
     if not path.is_file():
         raise ValueError(
             f"FAIL model cache: missing {record['id']}; run --fetch-models"
@@ -52,7 +90,7 @@ def fetch_models(cache: Path | str, manifest: Path | str) -> None:
     cache = Path(cache)
     cache.mkdir(parents=True, exist_ok=True)
     for record in model_records(manifest).values():
-        path = cache / f"{record['id']}.onnx"
+        path = model_path(cache, record)
         if path.exists():
             verified_model(cache, record)
             continue
@@ -60,6 +98,7 @@ def fetch_models(cache: Path | str, manifest: Path | str) -> None:
             data = response.read()
         if hashlib.sha256(data).hexdigest() != record["sha256"]:
             raise ValueError(f"downloaded model SHA-256 mismatch: {record['id']}")
+        path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix(".download")
         temporary.write_bytes(data)
         temporary.replace(path)

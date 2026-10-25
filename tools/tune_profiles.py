@@ -1,8 +1,11 @@
 """Replay frozen partial trajectories with local audio and turn models.
 
 TRAJECTORY_SCHEMA is the producer contract for JSON Lines partials. Each row
-joins a label by recording_id. Labels carry the same identity fields, audio_path,
-human, pause_intervals_ms, and executable_prefix_intervals_ms. Intervals are
+joins a label by the corpus label's id. Labels carry split, audio_sha256,
+speaker_type (or a speaker_id prefix), and set. Trajectory rows carry the STT
+identity, which must agree with the frozen declaration. Audio replay uses
+audio_path. Pause rows need pause_intervals_ms. Executable-prefix rows also
+need executable_prefix_intervals_ms. Replay rows need no interval fields. Intervals are
 [start_ms, end_ms] pairs. A pause error is an endpoint inside a pause interval.
 An executable-prefix error is an endpoint inside a prefix interval.
 
@@ -84,7 +87,8 @@ def validate_trajectory(
         if (
             not isinstance(value, str)
             or not value
-            or value != label[field]
+            or (field not in FROZEN and field not in label)
+            or (field not in FROZEN and value != label.get(field))
             or (field in FROZEN and value != frozen[field])
         ):
             raise ValueError(
@@ -116,14 +120,19 @@ def read_rows(path: Path) -> list[Evidence]:
     rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
     if not rows:
         raise ValueError("evidence file is empty")
+    for row in rows:
+        if "id" in row:
+            if "recording_id" in row and row["recording_id"] != row["id"]:
+                raise ValueError("conflicting recording id fields")
+            row["recording_id"] = row["id"]
+        if not isinstance(row.get("recording_id"), str) or not row["recording_id"]:
+            raise ValueError("missing recording id")
     if len({row["recording_id"] for row in rows}) != len(rows):
         raise ValueError("duplicate recording id")
     return rows
 
 
-def load_evidence(
-    labels: Path, audio_root: Path, partials: Path, frozen: Evidence
-) -> list[Evidence]:
+def validate_partials(labels: Path, partials: Path, frozen: Evidence) -> list[Evidence]:
     label_rows = read_rows(labels)
     trajectories = read_rows(partials)
     indexed = {row["recording_id"]: row for row in label_rows}
@@ -132,7 +141,67 @@ def load_evidence(
     result = []
     for row in trajectories:
         validate_trajectory(row, indexed, frozen)
-        label = indexed[row["recording_id"]]
+        result.append(policy_labels({**indexed[row["recording_id"]], **row}))
+    return result
+
+
+def speaker_kind(row: Evidence) -> str:
+    speaker = row.get("speaker_id", "")
+    if not isinstance(speaker, str):
+        raise ValueError("invalid speaker identifier")
+    inferred = (
+        "human"
+        if speaker.startswith("speaker-")
+        else "synthetic"
+        if speaker.startswith("synthetic-")
+        else None
+    )
+    kind = row.get("speaker_type", inferred)
+    if kind not in ("human", "synthetic") or (
+        inferred is not None and kind != inferred
+    ):
+        raise ValueError("invalid or missing speaker kind")
+    return str(kind)
+
+
+def policy_labels(row: Evidence, duration_ms: float | None = None) -> Evidence:
+    row["speaker_type"] = speaker_kind(row)
+    if row.get("set") not in ("replay", "pause"):
+        raise ValueError("invalid or missing corpus set")
+    prefix = row.get("executable_prefix", False)
+    if type(prefix) is not bool or (prefix and row["set"] != "pause"):
+        raise ValueError("executable prefix must belong to a pause row")
+    for field, required, description in (
+        ("pause_intervals_ms", row["set"] == "pause", "pause"),
+        ("executable_prefix_intervals_ms", prefix, "prefix"),
+    ):
+        intervals = row.get(field, [])
+        if required and not intervals:
+            raise ValueError(f"{description} interval labels missing")
+        if not isinstance(intervals, list) or (not required and intervals):
+            raise ValueError(f"invalid {description} interval labels")
+        for interval in intervals:
+            if (
+                not isinstance(interval, list)
+                or len(interval) != 2
+                or any(
+                    type(v) not in (int, float) or not math.isfinite(v)
+                    for v in interval
+                )
+                or not 0 <= interval[0] < interval[1]
+                or (duration_ms is not None and interval[1] > duration_ms)
+            ):
+                raise ValueError(f"invalid {description} interval labels")
+        row[field] = intervals
+    return row
+
+
+def load_evidence(
+    labels: Path, audio_root: Path, partials: Path, frozen: Evidence
+) -> list[Evidence]:
+    result = []
+    for row in validate_partials(labels, partials, frozen):
+        label = row
         path = (audio_root / label["audio_path"]).resolve()
         if not path.is_relative_to(audio_root.resolve()):
             raise ValueError("audio path must stay inside audio root")
@@ -150,21 +219,7 @@ def load_evidence(
         duration = len(pcm) / 32
         if row["partials"][-1]["audio_ms"] > duration:
             raise ValueError("partial timestamp exceeds audio duration")
-        if type(label.get("human")) is not bool:
-            raise ValueError("label needs human boolean")
-        for field in ("pause_intervals_ms", "executable_prefix_intervals_ms"):
-            if field not in label or not isinstance(label[field], list):
-                raise ValueError("label needs pause and prefix intervals")
-            for interval in label[field]:
-                if (
-                    len(interval) != 2
-                    or any(
-                        type(v) not in (int, float) or not math.isfinite(v)
-                        for v in interval
-                    )
-                    or not 0 <= interval[0] < interval[1] <= duration
-                ):
-                    raise ValueError("invalid label interval")
+        policy_labels(label, duration)
         result.append({**label, "partials": row["partials"], "pcm": pcm})
     return result
 
@@ -242,7 +297,8 @@ def pause_denominator(rows: list[Evidence]) -> int:
             row["recording_id"]
             for row in rows
             if row["split"] == "held_out"
-            and row.get("human") is True
+            and row.get("set") == "pause"
+            and speaker_kind(row) == "human"
             and row.get("pause_intervals_ms")
         }
     )
@@ -275,7 +331,10 @@ def freeze_profiles(
 def evidence_digest(rows: list[Evidence]) -> str:
     fields = [
         *TRAJECTORY_SCHEMA["required"],
-        "human",
+        "speaker_id",
+        "speaker_type",
+        "set",
+        "executable_prefix",
         "pause_intervals_ms",
         "executable_prefix_intervals_ms",
     ]
@@ -317,7 +376,7 @@ def check_held_out(
     profiles = {name: Profile(**value) for name, value in document["profiles"].items()}
     if set(profiles) != {"safe", "fast"}:
         raise ValueError("gate needs safe and fast profiles")
-    human = [row for row in rows if row["human"]]
+    human = [row for row in rows if speaker_kind(row) == "human"]
     for name, profile in profiles.items():
         count, total = errors(human, profile, run, "pause_intervals_ms")
         if count / total > 0.03 or upper95(count, total) > 0.06:
@@ -350,6 +409,7 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument("--fetch-models", action="store_true")
+    parser.add_argument("--validate-partials", action="store_true")
     parser.add_argument("--labels", type=Path)
     parser.add_argument("--audio-root", type=Path)
     parser.add_argument("--partials", type=Path)
@@ -374,6 +434,7 @@ def main(argv: list[str] | None = None) -> int:
                         args.freeze,
                         args.check_held_out,
                         args.fetch_models,
+                        args.validate_partials,
                         args.split,
                         args.profile,
                         args.labels,
@@ -394,6 +455,34 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 "PASS constant safety fallback: safe early_enabled=false; "
                 "rerun held_out gate"
+            )
+            return 0
+        if args.validate_partials:
+            frozen = {field: getattr(args, field) for field in FROZEN}
+            if not all(frozen.values()) or not args.labels or not args.partials:
+                raise ValueError(
+                    "partial validation needs labels, partials, and frozen STT identity"
+                )
+            if any(
+                (
+                    args.fetch_models,
+                    args.freeze,
+                    args.check_held_out,
+                    args.output,
+                    args.profiles_file,
+                    args.profile,
+                    args.split,
+                    args.audio_root,
+                )
+            ):
+                raise ValueError(
+                    "partial validation cannot tune, replay, or write profiles"
+                )
+            rows = validate_partials(args.labels, args.partials, frozen)
+            print(
+                f"PASS partial trajectories rows={len(rows)} "
+                f"tuning={sum(row['split'] == 'tuning' for row in rows)} "
+                f"held_out={sum(row['split'] == 'held_out' for row in rows)}"
             )
             return 0
         if args.fetch_models:

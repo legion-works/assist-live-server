@@ -32,23 +32,20 @@ def evidence(tmp_path):
         "split": "tuning",
         "audio_path": "sample.wav",
         "audio_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-        "stt_model_id": "test-stt",
-        "stt_revision": "frozen-revision",
-        "provider_config_sha256": "a" * 64,
-        "human": False,
+        "speaker_type": "synthetic",
+        "speaker_id": "synthetic-fixture",
+        "set": "pause",
+        "executable_prefix": True,
         "pause_intervals_ms": [[100, 900]],
         "executable_prefix_intervals_ms": [[100, 900]],
     }
     row = {
-        key: label[key]
-        for key in (
-            "recording_id",
-            "split",
-            "audio_sha256",
-            "stt_model_id",
-            "stt_revision",
-            "provider_config_sha256",
-        )
+        "recording_id": label["recording_id"],
+        "split": label["split"],
+        "audio_sha256": label["audio_sha256"],
+        "stt_model_id": "test-stt",
+        "stt_revision": "frozen-revision",
+        "provider_config_sha256": "a" * 64,
     }
     row["partials"] = [
         {"audio_ms": 0, "text": "turn on the"},
@@ -118,7 +115,7 @@ def test_rejects_bad_trajectory(evidence, field, value, error):
         validate_trajectory(row, {label["recording_id"]: label}, frozen)
 
 
-def test_declared_revision_must_match_labels(evidence):
+def test_declared_revision_must_match_trajectory(evidence):
     label, row, frozen = evidence
     frozen["stt_revision"] = "different"
     with pytest.raises(ValueError, match="revision"):
@@ -168,7 +165,8 @@ def test_synthetic_and_duplicate_rows_cannot_fill_denominator(tmp_path):
         {
             "recording_id": str(i),
             "split": "held_out",
-            "human": False,
+            "speaker_type": "synthetic",
+            "set": "pause",
             "pause_intervals_ms": [[1, 2]],
         }
         for i in range(300)
@@ -179,7 +177,8 @@ def test_synthetic_and_duplicate_rows_cannot_fill_denominator(tmp_path):
         {
             "recording_id": "same",
             "split": "held_out",
-            "human": True,
+            "speaker_type": "human",
+            "set": "pause",
             "pause_intervals_ms": [[1, 2]],
         }
     ] * 300
@@ -209,7 +208,8 @@ def test_held_out_does_not_rewrite_or_tune(tmp_path):
         {
             "recording_id": str(i),
             "split": "held_out",
-            "human": True,
+            "speaker_type": "human",
+            "set": "pause",
             "pause_intervals_ms": [[100, 200]],
             "executable_prefix_intervals_ms": [[100, 200]],
         }
@@ -257,7 +257,8 @@ def test_frozen_gate_rejects_evidence_substitution(tmp_path, field, value):
         {
             "recording_id": str(i),
             "split": "held_out",
-            "human": True,
+            "speaker_type": "human",
+            "set": "pause",
             "audio_sha256": "a" * 64,
             "partials": [{"audio_ms": 0, "text": "the"}],
             "pause_intervals_ms": [[100, 200]],
@@ -308,7 +309,8 @@ def test_prefix_fallback_changes_only_safe_early_flag(tmp_path):
         {
             "recording_id": str(i),
             "split": "held_out",
-            "human": True,
+            "speaker_type": "human",
+            "set": "pause",
             "pause_intervals_ms": [[1, 2]],
         }
         for i in range(300)
@@ -331,3 +333,175 @@ def test_prefix_fallback_changes_only_safe_early_flag(tmp_path):
     expected = json.loads(before)
     expected["profiles"]["safe"]["early_enabled"] = False
     assert json.loads(output.read_bytes()) == expected
+
+
+def test_metadata_validation_accepts_corpus_label_ids_without_policy_annotations(
+    tmp_path, evidence, capsys
+):
+    from tools.tune_profiles import main
+
+    label, row, frozen = evidence
+    label = {
+        "id": label["recording_id"],
+        "split": label["split"],
+        "audio_sha256": label["audio_sha256"],
+        "set": "replay",
+        "speaker_type": "synthetic",
+        "speaker_id": "synthetic-fixture",
+    }
+    labels = tmp_path / "labels.jsonl"
+    partials = tmp_path / "partials.jsonl"
+    labels.write_text(json.dumps(label) + "\n")
+    partials.write_text(json.dumps(row) + "\n")
+    before = (labels.read_bytes(), partials.read_bytes())
+    assert (
+        main(
+            [
+                "--validate-partials",
+                "--labels",
+                str(labels),
+                "--partials",
+                str(partials),
+                "--stt-model-id",
+                frozen["stt_model_id"],
+                "--stt-revision",
+                frozen["stt_revision"],
+                "--provider-config-sha256",
+                frozen["provider_config_sha256"],
+            ]
+        )
+        == 0
+    )
+    assert (
+        "PASS partial trajectories rows=1 tuning=1 held_out=0"
+        in capsys.readouterr().out
+    )
+    assert (labels.read_bytes(), partials.read_bytes()) == before
+
+
+def test_stt_identity_comes_from_trajectory_not_corpus_label(evidence):
+    label, row, frozen = evidence
+    label["stt_revision"] = "different"
+    validate_trajectory(row, {label["recording_id"]: label}, frozen)
+
+
+def test_conflicting_label_id_aliases_are_rejected(tmp_path):
+    from tools.tune_profiles import read_rows
+
+    path = tmp_path / "labels.jsonl"
+    path.write_text(json.dumps({"id": "one", "recording_id": "another"}) + "\n")
+    with pytest.raises(ValueError, match="recording id"):
+        read_rows(path)
+
+
+def test_real_corpus_label_shape_replays_without_invented_fields(tmp_path, evidence):
+    original, row, frozen = evidence
+    label = {
+        "id": "tas-v1-7c3006048df48ee90b38",
+        "speaker_id": "synthetic-fixture",
+        "speaker_type": "synthetic",
+        "set": "replay",
+        "split": "tuning",
+        "audio_path": original["audio_path"],
+        "audio_sha256": original["audio_sha256"],
+        "source_uri": "zenodo:4662102/timers-and-such-real.zip#test-real/sample.wav",
+        "source_revision": (
+            "c92772c830109a6d685b2106fa3f28fc7b1184bc74722045282ed7efb0cf135a"
+        ),
+        "sample_rate": 16000,
+        "last_voice_sample": 15999,
+        "executable_prefix": False,
+        "license": "CC0-1.0",
+        "attribution": "Timers and Such v1.0, real subset, Zenodo 4662102 (CC0-1.0).",
+        "consent_id": None,
+    }
+    row["recording_id"] = label["id"]
+    labels = tmp_path / "labels.jsonl"
+    partials = tmp_path / "partials.jsonl"
+    labels.write_text(json.dumps(label) + "\n")
+    partials.write_text(json.dumps(row) + "\n")
+    loaded = load_evidence(labels, tmp_path, partials, frozen)
+    assert len(loaded) == 1
+    assert loaded[0]["pause_intervals_ms"] == []
+    assert loaded[0]["executable_prefix_intervals_ms"] == []
+    assert loaded[0]["speaker_type"] == "synthetic"
+    assert "human" not in loaded[0]
+
+
+@pytest.mark.parametrize("prefix", [False, True])
+def test_pause_rows_without_intervals_have_named_failure(tmp_path, evidence, prefix):
+    label, row, frozen = evidence
+    label.pop("pause_intervals_ms")
+    label["executable_prefix"] = prefix
+    labels = tmp_path / "labels.jsonl"
+    partials = tmp_path / "partials.jsonl"
+    labels.write_text(json.dumps(label) + "\n")
+    partials.write_text(json.dumps(row) + "\n")
+    with pytest.raises(ValueError, match="^pause interval labels missing$"):
+        load_evidence(labels, tmp_path, partials, frozen)
+
+
+def test_prefix_rows_without_intervals_have_named_failure(tmp_path, evidence):
+    label, row, frozen = evidence
+    label.pop("executable_prefix_intervals_ms")
+    labels = tmp_path / "labels.jsonl"
+    partials = tmp_path / "partials.jsonl"
+    labels.write_text(json.dumps(label) + "\n")
+    partials.write_text(json.dumps(row) + "\n")
+    with pytest.raises(ValueError, match="^prefix interval labels missing$"):
+        load_evidence(labels, tmp_path, partials, frozen)
+
+
+def test_synthetic_kind_cannot_be_overridden_by_legacy_human_boolean(tmp_path):
+    rows = [
+        {
+            "recording_id": str(i),
+            "split": "held_out",
+            "set": "pause",
+            "speaker_type": "synthetic",
+            "human": True,
+            "pause_intervals_ms": [[1, 2]],
+        }
+        for i in range(300)
+    ]
+    with pytest.raises(ValueError, match="300"):
+        freeze_profiles(PROFILES, rows, tmp_path / "profiles.json", {}, {})
+
+
+@pytest.mark.parametrize(
+    "speaker_id,kind,expected",
+    [
+        ("speaker-fixture", None, "human"),
+        ("synthetic-fixture", None, "synthetic"),
+        ("speaker-fixture", "human", "human"),
+        ("speaker-fixture", "synthetic", None),
+        ("speaker-fixture", "unknown", None),
+        (None, "human", None),
+    ],
+)
+def test_corpus_speaker_kind(speaker_id, kind, expected):
+    from tools.tune_profiles import speaker_kind
+
+    row = {"speaker_id": speaker_id}
+    if kind is not None:
+        row["speaker_type"] = kind
+    if expected is None:
+        with pytest.raises(ValueError, match="speaker"):
+            speaker_kind(row)
+    else:
+        assert speaker_kind(row) == expected
+
+
+def test_replay_rows_cannot_fill_pause_denominator(tmp_path):
+    rows = [
+        {
+            "recording_id": str(i),
+            "split": "held_out",
+            "set": "replay",
+            "speaker_type": "human",
+            "pause_intervals_ms": [[1, 2]],
+        }
+        for i in range(300)
+    ]
+    with pytest.raises(ValueError, match="300"):
+        freeze_profiles(PROFILES, rows, tmp_path / "profiles.json", {}, {})

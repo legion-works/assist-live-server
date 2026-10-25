@@ -114,22 +114,37 @@ def test_fetch_plan_hash_checks_without_network(tmp_path):
             "revision": "pin",
             "sha256": hashlib.sha256(data).hexdigest(),
             "status": "included",
+            "path": f"models/{name}.onnx",
         }
         for name in ("silero-vad", "smart-turn-v3.2-cpu")
     ]
     manifest = tmp_path / "manifest.json"
     manifest.write_text(
-        json.dumps({"download_plan": [a["id"] for a in assets], "assets": assets})
+        json.dumps(
+            {
+                "download_plan": [
+                    {k: a[k] for k in ("id", "url", "sha256", "path")} for a in assets
+                ],
+                "assets": assets,
+            }
+        )
     )
     cache = tmp_path / "cache"
     fetch_models(cache, manifest)
-    assert all((cache / f"{a['id']}.onnx").read_bytes() == data for a in assets)
-    (cache / "silero-vad.onnx").write_bytes(b"corrupt")
+    assert all((cache / a["path"]).read_bytes() == data for a in assets)
+    (cache / "models/silero-vad.onnx").write_bytes(b"corrupt")
     with pytest.raises(ValueError, match="SHA-256"):
         ModelRuntime(cache, manifest)
     assets[0]["sha256"] = "0" * 64
     manifest.write_text(
-        json.dumps({"download_plan": [a["id"] for a in assets], "assets": assets})
+        json.dumps(
+            {
+                "download_plan": [
+                    {k: a[k] for k in ("id", "url", "sha256", "path")} for a in assets
+                ],
+                "assets": assets,
+            }
+        )
     )
     with pytest.raises(ValueError, match="SHA-256"):
         fetch_models(tmp_path / "bad-cache", manifest)
@@ -165,3 +180,52 @@ def test_server_ignores_tool_manifest_environment(monkeypatch):
     monkeypatch.setenv("ASSIST_LIVE_MODEL_CACHE", "absent-model-cache")
     with pytest.raises(ValueError, match="download plan|FAIL model cache"):
         module.TurnDetector()
+
+
+def test_landed_download_entries_are_the_runtime_pins():
+    document = json.loads((ROOT / "assets/manifest.json").read_text())
+    records = model_records(ROOT / "assets/manifest.json")
+    for name, record in records.items():
+        entry = next(row for row in document["download_plan"] if row["id"] == name)
+        assert all(record[key] == entry[key] for key in ("id", "url", "sha256", "path"))
+        assert record["revision"]
+
+
+@pytest.mark.parametrize(
+    "change", ["duplicate", "sha256", "url", "absolute_path", "traversal_path"]
+)
+def test_malformed_download_plan_is_rejected(tmp_path, change):
+    document = json.loads((ROOT / "assets/manifest.json").read_text())
+    entry = next(row for row in document["download_plan"] if row["id"] == "silero-vad")
+    if change == "duplicate":
+        document["download_plan"].append(dict(entry))
+    elif change == "sha256":
+        entry["sha256"] = "0" * 64
+    elif change == "url":
+        entry["url"] = "https://example.invalid/changed-model.onnx"
+    elif change == "absolute_path":
+        entry["path"] = str(tmp_path / "outside.onnx")
+    else:
+        entry["path"] = "../outside.onnx"
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps(document))
+    with pytest.raises(ValueError, match="download plan|pin|path"):
+        model_records(manifest)
+
+
+def test_cache_symlink_cannot_escape(tmp_path):
+    from assist_live_server.turn.detector import verified_model
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "model.onnx").write_bytes(b"synthetic model")
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    (cache / "models").symlink_to(outside, target_is_directory=True)
+    record = {
+        "id": "synthetic",
+        "path": "models/model.onnx",
+        "sha256": hashlib.sha256(b"synthetic model").hexdigest(),
+    }
+    with pytest.raises(ValueError, match="path"):
+        verified_model(cache, record)

@@ -7,6 +7,139 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_secret_scans_include_history_and_full_checkout(tmp_path):
+    import json
+    import os
+    import subprocess
+    import sys
+
+    workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+    steps = workflow["jobs"]["secret-scan"]["steps"]
+    checkout = next(
+        step for step in steps if step.get("uses", "").startswith("actions/checkout@")
+    )
+    assert checkout["with"]["fetch-depth"] == 0
+    scan = next(step for step in steps if step.get("name") == "Scan history and files")
+    script = tmp_path / "gitleaks"
+    script.write_text(
+        f"#!{sys.executable}\nimport json, os, sys\n"
+        "with open(os.environ['CALLS'], 'a') as f:\n"
+        "    f.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+    )
+    script.chmod(0o755)
+    log = tmp_path / "calls"
+    env = {
+        **os.environ,
+        "PATH": str(tmp_path) + os.pathsep + os.environ["PATH"],
+        "CALLS": str(log),
+    }
+    subprocess.run(
+        ["bash", "-e", "-c", scan["run"]],
+        env=env,
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    assert {json.loads(line)[0] for line in log.read_text().splitlines()} == {
+        "git",
+        "dir",
+    }
+    task = yaml.safe_load((ROOT / "Taskfile.yml").read_text())
+    log.write_text("")
+    for command in task["tasks"]["secret-scan"]["cmds"]:
+        subprocess.run(
+            ["bash", "-e", "-c", command],
+            env=env,
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+        )
+    assert {json.loads(line)[0] for line in log.read_text().splitlines()} == {
+        "git",
+        "dir",
+    }
+
+
+def test_ci_runs_tests_on_declared_floor():
+    import tomllib
+
+    floor = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"][
+        "requires-python"
+    ].removeprefix(">=")
+    workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+    job = workflow["jobs"]["checks"]
+    matrix = job["strategy"]["matrix"]
+    assert {"check": "unit", "python": floor} in matrix["include"]
+    setup = next(
+        step
+        for step in job["steps"]
+        if step.get("uses", "").startswith("astral-sh/setup-uv@")
+    )
+    assert setup["with"]["python-version"] == "${{ matrix.python }}"
+    run = next(step for step in job["steps"] if step.get("run") == 'task "$CHECK"')
+    assert run["env"]["CHECK"] == "${{ matrix.check }}"
+    task = yaml.safe_load((ROOT / "Taskfile.yml").read_text())
+    assert "uv run --locked pytest -q" in task["tasks"]["unit"]["cmds"]
+
+
+@pytest.mark.parametrize("use_denylist", [False, True])
+def test_public_tree_is_in_local_and_ci_gates(tmp_path, use_denylist):
+    import json
+    import os
+    import subprocess
+    import sys
+
+    task = yaml.safe_load((ROOT / "Taskfile.yml").read_text())
+    assert {"task": "public-tree"} in task["tasks"]["check"]["cmds"]
+    command = task["tasks"]["public-tree"]["cmds"][0]
+    script = tmp_path / "uv"
+    script.write_text(
+        f"#!{sys.executable}\nimport json, os, sys\n"
+        "with open(os.environ['CALLS'], 'w') as f:\n"
+        "    json.dump(sys.argv[1:], f)\n"
+    )
+    script.chmod(0o755)
+    log = tmp_path / "calls"
+    denylist = tmp_path / "denylist.txt"
+    denylist.write_text("synthetic-only-marker\n")
+    env = {
+        **os.environ,
+        "PATH": str(tmp_path) + os.pathsep + os.environ["PATH"],
+        "CALLS": str(log),
+        "PRIVATE_DENYLIST": str(denylist) if use_denylist else "",
+    }
+    subprocess.run(
+        ["bash", "-e", "-c", command],
+        cwd=tmp_path,
+        env=env,
+        check=True,
+        capture_output=True,
+    )
+    args = json.loads(log.read_text())
+    assert args[:4] == ["run", "--locked", "python", "tools/check_public_tree.py"]
+    assert "--history" in args and args[args.index("--root") + 1] == "."
+    assert ("--private-denylist" in args) == use_denylist
+    if use_denylist:
+        assert args[args.index("--private-denylist") + 1] == str(denylist)
+    workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+    checks = workflow["jobs"]["checks"]
+    assert "public-tree" in checks["strategy"]["matrix"]["check"]
+    checkout = next(
+        step
+        for step in checks["steps"]
+        if step.get("uses", "").startswith("actions/checkout@")
+    )
+    assert checkout["with"]["fetch-depth"] == 0
+    install = next(
+        step for step in checks["steps"] if step.get("name") == "Install Gitleaks"
+    )
+    assert install["if"] == "matrix.check == 'unit' || matrix.check == 'public-tree'"
+    assert (
+        "79a3ab579b53f71efd634f3aaf7e04a0fa0cf206b7ed434638d1547a2470a66e"
+        in install["run"]
+    )
+
+
 def test_ci_and_task_fetch_pinned_turn_models(tmp_path):
     import hashlib
     import json
@@ -33,9 +166,17 @@ def test_ci_and_task_fetch_pinned_turn_models(tmp_path):
     for record in selected:
         record["url"] = source.as_uri()
         record["sha256"] = hashlib.sha256(source.read_bytes()).hexdigest()
+        record["path"] = f"models/{record['id']}.onnx"
     manifest = tmp_path / "manifest.json"
     manifest.write_text(
-        json.dumps({"download_plan": [r["id"] for r in selected], "assets": selected})
+        json.dumps(
+            {
+                "download_plan": [
+                    {k: r[k] for k in ("id", "url", "sha256", "path")} for r in selected
+                ],
+                "assets": selected,
+            }
+        )
     )
     env = {
         **os.environ,
@@ -49,7 +190,7 @@ def test_ci_and_task_fetch_pinned_turn_models(tmp_path):
     for record in selected:
         assert (
             hashlib.sha256(
-                (tmp_path / "cache" / f"{record['id']}.onnx").read_bytes()
+                (tmp_path / "cache" / record["path"]).read_bytes()
             ).hexdigest()
             == record["sha256"]
         )
@@ -67,13 +208,22 @@ def test_server_wheel_requires_client(tmp_path, direct_wheel):
     import tomllib
     import zipfile
 
-    subprocess.run(
-        ["uv", "build", "--package", "assist-live-server", "--out-dir", str(tmp_path)]
+    completed = subprocess.run(
+        [
+            "uv",
+            "build",
+            "--offline",
+            "--package",
+            "assist-live-server",
+            "--out-dir",
+            str(tmp_path),
+        ]
         + (["--wheel"] if direct_wheel else []),
         cwd=ROOT,
-        check=True,
         capture_output=True,
+        text=True,
     )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
     wheel_path = next(tmp_path.glob("*.whl"))
     with zipfile.ZipFile(wheel_path) as wheel:
         metadata_path = next(
@@ -100,7 +250,15 @@ def test_client_wheel_has_no_server_or_manifest(tmp_path):
     import zipfile
 
     subprocess.run(
-        ["uv", "build", "--package", "assist-live-client", "--out-dir", str(tmp_path)],
+        [
+            "uv",
+            "build",
+            "--offline",
+            "--package",
+            "assist-live-client",
+            "--out-dir",
+            str(tmp_path),
+        ],
         cwd=ROOT,
         check=True,
         capture_output=True,
