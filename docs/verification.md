@@ -1669,3 +1669,95 @@ Unknown `Profile` names and duplicate asset records give `ValueError`.
 Model fetch refuses other CLI modes and inputs before side effects.
 
 CI uses the same SHA-256-checked actionlint 1.7.12 archive and Task 3.51.1 as the sibling repositories.
+
+## Local voice recognition
+
+Date: 2026-10-25.
+
+The provider uses `onnx-asr==0.12.0` as a server runtime dependency.
+The client package has no model-runtime dependency.
+The [PyPI metadata](https://pypi.org/pypi/onnx-asr/0.12.0/json) declares `requires_python: >=3.10` (accessed 2026-10-25).
+The server floor stays Python `3.14.2`.
+
+The initial provider test reported `ModuleNotFoundError` for the missing `providers.parakeet` and `providers.stt` modules.
+The interval-label tests reported `Failed: DID NOT RAISE ValueError` in six conditions before the new checks.
+The slow-decoder test reported `TimeoutError` because an audio push waited for inference.
+The session accepts audio during inference and merges ticks into one pending update.
+The slow-decoder test checks two snapshots: the first buffer and the newest complete buffer.
+Thirteen concurrent callers share those two decodes without a queue for each tick.
+
+The finish-priority test first reported decode order `1, 2, 3, 4`, not the necessary `1, 4, 2, 3`.
+Finish work runs before queued `partial` work from other sessions, without interruption of an active decode.
+The capacity test reported `completed work still consumes an admission slot` before the handoff change.
+The executor releases capacity before it gives a result to the caller.
+
+The image inventory is empty because all model, voice and runtime assets download at startup.
+No container image is available at this time. The image build must compare the built image with this inventory.
+The manifest contains 0 records with `download: included`, with component records in that count.
+The asset checker and its tests stay unchanged.
+
+Commands from the repository root:
+
+```sh
+uv run --locked pytest tests/providers -q
+ASSIST_LIVE_MODEL_CACHE="$TURN_MODEL_CACHE" task check
+UV_PROJECT_ENVIRONMENT="$FLOOR_ENV" uv run --locked --python 3.14.2 pytest tests/ -q
+unshare -rn sh -c 'ip link set lo up && UV_OFFLINE=1 uv run --locked pytest -q'
+uv lock --check
+uv run --locked python tools/tune_profiles.py --validate-partials \
+  --labels "$WORKSPACE/assist-live/tests/data/labels.jsonl" \
+  --partials docs/reports/q6-partials.jsonl \
+  --stt-model-id nvidia/parakeet-tdt-0.6b-v2 \
+  --stt-revision 0bbb45a3365852604aef28b538a8f066f4ccaa85 \
+  --provider-config-sha256 b4ede9e1a2e15e6dafd8e40680691d40760ad11904a9496edc2afe653a331eab
+uv run --project "$WORKSPACE/assist-live" python \
+  "$WORKSPACE/assist-live/tools/check_public_tree.py" --history --root . \
+  --private-denylist "$PRIVATE_DENYLIST"
+```
+
+The provider suite reports `15 passed`.
+The complete suite, floor suite, and network-blocked suite each report `505 passed`.
+The complete check reports `All checks passed!`, `PASS CI boundaries`, and `Success: no issues found in 34 source files`.
+It also reports `PASS server bootstrap`, `PASS isolated client and server packages`, and `PASS asset licenses`.
+The lock check resolves 60 packages without a change.
+The unchanged export reports `PASS partial trajectories rows=250 tuning=50 held_out=200`.
+
+The worktree task reports `NOT CHECKED public tree` because the sibling checker is missing there.
+The explicit canonical check reports `PASS own Git root`, `PASS history secrets`, and `PASS public data matches=0`.
+The ASD-STE100 checker reports 0 findings in this record, `STRUCTURE.md`, and `docs/providers/stt.md`.
+
+Nine valid-Python mutations each cause a behavioral test failure:
+
+1. Remove the onset gate.
+2. Remove the 15 s limit.
+3. Put input chunks in opposite order.
+4. Decode only the last interval at finish.
+5. Remove the 400 ms pause minimum.
+6. Remove the 800 ms pause maximum.
+7. Remove the sorted, non-overlap interval check.
+8. Discard the newest pending tick.
+9. Remove finish-first scheduling.
+
+The 250-recording replay used the pinned Silero VAD, 512-sample frames, and threshold 0.5.
+The automatic corpus `alignment_words` field supplies the first-word time.
+Nonempty results before that time fell from 319 to 12, across 229 to 12 recordings.
+All 250 recordings had a VAD onset. The 12 remaining results follow a VAD signal before the aligned first-word time.
+No held-out threshold changed.
+
+The external cost test used one, two, and four concurrent sessions with a 100 ms heartbeat.
+The 15 s test used 100 sessions for each of the one-session and four-session configurations.
+With four 15 s sessions, interval wall-time p50/p99 was 570.39/926.56 ms, with queue time.
+Finish wall-time p50/p99 was 901.48/968.36 ms. Heartbeat lag p99 was 1.82 ms.
+
+The same four-session workload then ran again with finish-first scheduling.
+Finish wall-time p50/p99 was 496.30/555.33 ms, with heartbeat lag p99 of 1.74 ms.
+Interval wall-time p50/p99 rose to 844.61/1636.86 ms.
+The second test had 100 finish calls and 498 heartbeat observations. Background host load was not constant between tests.
+One-minute host load stayed below 32.
+
+See [local voice recognition](providers/stt.md) for the two cost tables, worker-only times, source pins, and measurement limits.
+
+The gateway connection to `speech_started()` is not in this provider change.
+Human pause acceptance and the target-device baseline stay pending.
+No container image, device trial, cloud call, model file, or audio file is part of this change.
+The project is experimental and has no release.

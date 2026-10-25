@@ -70,7 +70,7 @@
   },
   "schema": 1,
   "release_root": "..",
-  "image_inventory": null,
+  "image_inventory": [],
   "download_plan": [
     {"id": "stt-parakeet", "url": "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx/resolve/0bbb45a3365852604aef28b538a8f066f4ccaa85/encoder-model.int8.onnx", "sha256": "3e0581fda6ab843888b51e56d7ee78b6d5bc3237ec113af1f732d1d5286aa155", "path": "models/stt/parakeet/encoder-model.int8.onnx"},
     {"id": "stt-parakeet-decoder", "url": "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx/resolve/0bbb45a3365852604aef28b538a8f066f4ccaa85/decoder_joint-model.int8.onnx", "sha256": "a449f49acd68979d418651dd2dcb737cc0f1bf0225e009e29ee326354edbf7d3", "path": "models/stt/parakeet/decoder_joint-model.int8.onnx"},

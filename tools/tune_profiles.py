@@ -180,6 +180,7 @@ def policy_labels(row: Evidence, duration_ms: float | None = None) -> Evidence:
             raise ValueError(f"{description} interval labels missing")
         if not isinstance(intervals, list) or (not required and intervals):
             raise ValueError(f"invalid {description} interval labels")
+        previous_end = 0
         for interval in intervals:
             if (
                 not isinstance(interval, list)
@@ -192,6 +193,13 @@ def policy_labels(row: Evidence, duration_ms: float | None = None) -> Evidence:
                 or (duration_ms is not None and interval[1] > duration_ms)
             ):
                 raise ValueError(f"invalid {description} interval labels")
+            if description == "pause" and not 400 <= interval[1] - interval[0] <= 800:
+                raise ValueError("pause interval duration must be 400 to 800 ms")
+            if interval[0] < previous_end:
+                raise ValueError(
+                    f"{description} intervals must be sorted without overlap"
+                )
+            previous_end = interval[1]
         row[field] = intervals
     return row
 

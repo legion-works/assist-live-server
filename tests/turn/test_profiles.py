@@ -570,3 +570,48 @@ def test_replay_flushes_received_final_silence():
         ]
         == 1500
     )
+
+
+@pytest.mark.parametrize("interval", [[100, 499], [100, 901]])
+def test_pause_interval_width_is_400_to_800_inclusive(evidence, interval):
+    from tools.tune_profiles import policy_labels
+
+    label, _, _ = evidence
+    label["pause_intervals_ms"] = [interval]
+    with pytest.raises(ValueError, match="pause interval duration"):
+        policy_labels(label, 2000)
+
+
+@pytest.mark.parametrize("interval", [[100, 500], [100, 900]])
+def test_pause_interval_width_accepts_both_limits(evidence, interval):
+    from tools.tune_profiles import policy_labels
+
+    label, _, _ = evidence
+    label["pause_intervals_ms"] = [interval]
+    assert policy_labels(label, 2000)["pause_intervals_ms"] == [interval]
+
+
+@pytest.mark.parametrize(
+    "field", ["pause_intervals_ms", "executable_prefix_intervals_ms"]
+)
+@pytest.mark.parametrize(
+    "intervals", [[[500, 1000], [100, 600]], [[100, 600], [500, 1000]]]
+)
+def test_interval_lists_require_sorted_nonoverlap(evidence, field, intervals):
+    from tools.tune_profiles import policy_labels
+
+    label, _, _ = evidence
+    label[field] = intervals
+    with pytest.raises(ValueError, match="sorted without overlap"):
+        policy_labels(label, 2000)
+
+
+@pytest.mark.parametrize(
+    "field", ["pause_intervals_ms", "executable_prefix_intervals_ms"]
+)
+def test_interval_lists_accept_adjacent_intervals(evidence, field):
+    from tools.tune_profiles import policy_labels
+
+    label, _, _ = evidence
+    label[field] = [[0, 400], [400, 1200]]
+    assert policy_labels(label, 2000)[field] == [[0, 400], [400, 1200]]

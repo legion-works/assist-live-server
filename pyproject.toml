@@ -24,7 +24,6 @@ dev = [
     "PyYAML>=6",
     "types-PyYAML>=6",
     "transformers==5.20.2",
-    "onnx-asr==0.12.0",
     "sherpa-onnx==2.0.0",
 ]
 

@@ -61,3 +61,11 @@ Privacy checks use the canonical `assist-live/tools/check_public_tree.py`, not a
 
 Model files stay in an external cache. They are not in the Python packages.
 The client package has no model runtime or asset manifest.
+
+## Local voice recognition
+
+- `server/assist_live_server/providers/stt.py`: session interface, bounded executor, and provider registry.
+- `server/assist_live_server/providers/parakeet.py`: pinned local model and onset-gated complete-buffer decode.
+- `server/assist_live_server/providers/streaming_local.py`: no streaming default.
+- `tests/providers/`: input order, first word, onset, cancellation, buffer, and queue limits.
+- `docs/providers/stt.md`: compatible-mode contract, decode cost, and replay limits.
