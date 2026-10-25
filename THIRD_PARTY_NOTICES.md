@@ -26,9 +26,25 @@ license: cc-by-4.0
 ```
 
 Keep this attribution, the source URLs, and the license URL when you supply these files.
-The `onnx-asr==0.12.0` and `sherpa-onnx==2.0.0` packages are benchmark development dependencies only.
-They are not server runtime or client dependencies.
 No streaming model has a selection for release use.
+
+## onnx-asr runtime package
+
+The server runtime uses the `onnx-asr==0.12.0` package from PyPI to run the Parakeet model.
+The package uses the MIT license, not the project Apache-2.0 license.
+
+```text
+MIT License
+
+Copyright (c) 2025 Ilya Stupakov
+```
+
+- Source: https://github.com/istupakov/onnx-asr
+- Package metadata: `License-Expression: MIT`, with the license text in the `LICENSE` file of the wheel.
+
+Keep the copyright line and the MIT license text when you supply this package.
+The `sherpa-onnx==2.0.0` package is a benchmark development dependency only.
+It is not a server runtime or client dependency.
 
 ## Bootstrap
 

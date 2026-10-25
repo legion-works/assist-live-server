@@ -1761,3 +1761,20 @@ The gateway connection to `speech_started()` is not in this provider change.
 Human pause acceptance and the target-device baseline stay pending.
 No container image, device trial, cloud call, model file, or audio file is part of this change.
 The project is experimental and has no release.
+
+## Runtime package record for onnx-asr
+
+Date: 2026-10-25.
+
+The local Parakeet provider made `onnx-asr==0.12.0` a server runtime dependency.
+`THIRD_PARTY_NOTICES.md` records it as a runtime package.
+The record gives the MIT license, the copyright line, and the source.
+The earlier notice said that `onnx-asr` was a benchmark development dependency only.
+That statement is incorrect after the provider change.
+
+The section "Local STT replay measurements" above says that the server and client runtime dependencies stay unchanged.
+That statement was correct at that date.
+The section "Local voice recognition" supersedes it.
+`sherpa-onnx==2.0.0` stays a benchmark development dependency only.
+
+The package metadata of the installed wheel gives `License-Expression: MIT` and `License-File: LICENSE`.
