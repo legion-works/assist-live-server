@@ -19,6 +19,25 @@ def pcm(ms):
     return bytes(ms * 32)
 
 
+def test_speech_onset_property_is_once_per_turn_and_uses_existing_vad():
+    calls = []
+
+    def vad(samples):
+        calls.append(True)
+        return float(np.any(samples))
+
+    d = TurnDetector(vad_probability=vad, turn_probability=lambda _: 0)
+    assert d.speech_started_at_ms is None
+    d.push(pcm(32), "")
+    assert d.speech_started_at_ms is None
+    d.push(np.ones(512, dtype="<i2").tobytes(), "")
+    assert d.speech_started_at_ms == 32.0
+    d.push(pcm(32), "")
+    d.push(np.ones(512, dtype="<i2").tobytes(), "")
+    assert d.speech_started_at_ms == 32.0
+    assert len(calls) == 4
+
+
 def test_incomplete_transcript_blocks_early_end(detector):
     assert not detector.candidate(
         silence_ms=500, probability=0.99, partial="turn on the"

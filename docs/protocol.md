@@ -51,17 +51,21 @@ The device WebSocket has a global limit of 64 concurrent connections for each se
 The server refuses a connection above this limit with HTTP `503`, before the WebSocket upgrade.
 That refusal also closes the HTTP transport. The HTTP connection does not stay open.
 
-Each connection must send its first authenticated device event in less than two seconds. If it does not, the server closes it with code `1008`.
+Each connection must send its first authenticated device event in less than two seconds.
+If it does not, the server sends a close frame with code `1008` and `reason` `event timeout`.
 An authenticated connection does not use that first-event deadline for subsequent events.
 
 Each authenticated device can hold a maximum of four slots. A connection cannot change its device identity.
-A device connection above that limit closes with code `1008` after its first authenticated event.
-Each event has a two-second acceptance-result deadline. A timeout closes the connection with code `1008`.
+A device connection above that limit closes with code `1008` and `reason` `event refused` after its first authenticated event.
+Each event has a two-second acceptance-result deadline.
+A timeout sends a close frame with code `1008` and `reason` `event timeout`.
 
 Ping and pong frames do not restart the authentication deadline.
 The server gives a peer 100 ms to reply to a close frame, then closes the transport and releases its connection slot.
 
-One refused event closes `/v1/device` with code `1008`. A frame above 4,096 bytes closes it with code `1009`.
+One refused event closes `/v1/device` with code `1008` and `reason` `event refused`.
+A slot-cap refusal and a bad-event refusal send the same close frame.
+A frame above 4,096 bytes closes it with code `1009`.
 The firmware must make a new connection for subsequent events after a close.
 UDP has no connection close or error reply. The listener drops a refused or oversized datagram and continues with subsequent datagrams.
 
@@ -283,11 +287,42 @@ The client gives PCM chunks to the integration without headers.
 
 This message does not change transcript bytes.
 Destinations are `local` or `cloud`.
+Without a speaker plug-in, the streaming STT gateway sends an empty `name`, distance `0.0`, and destination `local`.
+This result does not identify a speaker.
 
 Timing records for STT, TTS, fallback, and speaker ID use `data.part`, `data.provider`, and `data.destination` for the actual used service.
 
 The backend supplies these records.
 The protocol does not select a provider or tune the `safe` and `fast` settings.
+
+### Streaming STT
+
+`create_app(..., audio_gateway=AudioGateway(provider_factory))` selects the streaming STT path.
+The factory receives the configured provider ID and makes one `STTSession` before the first audio frame.
+The default ID is `parakeet`. Configuration can select a different ID without a second audio path.
+Load a local provider before the service starts, then supply its `session` method through the factory.
+
+Each turn has its own detector and session. Detection and STT decode run at the same time.
+
+The detector's first VAD onset calls `STTSession.speech_started()` one time. There is no second VAD.
+
+The gateway flushes received detector samples at a stream stall without adding audio time.
+It stops input at the endpoint, at 15 seconds of audio, or 15 seconds after input starts.
+It calls `finish()` one time after input stops.
+
+The server sends `end_decision`, one `final`, then `speaker_result` before `end` and stream close.
+A provider failure sends one terminal `error` with code `stt_failed`, not a `final`.
+The server does not retry or use fallback after a `final`.
+The `final.text` value stays unchanged. Text from `partial` is not a complete result.
+
+The store receives `speech_start`, `end_candidate`, `end_decision`, `stt_partial`, `stt_final`, and `speaker_result` timing events.
+These events use server UTC time and `quality=measured` at the server observation, not a device sample timestamp.
+A candidate starts when the received time without voice is at the detector profile's minimum.
+New voice starts a new candidate interval.
+
+The store keeps `stt_partial` timing events without transcript text. The two transcript settings control `stt_final` text only.
+Disconnect cancels the session and awaits the gateway tasks.
+CPU work can finish in its `thread` after cancellation, but it cannot write a socket or store event.
 
 ## Heartbeats and limits
 
@@ -295,7 +330,10 @@ Each open audio turn has one heartbeat task, with an interval of 100 ms.
 The task also runs while the backend waits for a result.
 The client stops after 600 ms without a message.
 
-The server stops STT input after 600 ms without a message until it gets `end`.
+The streaming STT gateway stops input after 600 ms without input, flushes received samples, and finishes recognition.
+It does not add audio samples during that wait. The heartbeat continues during input and result waits.
+The legacy backend path closes after 600 ms without input until it gets `end`.
+
 The TTS text path has a different limit of 30 seconds without text, before its first part and between parts.
 Heartbeats continue during text waits. The client's 600 ms server-message deadline does not change.
 
@@ -309,6 +347,9 @@ Close cancels and awaits the heartbeat, input, output, and client sender tasks.
 | Subscription or export record | 16,384 bytes | One record at a time |
 
 WebSocket compression is off. The frame parser has a set message limit before JSON decoding.
+The audio maximum is inclusive. The server accepts a correct 32,021-byte frame.
+A 32,022-byte frame closes with code `1009`.
+
 The UDP stack supplies one bounded datagram. The adapter checks its length before JSON decoding or queue allocation.
 
 HTTP and export readers check each bounded chunk before they extend a buffer.

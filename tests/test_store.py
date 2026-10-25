@@ -7,6 +7,23 @@ import pytest
 from assist_live_client import TimingEvent, TurnOpen
 
 
+def test_duplicate_turn_uses_typed_error(tmp_path):
+    from assist_live_server.protocol import TurnExistsError
+    from assist_live_server.store import SQLiteStore
+
+    async def run():
+        store = SQLiteStore(tmp_path / "turns.db")
+        try:
+            turn = TurnOpen(str(uuid7()), "satellite-a", "voice", None, None)
+            await store.open_turn(turn)
+            with pytest.raises(TurnExistsError):
+                await store.open_turn(turn)
+        finally:
+            store.close()
+
+    asyncio.run(run())
+
+
 def test_retention_and_status_queries_use_indexes_and_acceptance_has_no_scans(tmp_path):
     from assist_live_server.auth import Registry
     from assist_live_server.event_gateway import EventGateway

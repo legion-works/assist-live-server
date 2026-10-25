@@ -3,7 +3,7 @@ description: Request a server or client function.
 body:
   - type: markdown
     attributes:
-      value: This project is experimental and has no release. Do not include personal data.
+      value: This project is experimental and has no release. Do not include secrets, personal data, or household recordings.
   - type: textarea
     id: need
     attributes:

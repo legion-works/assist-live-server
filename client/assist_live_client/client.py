@@ -206,6 +206,7 @@ class AssistLiveClient:
         voice: str = "",
     ) -> AsyncGenerator[dict[str, Any] | bytes]:
         sender: asyncio.Task[None] | None = None
+        received_terminal = False
         try:
             async with self._connection().ws_connect(
                 self.url + "/v1/audio",
@@ -248,7 +249,7 @@ class AssistLiveClient:
                 expected_seq = 0
                 got_format = False
                 while True:
-                    if sender.done():
+                    if sender.done() and not received_terminal:
                         sender.result()
                     reply = await ws.receive(timeout=MESSAGE_DEADLINE)
                     if (
@@ -263,6 +264,11 @@ class AssistLiveClient:
                         yield pcm
                     elif reply.type == aiohttp.WSMsgType.TEXT:
                         value = decode_control(reply.data, turn_id)
+                        if value["type"] == "end" or (
+                            mode == "stt" and value["type"] == "final"
+                        ):
+                            received_terminal = True
+                            sender.cancel()
                         if value["type"] == "end":
                             return
                         if value["type"] == "error":
@@ -280,7 +286,11 @@ class AssistLiveClient:
             if sender is not None:
                 sender.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
-                    await sender
+                    try:
+                        await sender
+                    except aiohttp.ClientConnectionResetError:
+                        if not received_terminal:
+                            raise
 
     async def stt(
         self, turn_id: str, audio: AsyncIterator[bytes]

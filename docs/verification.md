@@ -1778,3 +1778,82 @@ The section "Local voice recognition" supersedes it.
 `sherpa-onnx==2.0.0` stays a benchmark development dependency only.
 
 The package metadata of the installed wheel gives `License-Expression: MIT` and `License-File: LICENSE`.
+
+## Streaming voice recognition gateway
+
+Date: 2026-10-25 (UTC).
+
+The streaming gateway selects one configured STT session before input audio.
+Each turn has its own detector. The detector's VAD onset starts interval decode in the STT session.
+The heartbeat has its own timer. Detection and STT decode run at the same time.
+
+The server stops input at the detector endpoint, at 15 seconds of audio, or 15 seconds after input starts.
+It flushes received samples at a stream stall and calls `finish()` after input stops.
+The store receives onset, candidate, decision, `stt_partial`, `stt_final`, and speaker timing events.
+The store keeps no text from `partial`. The two-setting policy controls `stt_final` text only.
+
+The audio route had a boundary defect: aiohttp refused a correct 32,021-byte frame at the protocol maximum.
+The route accepts that frame. A 32,022-byte frame closes with code `1009`.
+The contract test checks the two boundaries.
+
+The client stops its audio sender when it receives `final` or `end`.
+A late `ClientConnectionResetError` from that sender does not replace the complete result.
+Transport errors before `final` and other source errors propagate.
+The Home Assistant integration gets this client change only after its client dependency pin changes.
+
+Commands from the server repository:
+
+```sh
+uv run pytest tests/test_audio_gateway.py tests/contract/test_streaming_stt.py -q
+task check
+UV_LINK_MODE=copy UV_PROJECT_ENVIRONMENT="$CHECK_ENVIRONMENT" uv run --locked --python 3.14.2 pytest tests/ -q
+unshare -rn sh -c 'ip link set lo up && UV_OFFLINE=1 uv run --locked pytest -q'
+uv run python "$REPLAY_PROBE"
+uv run python "$MUTATION_PROBE"
+uv run --project "$WORKSPACE/assist-live" python "$WORKSPACE/assist-live/tools/check_public_tree.py" --history --root . --private-denylist "$PRIVATE_DENYLIST"
+```
+
+Set `ASSIST_LIVE_MODEL_CACHE` to the same external cache that `task unit` uses.
+The RED result was `ModuleNotFoundError: No module named 'assist_live_server.audio_gateway'`.
+
+The gateway tests gave `PASS`. The complete suite gave `PASS` on Python 3.14.3 and 3.14.2.
+The suite also gave `PASS` without external network access.
+
+The `task check` command gave `PASS` for Ruff, mypy, unit tests, bootstrap, the two packages, asset checks, and secret checks.
+Its public-tree step reported `NOT CHECKED public tree` because the worktree has no sibling integration checkout.
+The explicit canonical checker gave `PASS own Git root` and `PASS public data matches=0`.
+The history secret check also gave `PASS`.
+
+The external replay probe used the Parakeet provider and Silero VAD and Smart Turn models, not test doubles.
+It sent 32 ms frames at real-time intervals, then added a maximum of 1.6 seconds without voice.
+All five recordings sent `end_decision`, one `final`, and `speaker_result` before stream close.
+The probe compared each `final.text` value with the provider's `finish()` result. All values stayed unchanged.
+
+The five source WAV SHA-256 values were:
+
+```text
+00f7031f4ecbe360965e9012a7b2c7f713f1dc0315eee73b2eec418a57f20fa6
+0136e4bde0e4e9511f0394cefd5b06c21f8534d17eac88dc87b3f9a100aa48dc
+02cbc1043f5991259e71669d7bce7f5d5442d042c45909856064d1f9518b75ba
+0311dcfa53376ffe166231f91e97d26e75fd52d3057be2988cd54d439c28ed91
+042c1802259254dc52523c510fd34bcdafd622432bcd425de26c9f1aab0052a2
+```
+
+These recordings are from the external licensed STT replay corpus. No audio file is in this change.
+This small probe does not measure recognition quality, human pause acceptance, or target-device capacity.
+
+Eight isolated source mutations each gave an unsatisfactory result in its target test:
+
+1. A heartbeat that waits for an audio frame.
+2. Two complete results for one turn.
+3. Work that continues after turn cancellation.
+4. No forwarding of the VAD onset to STT.
+5. No `finish()` call at the audio bound.
+6. Acceptance after a non-SQLite store failure.
+7. Refusal of the inclusive audio-frame maximum.
+8. Continued source input after `final`.
+
+The non-SQLite acceptance task refuses a store failure.
+A typed `TurnExistsError`, not error text, selects HTTP `409` for concurrent opens of the same turn.
+The `feature.yml` template tells users not to include secrets or household recordings.
+The project is experimental and has no release. No device trial, cloud call, publication, or commit is part of these checks.

@@ -22,11 +22,13 @@ from assist_live_client.protocol import (
     parse_json,
 )
 
+from .audio_gateway import AudioGateway
 from .auth import Registry
 from .event_gateway import EventGateway
 from .protocol import (
     AudioBackend,
     TimingIngress,
+    TurnExistsError,
     TurnStore,
     UDPTransport,
     WebSocketTransport,
@@ -46,6 +48,7 @@ def create_app(
     backend: AudioBackend | None = None,
     *,
     record_transcripts: bool = False,
+    audio_gateway: AudioGateway | None = None,
     ingress: TimingIngress | None = None,
     udp_address: tuple[str, int] | None = None,
 ) -> web.Application:
@@ -189,7 +192,7 @@ def create_app(
             {
                 "version": 1,
                 "healthy": store is not None
-                and backend is not None
+                and (backend is not None or audio_gateway is not None)
                 and registry.replay_store is not None,
             }
         )
@@ -239,10 +242,8 @@ def create_app(
             raise web.HTTPConflict(text="turn already exists")
         try:
             await storage().open_turn(turn)
-        except ValueError as error:
-            if str(error) == "turn already exists":
-                raise web.HTTPConflict(text="turn already exists") from None
-            raise
+        except TurnExistsError:
+            raise web.HTTPConflict(text="turn already exists") from None
         return web.json_response({"version": 1})
 
     async def turn(request: web.Request) -> web.Response:
@@ -355,9 +356,10 @@ def create_app(
     async def audio(request: web.Request) -> web.WebSocketResponse:
         satellites = allowed(request)
         target = storage()
-        if backend is None:
+        if backend is None and audio_gateway is None:
             raise web.HTTPServiceUnavailable(text="audio unavailable")
-        ws = web.WebSocketResponse(max_msg_size=MAX_AUDIO, compress=False)
+        # aiohttp refuses equality. The protocol maximum is inclusive.
+        ws = web.WebSocketResponse(max_msg_size=MAX_AUDIO + 1, compress=False)
         await ws.prepare(request)
         tasks: list[asyncio.Task[None]] = []
         try:
@@ -367,6 +369,8 @@ def create_app(
             negotiation = decode_control(first.data)
             if negotiation["type"] != "negotiate":
                 raise ValueError("negotiation required")
+            if negotiation["mode"] == "tts" and backend is None:
+                raise ValueError("TTS unavailable")
             turn_id = negotiation["turn_id"]
             turn_value = await target.get_turn(turn_id)
             if turn_value is None or turn_value["satellite"] not in satellites:
@@ -378,6 +382,28 @@ def create_app(
             )
             queue: asyncio.Queue[bytes | str | None] = asyncio.Queue(maxsize=16)
             lock = asyncio.Lock()
+            input_stopped = asyncio.Event()
+
+            async def record(stage: str, data: dict[str, object]) -> None:
+                if stage == "end_decision":
+                    input_stopped.set()
+                    while not queue.empty():
+                        queue.get_nowait()
+                stamp = data.get("t_utc_ns")
+                event = TimingEvent(
+                    turn_id,
+                    turn_value["satellite"],
+                    "server",
+                    stage,
+                    stamp if isinstance(stamp, int) else time.time_ns(),
+                    "measured",
+                    None,
+                    data=data,
+                )
+                transcript = bool(
+                    record_transcripts and turn_value["record_transcripts"]
+                )
+                await target.append(replace(event, data=safe_data(event, transcript)))
 
             async def send(value: dict[str, Any]) -> None:
                 async with lock:
@@ -392,15 +418,27 @@ def create_app(
                 expected_seq = 0
                 ended = False
                 while True:
-                    message = await ws.receive(
-                        timeout=None
-                        if ended
-                        else (
-                            TEXT_IDLE_TIMEOUT
-                            if negotiation["mode"] == "tts"
-                            else MESSAGE_DEADLINE
+                    try:
+                        message = await ws.receive(
+                            timeout=None
+                            if ended or input_stopped.is_set()
+                            else (
+                                TEXT_IDLE_TIMEOUT
+                                if negotiation["mode"] == "tts"
+                                else MESSAGE_DEADLINE
+                            )
                         )
-                    )
+                    except TimeoutError:
+                        if negotiation["mode"] != "stt" or audio_gateway is None:
+                            raise
+                        ended = True
+                        await queue.put(None)
+                        continue
+                    if input_stopped.is_set() and message.type in {
+                        WSMsgType.BINARY,
+                        WSMsgType.TEXT,
+                    }:
+                        continue
                     if ended:
                         raise ValueError("input already ended")
                     if (
@@ -440,26 +478,52 @@ def create_app(
 
             async def produce() -> None:
                 if negotiation["mode"] == "stt":
-                    async for reply in backend.stt(turn_id, pcm_input()):
-                        reply = decode_control(json.dumps(reply), turn_id)
-                        if reply.get("type") == "final":
-                            data: dict[str, object] = {}
-                            if record_transcripts and turn_value["record_transcripts"]:
-                                data["transcript"] = reply["text"]
-                            await target.append(
-                                TimingEvent(
-                                    turn_id,
-                                    turn_value["satellite"],
-                                    "server",
-                                    "stt_final",
-                                    time.time_ns(),
-                                    "measured",
-                                    None,
-                                    data=data,
+                    if audio_gateway is not None:
+                        replies = audio_gateway.stt(turn_id, pcm_input(), record=record)
+                    else:
+                        assert backend is not None
+                        replies = backend.stt(turn_id, pcm_input())
+                    terminal = False
+                    speaker = False
+                    try:
+                        async for reply in replies:
+                            reply = decode_control(json.dumps(reply), turn_id)
+                            kind = reply["type"]
+                            if terminal and kind != "speaker_result":
+                                continue
+                            if kind in {"final", "error"}:
+                                terminal = True
+                            metadata: dict[str, object] = {}
+                            if audio_gateway is not None:
+                                metadata = {
+                                    "part": "stt",
+                                    "provider": audio_gateway.provider,
+                                }
+                            if kind in {"partial", "final"}:
+                                await record(
+                                    "stt_final" if kind == "final" else "stt_partial",
+                                    {**metadata, "transcript": reply["text"]},
                                 )
+                            elif kind == "speaker_result":
+                                if speaker or not terminal:
+                                    continue
+                                speaker = True
+                                await record("speaker_result", reply)
+                            elif kind == "error":
+                                await record("stt_failed", metadata)
+                            await send(reply)
+                            if kind == "error":
+                                break
+                        if not terminal:
+                            await record("stt_failed", {})
+                            await send(
+                                encode_control("error", turn_id, code="stt_failed")
                             )
-                        await send(reply)
+                    finally:
+                        if hasattr(replies, "aclose"):
+                            await replies.aclose()
                 else:
+                    assert backend is not None
                     await send(
                         encode_control(
                             "format",

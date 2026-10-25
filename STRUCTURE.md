@@ -69,3 +69,6 @@ The client package has no model runtime or asset manifest.
 - `server/assist_live_server/providers/streaming_local.py`: no streaming default.
 - `tests/providers/`: input order, first word, onset, cancellation, buffer, and queue limits.
 - `docs/providers/stt.md`: compatible-mode contract, decode cost, and replay limits.
+- `server/assist_live_server/audio_gateway.py`: per-turn STT sessions, detector calls, and `partial` results.
+- `tests/test_audio_gateway.py`: onset, endpoint, stall, bound, and concurrent decode tests.
+- `tests/contract/test_streaming_stt.py`: streaming messages, timing events, disconnect, and audio-frame limits.

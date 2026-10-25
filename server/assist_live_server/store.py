@@ -18,7 +18,7 @@ from assist_live_client.models import (
 from assist_live_client.protocol import MAX_CONTROL
 
 from .auth import Registry
-from .protocol import DeviceEvent
+from .protocol import DeviceEvent, TurnExistsError
 from .replay_store import SQLiteReplayStore, connect
 
 
@@ -350,7 +350,7 @@ class SQLiteStore:
             if self.connection.execute(
                 "SELECT 1 FROM turns WHERE turn_id=?", (turn.turn_id,)
             ).fetchone():
-                raise ValueError("turn already exists")
+                raise TurnExistsError("turn already exists")
             if turn.parent_turn_id is not None:
                 parent = self.connection.execute(
                     "SELECT satellite FROM turns WHERE turn_id=?",

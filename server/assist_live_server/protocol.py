@@ -19,6 +19,10 @@ MAX_DEVICE_CONNECTIONS = 64
 MAX_DEVICE_PER_DEVICE = 4
 
 
+class TurnExistsError(ValueError):
+    """The turn identifier already exists in the store."""
+
+
 class TurnStore(Protocol):
     async def open_turn(self, turn: TurnOpen) -> None: ...
     async def append(self, event: TimingEvent) -> None: ...

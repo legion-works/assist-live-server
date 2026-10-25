@@ -223,6 +223,7 @@ class TurnDetector:
         self.samples = 0
         self.silent_samples = 0
         self.done = False
+        self.speech_started_at_ms: float | None = None
         self.last_turn_samples = -SMART_TURN_INTERVAL_SAMPLES
         self.last_turn_partial: str | None = None
 
@@ -275,6 +276,8 @@ class TurnDetector:
                 voice = self.vad_probability(np.pad(samples, (0, 512 - len(samples))))
                 if not math.isfinite(voice) or not 0 <= voice <= 1:
                     raise ValueError("invalid VAD probability")
+                if voice >= 0.5 and self.speech_started_at_ms is None:
+                    self.speech_started_at_ms = (self.samples - count) / 16
                 self.silent_samples = self.silent_samples + count if voice < 0.5 else 0
                 silence_ms = self.silent_samples / 16
                 if silence_ms >= self.profile.max_silence_ms:

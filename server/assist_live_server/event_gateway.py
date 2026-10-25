@@ -91,9 +91,11 @@ class EventGateway:
                     ingress.refused += 1
                 backoff = 0.1
             except asyncio.CancelledError:
+                accepted = False
                 ingress.dropped += 1
                 raise
             except Exception:
+                accepted = False
                 # Exception text can contain credentials or event data.
                 LOGGER.error("timing acceptance failed")
                 ingress.worker_errors += 1

@@ -109,6 +109,73 @@ def test_worker_store_error_resolves_result_and_accepts_next_event(
     asyncio.run(run())
 
 
+def test_non_sqlite_store_failure_refuses_acceptance_result(replay_store):
+    from contextlib import suppress
+
+    from assist_live_server.auth import Registry
+    from assist_live_server.event_gateway import EventGateway
+    from assist_live_server.protocol import TimingIngress
+
+    from tests.contract.conftest import MemoryStore
+
+    class FailingStore(MemoryStore):
+        async def append(self, event):
+            raise RuntimeError("synthetic append failure")
+
+    async def run():
+        registry = Registry(replay_store=replay_store)
+        registry.bind("satellite-a", "satellite-a", b"synthetic-device-key")
+        ingress = TimingIngress(registry)
+        worker = asyncio.create_task(EventGateway(FailingStore()).run(ingress))
+        try:
+            result = asyncio.get_running_loop().create_future()
+            assert ingress.accept(packet(0), result=result)
+            assert await asyncio.wait_for(result, 2) is False
+            await ingress.queue.join()
+            assert ingress.accepted == 0
+            assert ingress.refused == 1 and ingress.worker_errors == 1
+        finally:
+            worker.cancel()
+            with suppress(asyncio.CancelledError):
+                await worker
+
+    asyncio.run(run())
+
+
+def test_duplicate_turn_error_type_controls_conflict_not_message(tmp_path, monkeypatch):
+    from dataclasses import asdict
+
+    from assist_live_server.protocol import TurnExistsError
+
+    async def run():
+        async with service(tmp_path) as (client, session, store, _, _):
+
+            async def duplicate(turn):
+                raise TurnExistsError("different store wording")
+
+            monkeypatch.setattr(store, "open_turn", duplicate)
+            turn = TurnOpen(str(uuid7()), "satellite-a", "voice", None, None)
+            async with session.post(
+                "http://service.invalid/v1/turns",
+                headers=client._headers,
+                json=asdict(turn),
+            ) as response:
+                assert response.status == 409
+
+            async def invalid(turn):
+                raise ValueError("turn already exists")
+
+            monkeypatch.setattr(store, "open_turn", invalid)
+            async with session.post(
+                "http://service.invalid/v1/turns",
+                headers=client._headers,
+                json=asdict(turn),
+            ) as response:
+                assert response.status == 400
+
+    asyncio.run(run())
+
+
 def test_maintenance_recovers_after_store_error(tmp_path, monkeypatch, caplog):
     from assist_live_server.store import SQLiteStore
 
