@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from aiohttp import WSMsgType, web
-from assist_live_client.models import TimingEvent, TurnOpen
+from assist_live_client.models import TimingEvent, TurnOpen, TurnRecord
 from assist_live_client.protocol import parse_json
 
 from .auth import Registry, verify_event
@@ -16,7 +16,7 @@ MAX_DEVICE = 4096
 class TurnStore(Protocol):
     async def open_turn(self, turn: TurnOpen) -> None: ...
     async def append(self, event: TimingEvent) -> None: ...
-    async def get_turn(self, turn_id: str) -> dict[str, Any] | None: ...
+    async def get_turn(self, turn_id: str) -> TurnRecord | None: ...
     def export(
         self, satellite: str, since_utc_ns: int
     ) -> AsyncIterator[dict[str, Any]]: ...
@@ -40,6 +40,8 @@ class DeviceEvent:
     event: dict[str, Any]
     new_boot: bool
     arrival_ns: int
+    result: asyncio.Future[bool] | None = None
+    credential_epoch: int = 0
 
 
 class TimingIngress:
@@ -48,26 +50,29 @@ class TimingIngress:
             raise ValueError("invalid queue size")
         self.registry = registry
         self.queue: asyncio.Queue[DeviceEvent] = asyncio.Queue(maxsize=queue_size)
+        self.accepted = 0
+        self.refused = 0
+        self.dropped = 0
 
-    def accept(self, packet: bytes) -> bool:
+    def accept(
+        self, packet: bytes, *, result: asyncio.Future[bool] | None = None
+    ) -> bool:
         arrival_ns = time.time_ns()
         if len(packet) > MAX_DEVICE or self.queue.full():
+            self.dropped += 1
             return False
         try:
             event = parse_json(packet, MAX_DEVICE)
             tag = event.pop("tag")
-            credentials = self.registry.device(event["device"])
+            credentials = self.registry.device_snapshot(event["device"])
             if credentials is None or not verify_event(event, tag, credentials[1]):
                 return False
             satellite = credentials[0]
             if event["data"].get("satellite", satellite) != satellite:
                 return False
-            new_boot = self.registry.replay[event["device"]].boot != event["boot"]
-            if not self.registry.accept_sequence(
-                event["device"], event["boot"], event["seq"]
-            ):
-                return False
-            self.queue.put_nowait(DeviceEvent(satellite, event, new_boot, arrival_ns))
+            self.queue.put_nowait(
+                DeviceEvent(satellite, event, False, arrival_ns, result, credentials[2])
+            )
             return True
         except ValueError, TypeError, KeyError, RecursionError:
             return False
@@ -107,7 +112,8 @@ class WebSocketTransport:
             packet = (
                 message.data.encode() if isinstance(message.data, str) else message.data
             )
-            if not self.accept(packet):
+            result = asyncio.get_running_loop().create_future()
+            if not self.ingress.accept(packet, result=result) or not await result:
                 await ws.close(code=1008, message=b"event refused")
                 break
         return ws

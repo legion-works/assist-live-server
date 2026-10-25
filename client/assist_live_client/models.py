@@ -1,6 +1,6 @@
 import math
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, NotRequired, TypedDict
 from uuid import UUID
 
 STAGES = frozenset(
@@ -59,6 +59,30 @@ class TurnOpen:
             not isinstance(self.conversation_id, str) or len(self.conversation_id) > 256
         ):
             raise ValueError("invalid conversation identifier")
+
+
+class TurnRecord(TypedDict):
+    turn_id: str
+    satellite: str
+    turn_type: Literal["voice", "tts_only"]
+    parent_turn_id: str | None
+    conversation_id: str | None
+    record_transcripts: bool
+    status: NotRequired[Literal["open", "complete", "incomplete"]]
+    events: NotRequired[list[TimingRecord]]
+
+
+class TimingRecord(TypedDict):
+    turn_id: str | None
+    satellite: str
+    source: Literal["device", "ha_state", "integration", "server"]
+    stage: str
+    t_utc_ns: int
+    quality: Literal["measured", "proxy", "estimate"]
+    uncertainty_ms: float | None
+    t_device_ms: int | None
+    seq: int | None
+    data: dict[str, object]
 
 
 @dataclass(frozen=True)

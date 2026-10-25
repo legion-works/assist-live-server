@@ -999,3 +999,75 @@ The timing store must supply durable replay hooks before the service accepts dev
 The server's client-version pin must equal the client package version in release configuration.
 The device trial did not run because no test device is available.
 Transport selection stays open.
+
+## Clock conversion and SQLite records
+
+Date: 2026-10-25 (UTC).
+
+Initial command: `uv run --locked pytest tests/test_clock.py tests/test_store.py tests/test_pending_events.py -q`.
+The initial result included `ModuleNotFoundError: No module named 'assist_live_server.clock'` and missing store modules.
+The complete-turn test also reported `KeyError: 'events'` before the query supplied stored events.
+
+Command: `uv run --locked pytest tests/test_clock.py tests/test_store.py tests/test_pending_events.py tests/contract -q`.
+Result: `55 passed`.
+The output includes `PASS event-to-store-to-client`, `PASS identity isolation`, and `PASS transcript opt-in`.
+The tests check clock units, window limits, boot changes, pending events, expiry, retention, restart, and cursor order.
+The service tests use the configured UDP listener and the WebSocket path.
+Byte checks examine SQLite files, WAL files, exports, diagnostics, and logs with synthetic PCM markers.
+
+Command: `task check`.
+
+```text
+51 files already formatted
+All checks passed!
+PASS CI boundaries
+Success: no issues found in 21 source files
+204 passed
+PASS server bootstrap
+PASS isolated client and server packages
+NOT CHECKED image inventory: no image inventory exists
+PASS asset licenses
+no leaks found
+```
+
+Command: `UV_LINK_MODE=copy UV_PROJECT_ENVIRONMENT="$FLOOR_ENV" uv run --locked --python 3.14.2 pytest tests/ -q`.
+Result: `204 passed`.
+
+Command: `UV_OFFLINE=1 unshare -rn sh -c 'ip link set lo up && .venv/bin/python -m pytest tests/ -q'`.
+Result: `204 passed`.
+The temporary network namespace has loopback only. The package test uses cached build dependencies without external network access.
+An earlier run without `UV_OFFLINE=1` could not refresh the cached `hatchling` index.
+
+A synthetic trial sends 10,000 signed events in groups of 64, with a concurrent 100 ms heartbeat.
+The server accepts all events. The queue has no drops in this trial.
+The SQLite writer uses WAL with `synchronous=NORMAL` and owns all checkpoints.
+
+| Measurement | Samples | p50 ms | p99 ms | Maximum ms |
+|---|---:|---:|---:|---:|
+| Event-loop lag, 1 ms probe | 11,445 | 0.418762 | 1.061935 | 2.012874 |
+| Heartbeat lag, 100 ms interval | 115 | 0.463090 | 1.056299 | 1.060818 |
+| Arrival to transaction commit | 10,000 | 20.291497 | 163.966180 | 223.147937 |
+
+The event-loop p99 is below the 10 ms test target. These values are from a synthetic local trial, not a device performance test.
+The replay update and device event share one transaction. A unique device, boot, and sequence key supplies a second duplicate check.
+An earlier synchronous FULL-write trial had a p99 of 69.886903 ms and a maximum of 456.996348 ms on the event loop.
+The dedicated SQLite writer keeps such storage waits off the audio event loop.
+
+Mutation result: `15/15 behavioral mutants killed` after Python parse checks.
+The changes test minimum offset, units, satellite access, expiry, transcript defaults, replay restart, arrival time, writer count, and duplicate keys.
+They also test the two clock-window limits, boot changes, and playback quality.
+The last two changes test backend validation before storage and refusal of queued events after credential revocation.
+The writer-count test checks concurrent acceptance. The different unique-key test checks duplicate commits.
+
+The ASD-STE100 checker reports 0 findings in `docs/protocol.md`, `STRUCTURE.md`, and this record.
+The public-tree check with `--history` reports:
+
+```text
+PASS own Git root
+PASS history secrets commits=9
+PASS public data matches=0
+```
+
+The file self-check reports 0 private terms, 0 home paths, and 0 private addresses.
+Workspace diagnostics cannot identify the isolated worktree root. Configured Mypy and pytest supply the type and execution checks.
+Device timing and transport selection stay open because no test device is available.

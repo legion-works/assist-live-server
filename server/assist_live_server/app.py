@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import json
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import replace
 from typing import Any
@@ -20,7 +21,17 @@ from assist_live_client.protocol import (
 )
 
 from .auth import Registry
-from .protocol import AudioBackend, TimingIngress, TurnStore, WebSocketTransport
+from .event_gateway import EventGateway
+from .protocol import (
+    AudioBackend,
+    TimingIngress,
+    TurnStore,
+    UDPTransport,
+    WebSocketTransport,
+)
+from .store import SQLiteStore, safe_data
+
+UDP_ADDRESS = web.AppKey("udp_address", tuple[str, int])
 
 
 def create_app(
@@ -30,6 +41,7 @@ def create_app(
     *,
     record_transcripts: bool = False,
     ingress: TimingIngress | None = None,
+    udp_address: tuple[str, int] | None = None,
 ) -> web.Application:
     @web.middleware
     async def errors(
@@ -42,6 +54,53 @@ def create_app(
             raise web.HTTPBadRequest(text="invalid request") from None
 
     app = web.Application(client_max_size=MAX_CONTROL, middlewares=[errors])
+    timing = ingress or TimingIngress(registry)
+    if timing.registry is not registry:
+        raise ValueError("ingress registry mismatch")
+    gateway = EventGateway(store) if store is not None else None
+    if udp_address is not None and store is None:
+        raise ValueError("timing store required")
+
+    async def lifecycle(application: web.Application) -> AsyncIterator[None]:
+        transport = None
+        consumer = None
+        maintenance = None
+        if isinstance(store, SQLiteStore):
+            await store.configure_registry(registry)
+
+        async def maintain() -> None:
+            while True:
+                if isinstance(store, SQLiteStore):
+                    await store.maintain()
+                await asyncio.sleep(0.1)
+
+        try:
+            if gateway is not None:
+                consumer = asyncio.create_task(
+                    gateway.run(timing), name="assist-live-timing"
+                )
+                maintenance = asyncio.create_task(
+                    maintain(), name="assist-live-retention"
+                )
+            if udp_address is not None:
+                (
+                    transport,
+                    _,
+                ) = await asyncio.get_running_loop().create_datagram_endpoint(
+                    lambda: UDPTransport(timing), local_addr=udp_address
+                )
+                address = transport.get_extra_info("sockname")
+                application[UDP_ADDRESS] = (address[0], address[1])
+            yield
+        finally:
+            if transport is not None:
+                transport.close()
+            tasks = [task for task in (consumer, maintenance) if task is not None]
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    app.cleanup_ctx.append(lifecycle)
 
     def allowed(request: web.Request, satellite: str | None = None) -> frozenset[str]:
         header = request.headers.get("Authorization", "")
@@ -83,6 +142,32 @@ def create_app(
         satellites = allowed(request)
         return web.json_response([{"satellite": s} for s in sorted(satellites)])
 
+    async def metrics(request: web.Request) -> web.Response:
+        satellites = allowed(request)
+        if not isinstance(store, SQLiteStore) or gateway is None:
+            raise web.HTTPServiceUnavailable(text="metrics unavailable")
+        await store.maintain()
+        gateway.metrics.sequence_gaps = sum(
+            registry.missing(device)
+            for device in registry.devices
+            if registry.devices[device]["satellite"] in satellites
+        )
+        return web.Response(
+            text=gateway.metrics.render(
+                {
+                    **await store.diagnostics(satellites),
+                    "device_accepted_total": timing.accepted,
+                    "device_refused_total": timing.refused,
+                    "device_dropped_total": timing.dropped,
+                }
+            ),
+            headers={"Content-Type": "text/plain; version=0.0.4; charset=utf-8"},
+        )
+
+    async def device(request: web.Request) -> web.WebSocketResponse:
+        storage()
+        return await WebSocketTransport(timing).handle(request)
+
     async def open_turn(request: web.Request) -> web.Response:
         allowed(request)
         turn = TurnOpen(**await body(request))
@@ -112,14 +197,12 @@ def create_app(
             turn_value is None or turn_value["satellite"] != event.satellite
         ):
             raise web.HTTPForbidden(text="turn refused")
-        data = {k: v for k, v in event.data.items() if k not in {"transcript", "audio"}}
-        if (
+        transcript = bool(
             record_transcripts
             and turn_value
             and turn_value.get("record_transcripts", False)
-            and "transcript" in event.data
-        ):
-            data["transcript"] = event.data["transcript"]
+        )
+        data = safe_data(event, transcript)
         await storage().append(replace(event, data=data))
         return web.json_response({"version": 1})
 
@@ -286,6 +369,23 @@ def create_app(
             async def produce() -> None:
                 if negotiation["mode"] == "stt":
                     async for reply in backend.stt(turn_id, pcm_input()):
+                        reply = decode_control(json.dumps(reply), turn_id)
+                        if reply.get("type") == "final":
+                            data: dict[str, object] = {}
+                            if record_transcripts and turn_value["record_transcripts"]:
+                                data["transcript"] = reply["text"]
+                            await target.append(
+                                TimingEvent(
+                                    turn_id,
+                                    turn_value["satellite"],
+                                    "server",
+                                    "stt_final",
+                                    time.time_ns(),
+                                    "measured",
+                                    None,
+                                    data=data,
+                                )
+                            )
                         await send(reply)
                 else:
                     await send(
@@ -333,6 +433,7 @@ def create_app(
         return ws
 
     app.router.add_get("/health", health)
+    app.router.add_get("/metrics", metrics)
     app.router.add_get("/v1/bindings", bindings)
     app.router.add_post("/v1/turns", open_turn)
     app.router.add_get("/v1/turns/{turn_id}", turn)
@@ -340,7 +441,5 @@ def create_app(
     app.router.add_get("/v1/export", export)
     app.router.add_get("/v1/events", events)
     app.router.add_get("/v1/audio", audio)
-    app.router.add_get(
-        "/v1/device", WebSocketTransport(ingress or TimingIngress(registry)).handle
-    )
+    app.router.add_get("/v1/device", device)
     return app

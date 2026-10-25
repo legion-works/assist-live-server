@@ -7,7 +7,7 @@ from typing import Any
 
 import aiohttp
 
-from .models import TimingEvent, TurnOpen, identifier, unsigned
+from .models import TimingEvent, TurnOpen, TurnRecord, identifier, unsigned
 from .protocol import (
     MAX_AUDIO,
     MAX_CONTROL,
@@ -111,7 +111,7 @@ class AssistLiveClient:
     async def event(self, event: TimingEvent) -> None:
         await self._request("POST", "/v1/event", data=asdict(event))
 
-    async def turn(self, turn_id: str) -> dict[str, Any]:
+    async def turn(self, turn_id: str) -> TurnRecord:
         from .models import turn_uuid
 
         turn_uuid(turn_id)

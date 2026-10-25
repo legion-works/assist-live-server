@@ -44,7 +44,12 @@ Use TLS or an isolated network. HMAC authenticates events but does not encrypt t
 Each UDP datagram or WebSocket message contains one UTF-8 JSON object.
 The WebSocket route is `/v1/device`.
 The two adapters call the same `TimingIngress.accept` path.
-The host can use `UDPTransport` with an asyncio datagram endpoint.
+
+`create_app(..., udp_address=None)` opens no UDP listener by default.
+Set `udp_address` to an explicit address and port to enable the UDP adapter.
+The server gives the bound address through the typed `UDP_ADDRESS` key.
+Tests use a loopback address and port `0` for an isolated trial.
+Transport selection stays open. The WebSocket route and configured UDP listener use the same acceptance task.
 
 Necessary fields:
 
@@ -81,7 +86,12 @@ Canonical JSON sorts object keys, uses compact separators, keeps UTF-8 character
 The `tag` field is not part of the signed bytes.
 Do not use pipe-separated fields, comma-separated data, hexadecimal boot strings, or native integer byte order.
 
-The gateway checks size, JSON, tag, mapping, replay state, and queue capacity before it accepts an event.
+The adapter captures UTC arrival time, then checks size, JSON, tag, mapping, and queue capacity.
+It does not wait for queue space. A full queue drops the event and increases a counter.
+Queue admission is not replay acceptance.
+
+One task consumes the bounded queue and sends each replay check to one dedicated SQLite writer.
+The writer checks and updates the replay window before it releases the event.
 It accepts an unseen reordered sequence in the current boot's replay window.
 It records missing sequences independently from duplicates.
 A new boot retires the previous boot.
@@ -111,10 +121,23 @@ At this limit, the gateway refuses new boots and makes a credential-free error l
 The operator must change the secret to clear the set.
 The active-boot traffic can continue at this limit.
 
-`ReplayStore` supplies the synchronous `load_replay`, `save_replay`, and `clear_replay` hooks.
-The timing store must supply durable replay state through these hooks before the service accepts device traffic.
-The gateway commits replay state through the hook before it adds an event to the queue.
-An unsuccessful commit refuses the event and does not change the in-memory window.
+`ReplayStore` supplies the synchronous `load_replay`, `save_replay`, and `clear_replay` hooks in the SQLite writer.
+The server loads replay state before it starts the acceptance task.
+The writer commits the replay update and its device-event row in one SQLite transaction.
+An unsuccessful transaction refuses the event and keeps the previous in-memory window.
+The unique `(device, boot, seq)` key supplies a second duplicate check.
+
+The writer owns the only SQLite write connection. SQLite uses WAL with `synchronous=NORMAL`.
+Checkpoints also run in the SQLite writer, not in the audio event loop.
+An electrical supply failure can remove the last transactions.
+Each transaction keeps or removes its replay update and event together.
+
+If SQLite removes the two rows, acceptance of that event again adds the removed row. It does not duplicate a row that SQLite keeps.
+Use `await store.rotate(registry, device, secret)` to change credentials in an active service.
+This method clears the previous secret's replay rows in the SQLite writer.
+
+Queue entries keep an immutable credential-generation snapshot. The writer refuses an entry from a revoked generation.
+The [SQLite WAL documentation](https://sqlite.org/wal.html) gives the checkpoint and `synchronous` rules.
 
 The credential file keeps credentials only. It does not supply replay persistence.
 An in-memory replay store is for isolated tests only.
@@ -221,6 +244,23 @@ Its minimum arrival offset comes from the last 60 seconds or 50 events.
 Uncertainty is the median offset minus the minimum. The timing store calculates these values.
 The protocol does not change a playback proxy to a measured sample time.
 
+The turn query keeps the six `TurnOpen` fields and adds `status` and `events`.
+These two fields are optional in the client `TurnRecord` type for older store implementations.
+The SQLite server supplies the two fields. `events` contains the timing objects in stored `event_id` order.
+These objects equal the `event` values in subscriptions and exports. Quality and uncertainty do not change.
+
+The status rules are:
+
+- `open`: no closing event, or a closing event has missing `stage` values and its five-second reorder window stays open.
+- `complete`: the record contains `playback_end` and all necessary `stage` values.
+- `incomplete`: necessary `stage` values are missing when the reorder window expires, the turn gets to 120 seconds, or a restart or supersession ends it.
+
+Necessary `stage` values for `tts_only` are `tts_first_text`, `tts_first_byte`, `playback_start`, and `playback_end`.
+Voice turns also use these necessary values: `wake_detected`, `mic_open`, `speech_start`, `end_decision`, and `stt_final`.
+The `stt_partial`, `speaker_result`, and `end_candidate` events are optional.
+The server keeps unattached device events for five seconds from arrival, for the same satellite only.
+Expired events keep their quality and uncertainty, get `stage=unmatched`, and keep `data.original_stage`.
+
 | Route | Contract |
 |---|---|
 | `GET /health` | Version and Boolean health, with authentication |
@@ -237,7 +277,10 @@ Each envelope has `version`, a monotonically increasing stored `event_id`, and a
 Reconnect with the last consumed identifier. The client does not change that cursor automatically.
 Subscriptions, queries, exports, audio, and event writes apply the same satellite authorization.
 
-No timing store ships in this protocol module. `TurnStore` specifies the necessary interface.
+`TurnStore` specifies the store interface. `SQLiteStore` supplies the SQLite implementation with 30-day retention by default.
+Retention uses server storage time, not a device-supplied timestamp. Replay state stays for the secret lifetime.
+`GET /metrics` supplies Prometheus text with the integration token's satellite access checks.
+Ordinary diagnostics contain counts only, without audio or transcripts.
 Without a store, record routes give a service-unavailable response.
 Without a backend, audio gives a service-unavailable response and health is `false`.
 

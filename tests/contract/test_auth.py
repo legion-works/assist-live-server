@@ -61,56 +61,77 @@ def test_shared_timing_contract(adapter, tmp_path, replay_store):
     )
 
     async def run():
-        registry = Registry(tmp_path / "credentials", replay_store=replay_store)
+        from assist_live_server.event_gateway import EventGateway
+        from assist_live_server.store import SQLiteStore
+
+        registry = Registry(tmp_path / "credentials")
         registry.bind("satellite-a", "satellite-a", b"test-key")
+        store = SQLiteStore(tmp_path / "timing.db")
+        gateway = EventGateway(store)
         ingress = TimingIngress(registry, queue_size=2)
         receiver = (
             UDPTransport(ingress) if adapter == "udp" else WebSocketTransport(ingress)
         )
 
-        def send(value, key=b"test-key"):
-            packet = json.dumps({**value, "tag": sign_event(value, key)}).encode()
-            return receiver.accept(packet)
+        def enqueue(value, key=b"test-key"):
+            return receiver.accept(
+                json.dumps({**value, "tag": sign_event(value, key)}).encode()
+            )
 
-        assert send(event(seq=0))
-        assert not send(event(seq=0))
-        assert send(event(seq=2))
-        assert ingress.queue.qsize() == 2
-        assert not send(event(seq=3))
-        assert (await ingress.queue.get()).satellite == "satellite-a"
-        await ingress.queue.get()
-        assert ingress.missing("satellite-a") == 1
-        assert send(event(seq=1))
-        assert ingress.missing("satellite-a") == 0
-        await ingress.queue.get()
-        assert send(event(boot=2, seq=0, device_ms=1))
-        accepted = await ingress.queue.get()
-        assert accepted.new_boot and accepted.event["device_ms"] == 1
-        assert accepted.arrival_ns > 0
-        assert not send(event(boot=1, seq=4))
-        registry = Registry.load(tmp_path / "credentials", replay_store=replay_store)
-        restarted = TimingIngress(registry)
-        receiver = (
-            UDPTransport(restarted)
-            if adapter == "udp"
-            else WebSocketTransport(restarted)
-        )
-        assert not send(event(boot=1, seq=0))
-        assert not send(event(boot=2, seq=0))
-        assert not send(event(device="unknown"))
-        assert not send(event(data={"satellite": "satellite-b"}, seq=1, boot=2))
-        changed = event(boot=2, seq=1)
-        packet = {
-            **changed,
-            "tag": sign_event(changed, b"test-key"),
-            "stage": "playback_end",
-        }
-        assert not receiver.accept(json.dumps(packet).encode())
-        assert not receiver.accept(b"x" * 4097)
-        assert not send(event(boot=2, seq=1), b"integration-test-token")
-        registry.rotate("satellite-a", b"replacement-key")
-        assert not send(event(boot=2, seq=2))
-        assert send(event(boot=2, seq=0), b"replacement-key")
+        async def consume():
+            pending = await ingress.queue.get()
+            assert pending.satellite == "satellite-a" and pending.arrival_ns > 0
+            try:
+                return await store.accept_device(registry, pending, gateway.convert)
+            finally:
+                ingress.queue.task_done()
+
+        async def send(value, key=b"test-key"):
+            return await consume() if enqueue(value, key) else False
+
+        try:
+            await store.configure_registry(registry)
+            assert enqueue(event(seq=0))
+            assert enqueue(event(seq=2))
+            assert ingress.queue.qsize() == 2
+            assert not enqueue(event(seq=3))
+            assert ingress.dropped == 1
+            assert await consume() and await consume()
+            assert not await send(event(seq=0))
+            assert ingress.missing("satellite-a") == 1
+            assert await send(event(seq=1))
+            assert ingress.missing("satellite-a") == 0
+            assert await send(event(boot=2, seq=0, device_ms=1))
+            assert gateway.clocks["satellite-a"].boot == 2
+            assert not await send(event(boot=1, seq=4))
+            registry = Registry.load(tmp_path / "credentials")
+            await store.configure_registry(registry)
+            ingress = TimingIngress(registry)
+            receiver = (
+                UDPTransport(ingress)
+                if adapter == "udp"
+                else WebSocketTransport(ingress)
+            )
+            assert not await send(event(boot=1, seq=0))
+            assert not await send(event(boot=2, seq=0))
+            assert not await send(event(device="unknown"))
+            assert not await send(
+                event(data={"satellite": "satellite-b"}, seq=1, boot=2)
+            )
+            changed = event(boot=2, seq=1)
+            packet = {
+                **changed,
+                "tag": sign_event(changed, b"test-key"),
+                "stage": "playback_end",
+            }
+            assert not receiver.accept(json.dumps(packet).encode())
+            assert not receiver.accept(b"x" * 4097)
+            assert not await send(event(boot=2, seq=1), b"integration-test-token")
+            await store.rotate(registry, "satellite-a", b"replacement-key")
+            assert not await send(event(boot=2, seq=2))
+            assert await send(event(boot=2, seq=0), b"replacement-key")
+        finally:
+            store.close()
 
     asyncio.run(run())
 
@@ -202,7 +223,7 @@ def test_adapter_receive_boundary(adapter, service):
                 ).encode()
 
             async def send(raw, expected, close_code=1008):
-                before = state.ingress.queue.qsize()
+                before = len(state.store.rows)
                 if adapter == "udp":
                     UDPTransport(state.ingress).datagram_received(
                         raw, ("192.0.2.1", 1234)
@@ -215,17 +236,21 @@ def test_adapter_receive_boundary(adapter, service):
                         reply = await asyncio.wait_for(ws.receive(), 1)
                         assert reply.type == WSMsgType.CLOSE
                         assert reply.data == close_code
-                assert state.ingress.queue.qsize() == before + int(expected)
+                async with asyncio.timeout(1):
+                    await state.ingress.queue.join()
+                assert len(state.store.rows) == before + int(expected)
+                if expected:
+                    stored = state.store.rows[-1]["event"]
+                    accepted = json.loads(raw)
+                    assert stored["satellite"] == accepted["device"]
+                    assert stored["stage"] == accepted["stage"]
+                    assert stored["seq"] == accepted["seq"]
 
             await send(packet(), True)
-            await state.ingress.queue.get()
             await send(packet(), False)
             await send(packet(seq=2), True)
-            await state.ingress.queue.get()
             await send(packet(seq=1), True)
-            await state.ingress.queue.get()
             await send(packet(boot=2), True)
-            await state.ingress.queue.get()
             await send(packet(boot=1, seq=3), False)
             await send(packet(device="unknown"), False)
             changed = json.loads(packet(boot=2, seq=1))
@@ -284,7 +309,7 @@ def test_replay_persistence_failure_does_not_advance_window(replay_store, monkey
 
 
 @pytest.mark.parametrize("adapter", ["udp", "websocket"])
-def test_adapter_stale_is_not_duplicate(adapter):
+def test_adapter_stale_is_not_duplicate(adapter, tmp_path):
     from assist_live_server.auth import REPLAY_WINDOW, Registry, sign_event
     from assist_live_server.protocol import (
         TimingIngress,
@@ -293,6 +318,9 @@ def test_adapter_stale_is_not_duplicate(adapter):
     )
 
     async def run():
+        from assist_live_server.event_gateway import EventGateway
+        from assist_live_server.store import SQLiteStore
+
         registry = Registry()
         registry.bind("satellite-a", "satellite-a", b"test-key")
         ingress = TimingIngress(registry)
@@ -300,20 +328,32 @@ def test_adapter_stale_is_not_duplicate(adapter):
             UDPTransport(ingress) if adapter == "udp" else WebSocketTransport(ingress)
         )
 
-        def send(seq):
+        store = SQLiteStore(tmp_path / "timing.db")
+        await store.configure_registry(registry)
+        gateway = EventGateway(store)
+
+        async def send(seq):
             value = event(seq=seq)
-            return receiver.accept(
+            assert receiver.accept(
                 json.dumps({**value, "tag": sign_event(value, b"test-key")}).encode()
             )
+            pending = await ingress.queue.get()
+            try:
+                return await store.accept_device(registry, pending, gateway.convert)
+            finally:
+                ingress.queue.task_done()
 
-        assert send(0)
-        assert send(REPLAY_WINDOW)
-        assert not send(0)
-        assert registry.replay["satellite-a"].last_result == "stale"
-        assert registry.replay["satellite-a"].duplicates == 0
-        assert not send(REPLAY_WINDOW)
-        assert registry.replay["satellite-a"].last_result == "duplicate"
-        assert registry.replay["satellite-a"].stale == 1
-        assert send(1)
+        try:
+            assert await send(0)
+            assert await send(REPLAY_WINDOW)
+            assert not await send(0)
+            assert registry.replay["satellite-a"].last_result == "stale"
+            assert registry.replay["satellite-a"].duplicates == 0
+            assert not await send(REPLAY_WINDOW)
+            assert registry.replay["satellite-a"].last_result == "duplicate"
+            assert registry.replay["satellite-a"].stale == 1
+            assert await send(1)
+        finally:
+            store.close()
 
     asyncio.run(run())

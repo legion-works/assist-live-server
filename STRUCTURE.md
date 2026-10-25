@@ -33,3 +33,15 @@ The root Python project is a uv workspace. It installs the two Python packages f
 - `tests/contract/test_auth.py`: authentication, mapping, and replay tests.
 - `tests/contract/test_heartbeat.py`: message deadlines and task cleanup.
 - `tests/contract/test_queries.py`: subscription, query, export, and privacy tests.
+
+## Timing storage
+
+- `server/assist_live_server/clock.py`: minimum-offset clock window and uncertainty.
+- `server/assist_live_server/event_gateway.py`: device conversion and the acceptance task.
+- `server/assist_live_server/store.py`: SQLite writer, turn records, pending events, and retention.
+- `server/assist_live_server/replay_store.py`: replay-state rows in the shared transaction.
+- `server/assist_live_server/metrics.py`: Prometheus text without a new dependency.
+- `tests/test_clock.py`: clock windows, units, and boot changes.
+- `tests/test_store.py`: persistence, transcript policy, and the single writer.
+- `tests/test_pending_events.py`: satellite access, reorder, and expiry.
+- `tests/contract/test_event_store.py`: device-to-client records through the service.

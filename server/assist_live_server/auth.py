@@ -105,6 +105,8 @@ class Registry:
         self.boot_limit = boot_limit
         self.replay_store = replay_store
         self.replay: dict[str, ReplayState] = {}
+        self.credential_epochs: dict[str, int] = {}
+        self.credentials: dict[str, tuple[str, bytes, int]] = {}
         self.devices: dict[str, dict[str, Any]] = {}
         self.tokens: dict[str, list[str]] = {}
 
@@ -126,6 +128,8 @@ class Registry:
             "secret": secret.hex(),
         }
         self.replay[device] = ReplayState()
+        self.credential_epochs[device] = 0
+        self.credentials[device] = (satellite, secret, 0)
         self.save()
 
     def add_token(self, token: str, satellites: list[str]) -> None:
@@ -150,8 +154,11 @@ class Registry:
         return None
 
     def device(self, device: str) -> tuple[str, bytes] | None:
-        row = self.devices.get(device)
-        return (row["satellite"], bytes.fromhex(row["secret"])) if row else None
+        row = self.credentials.get(device)
+        return (row[0], row[1]) if row else None
+
+    def device_snapshot(self, device: str) -> tuple[str, bytes, int] | None:
+        return self.credentials.get(device)
 
     def rotate(self, device: str, secret: bytes) -> None:
         row = self.devices[device]
@@ -166,8 +173,21 @@ class Registry:
         if self.replay_store is not None:
             self.replay_store.clear_replay(device)
         self.replay[device] = ReplayState()
+        self.credential_epochs[device] = self.credential_epochs.get(device, 0) + 1
+        self.credentials[device] = (
+            row["satellite"],
+            secret,
+            self.credential_epochs[device],
+        )
 
-    def accept_sequence(self, device: str, boot: int, seq: int) -> bool:
+    def accept_sequence(
+        self, device: str, boot: int, seq: int, *, credential_epoch: int | None = None
+    ) -> bool:
+        if (
+            credential_epoch is not None
+            and credential_epoch != self.credential_epochs.get(device, 0)
+        ):
+            return False
         unsigned(boot)
         unsigned(seq)
         state = self.replay[device]
@@ -261,6 +281,12 @@ class Registry:
         registry.devices = value["devices"]
         registry.tokens = value["tokens"]
         for device in registry.devices:
+            row = registry.devices[device]
+            registry.credentials[device] = (
+                row["satellite"],
+                bytes.fromhex(row["secret"]),
+                0,
+            )
             state = (
                 replay_store.load_replay(device) if replay_store is not None else None
             )
