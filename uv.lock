@@ -165,7 +165,7 @@ dependencies = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "aiohttp", specifier = "==3.14.5" }]
+requires-dist = [{ name = "aiohttp", specifier = ">=3.14.4,<4" }]
 
 [[package]]
 name = "assist-live-server"

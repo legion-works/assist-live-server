@@ -147,6 +147,16 @@ Result: `ModuleNotFoundError: No module named 'tools'`, `4 failed`. Date: 2026-1
 `task check` runs formatting, lint, type checks, unit tests, package checks, asset checks, and the default Gitleaks rules.
 The project sets Ruff rule groups `E`, `F`, `W`, `I`, `B`, and `UP`, with target `py314` from the recorded Python floor.
 Mypy checks the server, client, and tools. Pytest stops on warnings.
+
+## Client dependency range
+
+The client accepts `aiohttp` versions from 3.14.4 to less than 4. The server keeps its pinned dependency.
+
+The dependency guard reported a failure before the metadata change because the client requirement was `aiohttp==3.14.5`. The assertion was `assert aiohttp.specifier.contains("3.14.4")`. Date: 2026-10-25.
+
+The guard reported success after the metadata change. The wheel installed with `aiohttp==3.14.4` on Python 3.14.2. A client import, `TurnOpen` construction, and a `parse_json` and `encode_control` cycle completed. The client-only tests do not include this import and protocol smoke test.
+
+Dry-run resolution with the wheel and Home Assistant 2026.10.1 on Python 3.14.2 selected `aiohttp==3.14.4`. Dry-run resolution with Home Assistant 2026.10.3 selected `aiohttp==3.14.5`. Date: 2026-10-25.
 The Pyright client import path stays. Pyright and Mypy also have server and repository import paths.
 
 CI runs the same named tasks. `ci-complete` is the single mandatory check.
