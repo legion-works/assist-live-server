@@ -1929,3 +1929,112 @@ All five streams kept transcript text out of the timing store.
 The nine mutations remove each boundary guard, the post-final error guard, slot release, or slot ownership.
 Each changed source parsed before its target test gave an unsatisfactory result. No mutant changed the working source.
 The project is experimental and has no release. No device trial, cloud call, publication, or commit is part of these checks.
+
+## Sentence-level local voice synthesis (2026-10-25)
+
+The local provider uses Piper 1.8.0, `en_US-lessac-medium`, native 22050 Hz mono int16 PCM, and four ONNX intra-op `threads`.
+The voice and configuration came from the manifest download plan. Each file agreed with its pinned SHA-256 before loading.
+No voice bytes or synthetic audio are in the repository.
+
+Initial command:
+
+```sh
+uv run --locked pytest tests/providers/test_piper.py tests/contract/test_streaming_tts.py tests/test_ci.py -q
+```
+
+Initial result:
+
+```text
+ImportError: cannot import name 'TTSAudio' from 'assist_live_client.models'
+```
+
+The legacy-format refusal test also gave `Failed: DID NOT RAISE ProtocolError` before the guard was available.
+The native-format schema and checker-digest tests also gave unsatisfactory results before their changes.
+
+Commands and satisfactory results:
+
+```sh
+uv run --locked pytest tests/providers/test_piper.py -q
+uv run --locked pytest tests/providers/test_piper.py tests/contract/test_streaming_tts.py tests/test_ci.py -q
+ASSIST_LIVE_MODEL_CACHE="$TURN_MODEL_CACHE" task check
+UV_PROJECT_ENVIRONMENT="$FLOOR_ENVIRONMENT" uv run --locked --python 3.14.2 pytest tests/ -q
+unshare -rn sh -c 'ip link set lo up && UV_OFFLINE=1 uv run --locked pytest -q'
+uv lock --check
+uv run --locked python tools/check_assets.py --manifest assets/manifest.json --release
+actionlint
+uv run --project "$WORKSPACE/assist-live" python "$WORKSPACE/assist-live/tools/check_public_tree.py" --history --root . --private-denylist "$PRIVATE_DENYLIST"
+```
+
+Set `ASSIST_LIVE_MODEL_CACHE` to the external turn-model cache for each suite.
+`TURN_MODEL_CACHE` names that cache. `FLOOR_ENVIRONMENT` names an external Python 3.14.2 environment.
+
+```text
+Provider tests: 15 passed
+Provider, client contract, and CI tests: 42 passed
+task check: 568 passed in 29.08s
+Python 3.14.2: 568 passed in 37.62s
+No external network, loopback up: 568 passed in 39.46s
+Ruff: All checks passed!
+Mypy: Success: no issues found in 37 source files
+PASS CI boundaries
+PASS server bootstrap
+PASS isolated client and server packages
+PASS asset licenses
+Lock check: 62 packages, exit 0
+actionlint: exit 0
+PASS own Git root
+History secret check: PASS
+PASS public data matches=0
+```
+
+The relative public-tree step reports `NOT CHECKED public tree` because this worktree has no sibling integration checkout.
+The explicit canonical checker supplied that check with history and the private denylist. Gitleaks found no leaks in files or history.
+
+The HTTP probe and the latency probe used external scratch scripts:
+
+```sh
+uv run --locked python "$ASSIST_LIVE_TTS_PROBE"
+uv run --locked python "$ASSIST_LIVE_TTS_MEASUREMENT"
+```
+
+The HTTP probe sent text in three parts, with 150 ms and 500 ms pauses.
+It sent `3.` and `5 degrees. ` in different parts. The last fragment had no punctuation.
+The client received the format at 2.48 ms, the first audio at 239.12 ms, and sentence `0` end at 239.27 ms.
+
+The first sentence text completed at 153.57 ms. The client received the last text part at 654.24 ms.
+Sentence `1` end was at 689.02 ms. All times use one monotonic clock relative to probe start.
+Result: `PASS HTTP client → route → native Piper → typed items; audio before text end`.
+
+The [local TTS provider record](providers/tts-local.md) gives the measured p50 and p99 latency for one and four TTS sessions.
+It also gives the same configurations with four Parakeet sessions and p99 event-loop lag at a 100 ms heartbeat interval.
+The four Parakeet sessions used the pinned models and decoded synthetic Piper audio at 16 kHz for the probe only.
+The production path has no sample-rate conversion. The probe checked `intra_op_num_threads=4` on the loaded Piper session.
+
+Twelve numbered mutations each made a target test give an unsatisfactory result:
+
+1. Wait for complete text: first-audio test timed out.
+2. Drop the last fragment: the sentence assertion did not agree.
+3. Divide `3.5` at the decimal point: the sentence assertion did not agree.
+4. Accept an unlisted voice: the necessary `ValueError` did not occur.
+5. Remove the sentence-end control: route contract timed out before the sentence end.
+6. Supply cancelled audio to the next session: the next session received incorrect bytes.
+7. Change `tts()` from bytes to typed items: the legacy byte assertion did not agree.
+8. Accept 22050 Hz through the legacy API: the necessary `ProtocolError` did not occur.
+9. Bypass voice-file hashes: the necessary SHA-256 error did not occur.
+10. Use the STT executor for TTS: a full STT queue refused the TTS request.
+11. Accept a fifth inference: the necessary `TTSBusyError` did not occur.
+12. Remove the downloaded checker digest: the CI output did not contain the known SHA-256.
+
+Each Python mutation parsed and ran before its behavioral assertion gave an unsatisfactory result.
+The four changed Python modules agreed with their pre-mutation snapshots after restoration. The 42 target tests then gave satisfactory results.
+
+The installed wheel metadata and license files supplied the runtime package records in `THIRD_PARTY_NOTICES.md`.
+Piper and pathvalidate each declare Python `>=3.9`. The workspace floor stays `>=3.14.2`.
+
+Sources: https://pypi.org/pypi/piper-tts/1.8.0/json and https://pypi.org/pypi/pathvalidate/3.3.1/json, accessed 2026-10-25.
+Piper declares `GPL-3.0-or-later`. pathvalidate declares `MIT License`.
+The Piper wheel has no program copyright line. Its GPL text has a Free Software Foundation copyright line, which is not a Piper copyright statement.
+
+The client dependency ranges did not change. The typed API accepts 22050 Hz and keeps sentence boundaries.
+The bytes-only API refuses that rate before audio because a legacy consumer can use a constant 16 kHz WAV header.
+Target-device measurements and a listening check stay open. No cloud call, device trial, publication, or commit is part of these checks.

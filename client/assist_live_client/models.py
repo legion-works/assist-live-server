@@ -38,6 +38,31 @@ def unsigned(value: object, bits: int = 64) -> int:
 
 
 @dataclass(frozen=True)
+class TTSFormat:
+    """The format of all audio in one TTS stream."""
+
+    codec: str
+    rate: int
+    channels: int
+    width: int
+
+
+@dataclass(frozen=True)
+class TTSAudio:
+    data: bytes
+
+
+@dataclass(frozen=True)
+class TTSSentenceEnd:
+    """All audio for this zero-based sentence index has arrived."""
+
+    sentence: int
+
+
+type TTSItem = TTSFormat | TTSAudio | TTSSentenceEnd
+
+
+@dataclass(frozen=True)
 class TurnOpen:
     turn_id: str
     satellite: str

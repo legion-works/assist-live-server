@@ -107,8 +107,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ## Cost probe dependencies
 
-The development environment uses NumPy 2.5.4, ONNX Runtime 1.31.0, and Transformers 5.20.2.
-The client package has none of these dependencies. They are not server-image components at this time.
+The server runtime uses NumPy 2.5.4 and ONNX Runtime 1.31.0.
+The development environment also uses Transformers 5.20.2.
+The client package has none of these dependencies. There is no server image at this time.
 The package metadata declares these licenses:
 
 - NumPy: `BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0`.
@@ -214,7 +215,9 @@ SOFTWARE.
 
 ## Selected local TTS components
 
-These are component selections, not a built image. No runtime dependency changes here.
+The server runtime uses Piper 1.8.0 and pathvalidate 3.3.1.
+NumPy 2.5.4 and ONNX Runtime 1.31.0 are also runtime dependencies, not development-only dependencies.
+These records are for installed packages, not a built image.
 The model and package bytes stay external to the repository.
 Sources accessed: 2026-10-25. See `docs/research/q7t-local-tts.md` for the pinned sources and quotations.
 
@@ -226,6 +229,16 @@ Piper 1.8.0, OHF-Voice/piper1-gpl. GPL-3.0-or-later. Keep the GPL text and corre
 
 The package declares `GPL-3.0-or-later`:
 https://pypi.org/pypi/piper-tts/1.8.0/json
+
+The pinned wheel `METADATA` names `The Home Assistant Authors` as the author.
+Its `licenses/COPYING` file has this license-text copyright line:
+
+```text
+Copyright (C) 2007 Free Software Foundation, Inc. <http://fsf.org/>
+```
+
+This line applies to the GPL text, not the Piper program.
+The wheel supplies no Piper program copyright line. The author field is not a program copyright statement.
 
 License text and `corresponding source`:
 https://github.com/OHF-Voice/piper1-gpl/tree/639388b6317fc4731e91d53da42aea68fd4166ff
@@ -299,6 +312,7 @@ NumPy 2.5.4. Copyright (c) 2005-2025, NumPy Developers. BSD-3-Clause AND 0BSD AN
 
 ```text
 pathvalidate 3.3.1. MIT. Preserve its copyright and permission notice from the pinned package.
+Copyright (c) 2016-2025 Tsuyoshi Hombashi
 ```
 
 Package declarations:
@@ -308,5 +322,16 @@ Package declarations:
 - https://pypi.org/pypi/pathvalidate/3.3.1/json
 
 The pinned wheels contain the complete upstream license files.
+The examined files are Piper `licenses/COPYING`, pathvalidate `licenses/LICENSE`, NumPy `licenses/LICENSE.txt`, and ONNX Runtime `onnxruntime/LICENSE`.
+The package `METADATA` files declare the licenses above. pathvalidate and ONNX Runtime declare `MIT License`.
+The NumPy declaration includes its bundled-library licenses, not only BSD-3-Clause.
+
+Runtime sources:
+
+- Piper: https://github.com/OHF-Voice/piper1-gpl/tree/639388b6317fc4731e91d53da42aea68fd4166ff
+- pathvalidate: https://github.com/thombashi/pathvalidate
+- ONNX Runtime: https://github.com/microsoft/onnxruntime
+- NumPy: https://github.com/numpy/numpy
+
 A future binary image must keep those files and all bundled-library notices.
 No built-image inventory or complete binary notice audit follows from this source record.

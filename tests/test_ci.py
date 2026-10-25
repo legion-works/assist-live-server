@@ -172,13 +172,16 @@ def test_public_tree_is_in_local_and_ci_gates(tmp_path, use_denylist):
         in public["run"]
     )
     log.unlink()
-    subprocess.run(
+    ci_result = subprocess.run(
         ["bash", "-e", "-c", public["run"]],
         cwd=server,
         env=env,
         check=True,
         capture_output=True,
     )
+    import hashlib
+
+    assert hashlib.sha256(b"# fixture\n").hexdigest().encode() in ci_result.stdout
     ci_args = json.loads(log.read_text())
     assert ci_args[:5] == args[:5]
     assert ci_args[5] == str(Path(env["RUNNER_TEMP"]) / "check_public_tree.py")

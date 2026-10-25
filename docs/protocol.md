@@ -291,14 +291,38 @@ Offset  Bytes        Content
 21      2 to 32,000  PCM bytes, length divisible by 2
 ```
 
-Audio is mono signed 16-bit little-endian PCM at 16 kHz.
+STT audio is mono signed 16-bit little-endian PCM at 16 kHz.
+TTS audio uses the sample rate from its `format` control.
 Sequences start at 0 in each direction.
 The receiver refuses missing sequences, duplicates, and out-of-order audio sequences.
 Device telemetry has different sequence rules because events can come out of order.
 
-TTS sends a `format` message before audio, with `codec=pcm_s16le`, `rate=16000`, `channels=1`, and `width=2`.
-It sends `sentence_end` with an unsigned `sentence` index for fallback continuation.
-The client gives PCM chunks to the integration without headers.
+TTS sends one `format` message before audio, with `codec=pcm_s16le`, `rate=16000` or `22050`, `channels=1`, and `width=2`.
+The selected local Piper voice uses `rate=22050`. A consumer must read the format control before it plays audio.
+The sample rate does not change in one stream. PCM chunks have no WAV header.
+
+After all audio for each sentence, the server sends `sentence_end` with an unsigned `sentence` index.
+Sentence indices start at `0` and increase by one. The last text fragment also gets a sentence index.
+This index identifies the last complete sentence for fallback continuation.
+An empty text stream has a format control and no sentence controls or audio.
+
+```json
+{"type":"format","version":1,"turn_id":"01900000-0000-7000-8000-000000000001","codec":"pcm_s16le","rate":22050,"channels":1,"width":2}
+{"type":"sentence_end","version":1,"turn_id":"01900000-0000-7000-8000-000000000001","sentence":0}
+```
+
+`AssistLiveClient.tts_stream()` yields `TTSFormat`, `TTSAudio(data)`, and `TTSSentenceEnd(sentence)` items in message order.
+It refuses duplicate formats, missing formats, incorrect sentence indices, and audio without a last sentence control.
+Heartbeats stay internal to the client.
+
+The `tts()` method continues to yield only bytes for 16 kHz, 16-bit, mono PCM.
+For other declared formats, it gives `ProtocolError("audio format needs the typed TTS stream")` before it yields audio.
+This refusal prevents a legacy consumer from using a constant 16 kHz WAV header with 22050 Hz audio.
+Use the typed API for native Piper audio.
+
+`create_app(..., tts_provider=provider)` connects a sentence-level provider to this route.
+The provider registry selects `PiperProvider.load(cache)` for `piper`. Loading uses the two hash-checked voice files in the external cache.
+An unknown voice gets `error` with `code=tts_failed`, not a default voice.
 
 `speaker_result` and `final.text` are different messages. The speaker message can follow the transcript before stream close:
 

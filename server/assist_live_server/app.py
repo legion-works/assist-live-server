@@ -9,7 +9,15 @@ from dataclasses import replace
 from typing import Any
 
 from aiohttp import WSMsgType, web
-from assist_live_client.models import TimingEvent, TurnOpen, identifier, unsigned
+from assist_live_client.models import (
+    TimingEvent,
+    TTSAudio,
+    TTSFormat,
+    TTSSentenceEnd,
+    TurnOpen,
+    identifier,
+    unsigned,
+)
 from assist_live_client.protocol import (
     HEARTBEAT_INTERVAL,
     MAX_AUDIO,
@@ -34,6 +42,7 @@ from .protocol import (
     UDPTransport,
     WebSocketTransport,
 )
+from .providers.tts import TTSProvider
 from .store import SQLiteStore, safe_data
 
 UDP_ADDRESS = web.AppKey("udp_address", tuple[str, int])
@@ -52,6 +61,7 @@ def create_app(
     audio_gateway: AudioGateway | None = None,
     ingress: TimingIngress | None = None,
     udp_address: tuple[str, int] | None = None,
+    tts_provider: TTSProvider | None = None,
 ) -> web.Application:
     active_auth = 0
     auth_connections: dict[bytes, int] = {}
@@ -362,7 +372,7 @@ def create_app(
     async def audio(request: web.Request) -> web.WebSocketResponse:
         satellites = allowed(request)
         target = storage()
-        if backend is None and audio_gateway is None:
+        if backend is None and audio_gateway is None and tts_provider is None:
             raise web.HTTPServiceUnavailable(text="audio unavailable")
         # aiohttp refuses equality. The protocol maximum is inclusive.
         ws = web.WebSocketResponse(
@@ -378,8 +388,18 @@ def create_app(
             negotiation = decode_control(first.data)
             if negotiation["type"] != "negotiate":
                 raise ValueError("negotiation required")
-            if negotiation["mode"] == "tts" and backend is None:
+            if (
+                negotiation["mode"] == "tts"
+                and backend is None
+                and tts_provider is None
+            ):
                 raise ValueError("TTS unavailable")
+            if (
+                negotiation["mode"] == "stt"
+                and backend is None
+                and audio_gateway is None
+            ):
+                raise ValueError("STT unavailable")
             turn_id = negotiation["turn_id"]
             turn_value = await target.get_turn(turn_id)
             if turn_value is None or turn_value["satellite"] not in satellites:
@@ -561,29 +581,68 @@ def create_app(
                         if hasattr(replies, "aclose"):
                             await replies.aclose()
                 else:
-                    assert backend is not None
-                    await send(
-                        encode_control(
-                            "format",
-                            turn_id,
-                            codec="pcm_s16le",
-                            rate=16000,
-                            channels=1,
-                            width=2,
-                        )
-                    )
                     seq = 0
-                    async for tts_reply in backend.tts(
-                        turn_id, text_input(), negotiation.get("voice", "")
-                    ):
-                        if isinstance(tts_reply, bytes):
-                            async with lock:
-                                await ws.send_bytes(
-                                    encode_audio(turn_id, seq, tts_reply)
-                                )
-                            seq += 1
-                        else:
-                            await send(tts_reply)
+                    if tts_provider is not None:
+                        tts_stream = tts_provider.stream(
+                            text_input(), negotiation.get("voice", "")
+                        )
+                        try:
+                            async for item in tts_stream:
+                                if isinstance(item, TTSFormat):
+                                    await send(
+                                        encode_control(
+                                            "format",
+                                            turn_id,
+                                            codec=item.codec,
+                                            rate=item.rate,
+                                            channels=item.channels,
+                                            width=item.width,
+                                        )
+                                    )
+                                elif isinstance(item, TTSAudio):
+                                    async with lock:
+                                        await ws.send_bytes(
+                                            encode_audio(turn_id, seq, item.data)
+                                        )
+                                    seq += 1
+                                elif isinstance(item, TTSSentenceEnd):
+                                    await send(
+                                        encode_control(
+                                            "sentence_end",
+                                            turn_id,
+                                            sentence=item.sentence,
+                                        )
+                                    )
+                        except ValueError, RuntimeError:
+                            await send(
+                                encode_control("error", turn_id, code="tts_failed")
+                            )
+                        finally:
+                            if hasattr(tts_stream, "aclose"):
+                                await tts_stream.aclose()
+                    else:
+                        assert backend is not None
+                        await send(
+                            encode_control(
+                                "format",
+                                turn_id,
+                                codec="pcm_s16le",
+                                rate=16000,
+                                channels=1,
+                                width=2,
+                            )
+                        )
+                        async for tts_reply in backend.tts(
+                            turn_id, text_input(), negotiation.get("voice", "")
+                        ):
+                            if isinstance(tts_reply, bytes):
+                                async with lock:
+                                    await ws.send_bytes(
+                                        encode_audio(turn_id, seq, tts_reply)
+                                    )
+                                seq += 1
+                            else:
+                                await send(tts_reply)
                 await send(encode_control("end", turn_id))
 
             reader = asyncio.create_task(receive(), name="assist-live-audio-receive")

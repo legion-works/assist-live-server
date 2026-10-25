@@ -124,7 +124,7 @@ def decode_control(raw: str | bytes, turn_id: str | None = None) -> dict[str, An
             unsigned(value[key], 32)
     if kind == "format" and (
         value["codec"] != "pcm_s16le"
-        or value["rate"] != 16000
+        or value["rate"] not in {16000, 22050}
         or value["channels"] != 1
         or value["width"] != 2
     ):

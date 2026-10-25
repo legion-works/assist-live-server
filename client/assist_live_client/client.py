@@ -7,7 +7,17 @@ from typing import Any
 
 import aiohttp
 
-from .models import TimingEvent, TurnOpen, TurnRecord, identifier, unsigned
+from .models import (
+    TimingEvent,
+    TTSAudio,
+    TTSFormat,
+    TTSItem,
+    TTSSentenceEnd,
+    TurnOpen,
+    TurnRecord,
+    identifier,
+    unsigned,
+)
 from .protocol import (
     MAX_AUDIO,
     MAX_CONTROL,
@@ -311,7 +321,52 @@ class AssistLiveClient:
         stream = self._audio(turn_id, text, "tts", voice)
         try:
             async for value in stream:
+                if (
+                    isinstance(value, dict)
+                    and value["type"] == "format"
+                    and (
+                        value["codec"],
+                        value["rate"],
+                        value["channels"],
+                        value["width"],
+                    )
+                    != ("pcm_s16le", 16000, 1, 2)
+                ):
+                    raise ProtocolError("audio format needs the typed TTS stream")
                 if isinstance(value, bytes):
                     yield value
+        finally:
+            await stream.aclose()
+
+    async def tts_stream(
+        self, turn_id: str, text: AsyncIterator[str], voice: str
+    ) -> AsyncIterator[TTSItem]:
+        """Yield the declared format, audio, and sentence-completion items."""
+        stream = self._audio(turn_id, text, "tts", voice)
+        got_format = False
+        pending_audio = False
+        sentence = 0
+        try:
+            async for value in stream:
+                if isinstance(value, bytes):
+                    if not got_format:
+                        raise ProtocolError("TTS format required before audio")
+                    pending_audio = True
+                    yield TTSAudio(value)
+                elif value["type"] == "format":
+                    if got_format:
+                        raise ProtocolError("duplicate TTS format")
+                    got_format = True
+                    yield TTSFormat(
+                        value["codec"], value["rate"], value["channels"], value["width"]
+                    )
+                elif value["type"] == "sentence_end":
+                    if not got_format or value["sentence"] != sentence:
+                        raise ProtocolError("TTS sentence sequence mismatch")
+                    sentence += 1
+                    pending_audio = False
+                    yield TTSSentenceEnd(value["sentence"])
+            if not got_format or pending_audio:
+                raise ProtocolError("incomplete TTS sentence stream")
         finally:
             await stream.aclose()

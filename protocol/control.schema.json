@@ -21,7 +21,7 @@
     {"properties": {"type": {"enum": ["end_decision", "heartbeat", "end"]}}},
     {"properties": {"type": {"const": "error"}, "code": {"$ref": "#/$defs/text"}}, "required": ["code"]},
     {"properties": {"type": {"const": "speaker_result"}, "name": {"$ref": "#/$defs/text"}, "distance": {"type": "number", "minimum": 0}, "destination": {"enum": ["local", "cloud"]}}, "required": ["name", "distance", "destination"]},
-    {"properties": {"type": {"const": "format"}, "codec": {"const": "pcm_s16le"}, "rate": {"type": "integer", "const": 16000}, "channels": {"type": "integer", "const": 1}, "width": {"type": "integer", "const": 2}}, "required": ["codec", "rate", "channels", "width"]},
+    {"properties": {"type": {"const": "format"}, "codec": {"const": "pcm_s16le"}, "rate": {"type": "integer", "enum": [16000, 22050]}, "channels": {"type": "integer", "const": 1}, "width": {"type": "integer", "const": 2}}, "required": ["codec", "rate", "channels", "width"]},
     {"properties": {"type": {"const": "sentence_end"}, "sentence": {"$ref": "#/$defs/u32"}}, "required": ["sentence"]}
   ]
 }

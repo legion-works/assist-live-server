@@ -72,3 +72,13 @@ The client package has no model runtime or asset manifest.
 - `server/assist_live_server/audio_gateway.py`: per-turn STT sessions, detector calls, and `partial` results.
 - `tests/test_audio_gateway.py`: onset, endpoint, stall, bound, and concurrent decode tests.
 - `tests/contract/test_streaming_stt.py`: streaming messages, timing events, disconnect, and audio-frame limits.
+
+## Local voice synthesis
+
+- `server/assist_live_server/providers/tts.py`: TTS interface, registry, sentence assembly, and isolated bounded executor.
+- `server/assist_live_server/providers/piper.py`: hash-checked Piper voice and sentence-level native PCM.
+- `tests/providers/test_piper.py`: text boundaries, voice selection, hashes, cancellation, and STT queue separation.
+- `tests/contract/test_streaming_tts.py`: typed stream, legacy bytes, format refusal, and route contracts.
+- `docs/providers/tts-local.md`: local voice, audio format, executor limits, fallback, and latency measurements.
+
+The client `models.py` also holds the typed TTS items. The client has no Piper dependency.
