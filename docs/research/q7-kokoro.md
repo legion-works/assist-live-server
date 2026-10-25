@@ -2,8 +2,8 @@
 
 ## Decision
 
-Stop Kokoro runtime inclusion and its release.
-Status: `confirmed_blocked_absent`. The project is experimental and has no release.
+Do not select Kokoro. Its measured cost is more than Piper.
+Status: `not_selected`. The project is experimental and has no release.
 Default voice allowlist: `[]`.
 
 No voice is a default selection.
@@ -11,15 +11,14 @@ No Kokoro model, voice, dictionary, or runtime is in this release tree.
 Image inventory: `NOT CHECKED`. There is no image.
 
 The packaged Python requirements do not include the server interpreter.
-The English phonemizer chain also contains GPL and LGPL components.
-The recorded stop causes are:
+The English phonemizer chain contains GPL and LGPL components.
+These licenses are records, not selection stop causes.
+The technical causes are:
 
 ```json
 [
   "Kokoro 0.9.4 requires Python <3.13,>=3.10; misaki 0.9.4 requires <3.13,>=3.8. The server requires >=3.14.2.",
-  "The actual English fallback loads phonemizer-fork and bundled eSpeak NG with GPL-3.0-or-later rights.",
-  "English number normalization uses num2words with LGPL-2.1-or-later rights.",
-  "No file-scoped license statement was found for the af_heart voice or config.json. Neither is approved."
+  "First-audio median 366.19 ms and RSS 2249.2 MiB exceed Piper at 29.74 ms and 368.6 MiB."
 ]
 ```
 
@@ -74,7 +73,8 @@ No rights approval applies to those paths or to other voices.
 
 Access date for all sources: 2026-10-24.
 The manifest records the source statement that sets each license decision.
-`NOASSERTION` is a blocked rights finding, not permission to use a file.
+`NOASSERTION` records a missing file-level grant.
+It does not stop technical selection.
 
 The weights have an Apache statement and a complete digest in the same model page.
 The voice table supplies a name and short digest.
@@ -85,7 +85,7 @@ Source headers also supply license statements.
 
 ### `kokoro-82m`
 
-- Status: `confirmed_blocked_absent`.
+- Status: `not_selected`.
 - License: `Apache-2.0`.
 - Version or revision: `f3ff3571791e39611d31c381e3a41a3af07b4987`.
 - Source: https://huggingface.co/hexgrad/Kokoro-82M/resolve/f3ff3571791e39611d31c381e3a41a3af07b4987/kokoro-v1_0.pth
@@ -94,11 +94,11 @@ Source headers also supply license statements.
 Attribution or stop cause:
 
 ```text
-Not distributed. Apache-2.0 weights do not approve the complete runtime chain.
+Not selected for technical reasons. Kokoro weights use Apache-2.0; transitive license records stay separate.
 ```
 - License source: https://huggingface.co/hexgrad/Kokoro-82M/blob/f3ff3571791e39611d31c381e3a41a3af07b4987/README.md
 - Source revision or version: `f3ff3571791e39611d31c381e3a41a3af07b4987`.
-- File or scope: `{'path': 'kokoro-v1_0.pth', 'sha256': '496dba118d1a58f5f3db2efc88dbdc216e0483fc89fe6e47ee1f2c53f18ad1e4'}`.
+- File: `kokoro-v1_0.pth`. SHA-256: `496dba118d1a58f5f3db2efc88dbdc216e0483fc89fe6e47ee1f2c53f18ad1e4`.
 
 License statement:
 
@@ -108,7 +108,11 @@ This is an Apache-licensed model, and Kokoro has been deployed in numerous proje
 
 - License source: https://github.com/hexgrad/kokoro/blob/dfb907a02bba8152ca444717ca5d78747ccb4bec/LICENSE
 - Source revision or version: `dfb907a02bba8152ca444717ca5d78747ccb4bec`.
-- File or scope: `Repository license text SHA-256 c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4. Context for the blocked weights chain.`.
+- Scope record:
+
+```text
+Repository license text SHA-256 c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4. Context for the not-selected weights chain.
+```
 
 License statement:
 
@@ -119,7 +123,7 @@ Apache License
 
 ### `kokoro-code`
 
-- Status: `confirmed_blocked_absent`.
+- Status: `not_selected`.
 - License: `Apache-2.0`.
 - Version or revision: `0.9.4`.
 - Source: https://files.pythonhosted.org/packages/ea/cc/75f41633c75224ba820a4533163bc8b070b6bf25416014074c63284c2d4e/kokoro-0.9.4-py3-none-any.whl
@@ -132,7 +136,7 @@ Not distributed. The packaged Python requirement excludes the server interpreter
 ```
 - License source: https://files.pythonhosted.org/packages/ea/cc/75f41633c75224ba820a4533163bc8b070b6bf25416014074c63284c2d4e/kokoro-0.9.4-py3-none-any.whl#kokoro-0.9.4.dist-info/licenses/LICENSE
 - Source revision or version: `0.9.4`.
-- File or scope: `{'path': 'kokoro-0.9.4-py3-none-any.whl', 'sha256': 'a129dc6364a286bd6a92c396e9862459d3d3e45f2c15596ed5a94dcee5789efd'}`.
+- File: `kokoro-0.9.4-py3-none-any.whl`. SHA-256: `a129dc6364a286bd6a92c396e9862459d3d3e45f2c15596ed5a94dcee5789efd`.
 
 License statement:
 
@@ -143,7 +147,7 @@ Apache License
 
 ### `kokoro-config`
 
-- Status: `confirmed_blocked_absent`.
+- Status: `not_selected`.
 - License: `NOASSERTION`.
 - Version or revision: `f3ff3571791e39611d31c381e3a41a3af07b4987`.
 - Source: https://huggingface.co/hexgrad/Kokoro-82M/resolve/f3ff3571791e39611d31c381e3a41a3af07b4987/config.json
@@ -156,7 +160,11 @@ Not distributed. Model configuration and vocabulary have no explicit file-scoped
 ```
 - License source: https://huggingface.co/hexgrad/Kokoro-82M/blob/f3ff3571791e39611d31c381e3a41a3af07b4987/README.md
 - Source revision or version: `f3ff3571791e39611d31c381e3a41a3af07b4987`.
-- File or scope: `Context only. No file-scoped license grant for this candidate is approved.`.
+- Scope record:
+
+```text
+Context only. No file-scoped license grant for this candidate is approved.
+```
 
 License statement:
 
@@ -166,7 +174,7 @@ license: apache-2.0
 
 ### `kokoro-voice-af-heart`
 
-- Status: `confirmed_blocked_absent`.
+- Status: `not_selected`.
 - License: `NOASSERTION`.
 - Version or revision: `f3ff3571791e39611d31c381e3a41a3af07b4987`.
 - Source: https://huggingface.co/hexgrad/Kokoro-82M/resolve/f3ff3571791e39611d31c381e3a41a3af07b4987/voices/af_heart.pt
@@ -179,7 +187,11 @@ Not selected. The voice table names af_heart and its short hash but supplies no 
 ```
 - License source: https://huggingface.co/hexgrad/Kokoro-82M/blob/f3ff3571791e39611d31c381e3a41a3af07b4987/VOICES.md
 - Source revision or version: `f3ff3571791e39611d31c381e3a41a3af07b4987`.
-- File or scope: `Context only. No file-scoped license grant for this candidate is approved.`.
+- Scope record:
+
+```text
+Context only. No file-scoped license grant for this candidate is approved.
+```
 
 License statement:
 
@@ -189,7 +201,7 @@ af\_heart
 
 ### `kokoro-misaki`
 
-- Status: `confirmed_blocked_absent`.
+- Status: `not_selected`.
 - License: `Apache-2.0`.
 - Version or revision: `0.9.4`.
 - Source: https://files.pythonhosted.org/packages/82/ec/0ee4110ddb54278b8f21c40a140370ae8f687036c4edf578316602697c56/misaki-0.9.4-py3-none-any.whl
@@ -202,7 +214,7 @@ Not distributed. The Python floor and the actual transitive fallback stop runtim
 ```
 - License source: https://files.pythonhosted.org/packages/82/ec/0ee4110ddb54278b8f21c40a140370ae8f687036c4edf578316602697c56/misaki-0.9.4-py3-none-any.whl#misaki-0.9.4.dist-info/licenses/LICENSE
 - Source revision or version: `0.9.4`.
-- File or scope: `{'path': 'misaki-0.9.4-py3-none-any.whl', 'sha256': '90e2eeb169786c014c429e5058d2ea6bcd02d651f2a24450ba6c9ffc0f8da15a'}`.
+- File: `misaki-0.9.4-py3-none-any.whl`. SHA-256: `90e2eeb169786c014c429e5058d2ea6bcd02d651f2a24450ba6c9ffc0f8da15a`.
 
 License statement:
 
@@ -213,7 +225,7 @@ Apache License
 
 ### `kokoro-us-gold`
 
-- Status: `confirmed_blocked_absent`.
+- Status: `not_selected`.
 - License: `Apache-2.0`.
 - Version or revision: `0.9.4`.
 - Source: https://files.pythonhosted.org/packages/82/ec/0ee4110ddb54278b8f21c40a140370ae8f687036c4edf578316602697c56/misaki-0.9.4-py3-none-any.whl
@@ -226,7 +238,7 @@ Not distributed. Dictionary rights use the attached package license, not an inde
 ```
 - License source: https://files.pythonhosted.org/packages/82/ec/0ee4110ddb54278b8f21c40a140370ae8f687036c4edf578316602697c56/misaki-0.9.4-py3-none-any.whl#misaki-0.9.4.dist-info/licenses/LICENSE
 - Source revision or version: `0.9.4`.
-- File or scope: `{'path': 'misaki/data/us_gold.json', 'sha256': 'dc414872a49a28ae6c141463d502fd945f3b2fde040484fdc47d00cc4612686f'}`.
+- File: `misaki/data/us_gold.json`. SHA-256: `dc414872a49a28ae6c141463d502fd945f3b2fde040484fdc47d00cc4612686f`.
 
 License statement:
 
@@ -238,7 +250,7 @@ Archive member: `misaki/data/us_gold.json`.
 
 ### `kokoro-us-silver`
 
-- Status: `confirmed_blocked_absent`.
+- Status: `not_selected`.
 - License: `Apache-2.0`.
 - Version or revision: `0.9.4`.
 - Source: https://files.pythonhosted.org/packages/82/ec/0ee4110ddb54278b8f21c40a140370ae8f687036c4edf578316602697c56/misaki-0.9.4-py3-none-any.whl
@@ -251,7 +263,7 @@ Not distributed. Dictionary rights use the attached package license, not an inde
 ```
 - License source: https://files.pythonhosted.org/packages/82/ec/0ee4110ddb54278b8f21c40a140370ae8f687036c4edf578316602697c56/misaki-0.9.4-py3-none-any.whl#misaki-0.9.4.dist-info/licenses/LICENSE
 - Source revision or version: `0.9.4`.
-- File or scope: `{'path': 'misaki/data/us_silver.json', 'sha256': 'de8f67be911bb6c659187b4a65fd966b6a30e56350e0f790d763210b053ac475'}`.
+- File: `misaki/data/us_silver.json`. SHA-256: `de8f67be911bb6c659187b4a65fd966b6a30e56350e0f790d763210b053ac475`.
 
 License statement:
 
@@ -263,7 +275,7 @@ Archive member: `misaki/data/us_silver.json`.
 
 ### `kokoro-phonemizer-fork`
 
-- Status: `confirmed_blocked_absent`.
+- Status: `not_selected`.
 - License: `GPL-3.0-or-later`.
 - Version or revision: `3.3.2`.
 - Source: https://files.pythonhosted.org/packages/64/f1/0dcce21b0ae16a82df4b6583f8f3ad8e55b35f7e98b6bf536a4dd225fa08/phonemizer_fork-3.3.2-py3-none-any.whl
@@ -272,11 +284,11 @@ Archive member: `misaki/data/us_silver.json`.
 Attribution or stop cause:
 
 ```text
-Not distributed. GPL runtime components do not satisfy the Apache image policy.
+Not selected with the Kokoro chain. GPL-3.0-or-later is recorded, not a selection stop cause.
 ```
 - License source: https://files.pythonhosted.org/packages/64/f1/0dcce21b0ae16a82df4b6583f8f3ad8e55b35f7e98b6bf536a4dd225fa08/phonemizer_fork-3.3.2-py3-none-any.whl#phonemizer/__init__.py
 - Source revision or version: `3.3.2`.
-- File or scope: `{'path': 'phonemizer_fork-3.3.2-py3-none-any.whl', 'sha256': '97305c76f4183b3825dae8f4c032265fe78c9946ce58c47d4b62161349264b74'}`.
+- File: `phonemizer_fork-3.3.2-py3-none-any.whl`. SHA-256: `97305c76f4183b3825dae8f4c032265fe78c9946ce58c47d4b62161349264b74`.
 
 License statement:
 
@@ -287,7 +299,11 @@ License statement:
 
 - License source: https://files.pythonhosted.org/packages/64/f1/0dcce21b0ae16a82df4b6583f8f3ad8e55b35f7e98b6bf536a4dd225fa08/phonemizer_fork-3.3.2-py3-none-any.whl#phonemizer_fork-3.3.2.dist-info/licenses/LICENSE
 - Source revision or version: `3.3.2`.
-- File or scope: `Attached license file SHA-256 d62f065830aa3739cc031156b9690805c7b2e811b4a178c8b4acd8725d561c94. The source header states GPL-3.0-or-later.`.
+- Scope record:
+
+```text
+Attached license file SHA-256 d62f065830aa3739cc031156b9690805c7b2e811b4a178c8b4acd8725d561c94. The source header states GPL-3.0-or-later.
+```
 
 License statement:
 
@@ -297,7 +313,7 @@ GNU GENERAL PUBLIC LICENSE
 
 ### `kokoro-espeak-loader`
 
-- Status: `confirmed_blocked_absent`.
+- Status: `not_selected`.
 - License: `MIT`.
 - Version or revision: `0.2.4`.
 - Source: https://files.pythonhosted.org/packages/de/1e/25ec5ab07528c0fbb215a61800a38eca05c8a99445515a02d7fa5debcb32/espeakng_loader-0.2.4-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
@@ -310,7 +326,7 @@ Not distributed. The wheel contains no license file and bundles a GPL library an
 ```
 - License source: https://github.com/thewh1teagle/espeakng-loader/blob/0ddc87adf77e5850d7eeb542ac8a87d421b64daa/LICENSE
 - Source revision or version: `0ddc87adf77e5850d7eeb542ac8a87d421b64daa`.
-- File or scope: `{'path': 'espeakng_loader-0.2.4-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl', 'sha256': '08721baf27d13d461f6be6eed9a65277e70d68234ff484fd8b9897b222cdcb6d'}`.
+- File: `espeakng_loader-0.2.4-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl`. SHA-256: `08721baf27d13d461f6be6eed9a65277e70d68234ff484fd8b9897b222cdcb6d`.
 
 License statement:
 
@@ -320,7 +336,11 @@ Permission is hereby granted, free of charge, to any person obtaining a copy
 
 - License source: https://github.com/thewh1teagle/espeakng-loader/blob/0ddc87adf77e5850d7eeb542ac8a87d421b64daa/LICENSE
 - Source revision or version: `0ddc87adf77e5850d7eeb542ac8a87d421b64daa`.
-- File or scope: `Loader source only. The installed __init__.py exactly matches this commit; its SHA-256 is 3900f0b174feebccb8991fd6f3888f037c7bfa23d9a3bdec480e894f75b03f3f.`.
+- Scope record:
+
+```text
+Loader source only. The installed __init__.py exactly matches this commit; its SHA-256 is 3900f0b174feebccb8991fd6f3888f037c7bfa23d9a3bdec480e894f75b03f3f.
+```
 
 License statement:
 
@@ -330,7 +350,7 @@ Permission is hereby granted, free of charge, to any person obtaining a copy
 
 ### `kokoro-espeak-ng`
 
-- Status: `confirmed_blocked_absent`.
+- Status: `not_selected`.
 - License: `GPL-3.0-or-later`.
 - Version or revision: `1.52.0`.
 - Source: https://github.com/espeak-ng/espeak-ng/tree/4870adfa25b1a32b4361592f1be8a40337c58d6c
@@ -343,7 +363,7 @@ Not distributed. Actual loaded version is 1.52.0. The loader source references t
 ```
 - License source: https://github.com/espeak-ng/espeak-ng/blob/4870adfa25b1a32b4361592f1be8a40337c58d6c/README.md
 - Source revision or version: `4870adfa25b1a32b4361592f1be8a40337c58d6c`.
-- File or scope: `{'path': 'espeakng_loader/libespeak-ng.so', 'sha256': 'b15ce0803b26254e8a0d088c6b9281a2637b2b02613147cc320cfdefaf2c3ccf'}`.
+- File: `espeakng_loader/libespeak-ng.so`. SHA-256: `b15ce0803b26254e8a0d088c6b9281a2637b2b02613147cc320cfdefaf2c3ccf`.
 
 License statement:
 
@@ -354,7 +374,11 @@ later license.
 
 - License source: https://github.com/espeak-ng/espeak-ng/blob/4870adfa25b1a32b4361592f1be8a40337c58d6c/COPYING
 - Source revision or version: `4870adfa25b1a32b4361592f1be8a40337c58d6c`.
-- File or scope: `Complete GPL license text for the blocked runtime source.`.
+- Scope record:
+
+```text
+Complete GPL license text for the not-selected runtime source.
+```
 
 License statement:
 
@@ -365,7 +389,7 @@ Archive member: `espeakng_loader/libespeak-ng.so`.
 
 ### `kokoro-espeak-data`
 
-- Status: `confirmed_blocked_absent`.
+- Status: `not_selected`.
 - License: `GPL-3.0-or-later AND Unicode-DFS-2016`.
 - Version or revision: `1.52.0`.
 - Source: https://github.com/espeak-ng/espeak-ng/tree/4870adfa25b1a32b4361592f1be8a40337c58d6c/espeak-ng-data
@@ -378,7 +402,11 @@ Not distributed. The active bundled data includes GPL and Unicode notices, not t
 ```
 - License source: https://github.com/espeak-ng/espeak-ng/blob/4870adfa25b1a32b4361592f1be8a40337c58d6c/README.md
 - Source revision or version: `4870adfa25b1a32b4361592f1be8a40337c58d6c`.
-- File or scope: `Bundled eSpeak data tree and Unicode notices; see the recorded tree and individual file digests.`.
+- Scope record:
+
+```text
+Bundled eSpeak data tree and Unicode notices; see the recorded tree and individual file digests.
+```
 
 License statement:
 
@@ -389,7 +417,11 @@ later license.
 
 - License source: https://github.com/espeak-ng/espeak-ng/blob/4870adfa25b1a32b4361592f1be8a40337c58d6c/COPYING.UCD
 - Source revision or version: `4870adfa25b1a32b4361592f1be8a40337c58d6c`.
-- File or scope: `Bundled eSpeak data tree and Unicode notices; see the recorded tree and individual file digests.`.
+- Scope record:
+
+```text
+Bundled eSpeak data tree and Unicode notices; see the recorded tree and individual file digests.
+```
 
 License statement:
 
@@ -412,7 +444,7 @@ Individual file digests:
 
 ### `kokoro-num2words`
 
-- Status: `confirmed_blocked_absent`.
+- Status: `not_selected`.
 - License: `LGPL-2.1-or-later`.
 - Version or revision: `0.5.14`.
 - Source: https://files.pythonhosted.org/packages/d6/5b/545e9267a1cc080c8a1be2746113a063e34bcdd0f5173fd665a5c13cb234/num2words-0.5.14-py3-none-any.whl
@@ -421,11 +453,11 @@ Individual file digests:
 Attribution or stop cause:
 
 ```text
-Not distributed. LGPL components do not satisfy the Apache image policy.
+Not selected with the Kokoro chain. LGPL-2.1-or-later is recorded, not a selection stop cause.
 ```
 - License source: https://files.pythonhosted.org/packages/d6/5b/545e9267a1cc080c8a1be2746113a063e34bcdd0f5173fd665a5c13cb234/num2words-0.5.14-py3-none-any.whl#num2words/__init__.py
 - Source revision or version: `0.5.14`.
-- File or scope: `{'path': 'num2words-0.5.14-py3-none-any.whl', 'sha256': '1c8e5b00142fc2966fd8d685001e36c4a9911e070d1b120e1beb721fa1edb33d'}`.
+- File: `num2words-0.5.14-py3-none-any.whl`. SHA-256: `1c8e5b00142fc2966fd8d685001e36c4a9911e070d1b120e1beb721fa1edb33d`.
 
 License statement:
 
@@ -435,7 +467,11 @@ version 2.1 of the License, or (at your option) any later version.
 
 - License source: https://files.pythonhosted.org/packages/d6/5b/545e9267a1cc080c8a1be2746113a063e34bcdd0f5173fd665a5c13cb234/num2words-0.5.14-py3-none-any.whl#num2words-0.5.14.dist-info/COPYING
 - Source revision or version: `0.5.14`.
-- File or scope: `Attached license file SHA-256 1457a03d928aeb06af3ea75ef065c517e915d7e41283d550dd4fa18ab20cda12. The source header states LGPL-2.1-or-later.`.
+- Scope record:
+
+```text
+Attached license file SHA-256 1457a03d928aeb06af3ea75ef065c517e915d7e41283d550dd4fa18ab20cda12. The source header states LGPL-2.1-or-later.
+```
 
 License statement:
 
@@ -445,7 +481,7 @@ GNU Lesser General Public License
 
 ### `kokoro-spacy-english-model`
 
-- Status: `confirmed_blocked_absent`.
+- Status: `not_selected`.
 - License: `MIT`.
 - Version or revision: `3.8.0`.
 - Source: https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
@@ -454,11 +490,11 @@ GNU Lesser General Public License
 Attribution or stop cause:
 
 ```text
-Not distributed. The model has MIT and source-data notices. It is part of the blocked English chain.
+Not distributed. The model has MIT and source-data notices. It is part of the not-selected English chain.
 ```
 - License source: https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl#en_core_web_sm/en_core_web_sm-3.8.0/LICENSE
 - Source revision or version: `3.8.0`.
-- File or scope: `{'path': 'en_core_web_sm-3.8.0-py3-none-any.whl', 'sha256': '1932429db727d4bff3deed6b34cfc05df17794f4a52eeb26cf8928f7c1a0fb85'}`.
+- File: `en_core_web_sm-3.8.0-py3-none-any.whl`. SHA-256: `1932429db727d4bff3deed6b34cfc05df17794f4a52eeb26cf8928f7c1a0fb85`.
 
 License statement:
 
@@ -468,7 +504,11 @@ Permission is hereby granted, free of charge, to any person obtaining a copy
 
 - License source: https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl#en_core_web_sm/en_core_web_sm-3.8.0/LICENSE
 - Source revision or version: `3.8.0`.
-- File or scope: `Model license file SHA-256 3933c176979b68bc6d0bcc902c7d6c130f1d127f476f17ba5cdba8d99cfd0012. Source-data notice LICENSES_SOURCES SHA-256 20d9dfacd215112251f15341edd1a47b1f98bf393a212f10f194ffdc7ee98a90.`.
+- Scope record:
+
+```text
+Model license file SHA-256 3933c176979b68bc6d0bcc902c7d6c130f1d127f476f17ba5cdba8d99cfd0012. Source-data notice LICENSES_SOURCES SHA-256 20d9dfacd215112251f15341edd1a47b1f98bf393a212f10f194ffdc7ee98a90.
+```
 
 License statement:
 
@@ -483,7 +523,8 @@ The attached package licenses supply these statements.
 These declarations do not supply approval for all bundled third-party parts.
 They also do not supply approval for all their dependencies.
 
-The complete Kokoro chain stays blocked. No package below is a new release selection.
+The Kokoro chain is not selected because of technical causes.
+No package below is a release selection.
 NumPy has the same license expression as the recorded probe dependency in the notices.
 
 ### `torch==2.6.0+cpu`
@@ -496,7 +537,11 @@ NumPy has the same license expression as the recorded probe dependency in the no
 
 - License source: https://github.com/pytorch/pytorch/blob/1eba9b3aa3c43f86f4a2c807ac8e12c4a7767340/LICENSE
 - Source revision or version: `1eba9b3aa3c43f86f4a2c807ac8e12c4a7767340`.
-- File or scope: `Supporting package torch 2.6.0+cpu; not a release selection.`.
+- Scope record:
+
+```text
+Supporting package torch 2.6.0+cpu; not a release selection.
+```
 
 License statement:
 
@@ -515,7 +560,11 @@ modification, are permitted provided that the following conditions are met:
 
 - License source: https://files.pythonhosted.org/packages/a9/b6/5257d04ae327b44db31f15cce39e6020cc986333c715660b1315a9724d82/transformers-4.51.3-py3-none-any.whl#transformers-4.51.3.dist-info/LICENSE
 - Source revision or version: `4.51.3`.
-- File or scope: `Supporting package transformers 4.51.3; not a release selection.`.
+- Scope record:
+
+```text
+Supporting package transformers 4.51.3; not a release selection.
+```
 
 License statement:
 
@@ -534,7 +583,11 @@ Apache License
 
 - License source: https://files.pythonhosted.org/packages/e3/d1/ca928dde89792ba589c973d7c120ec791ccbd18d539edb3d05dc738ab4e7/spacy-3.8.16-cp310-cp310-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl#spacy-3.8.16.dist-info/licenses/LICENSE
 - Source revision or version: `3.8.16`.
-- File or scope: `Supporting package spacy 3.8.16; not a release selection.`.
+- Scope record:
+
+```text
+Supporting package spacy 3.8.16; not a release selection.
+```
 
 License statement:
 
@@ -552,7 +605,11 @@ Permission is hereby granted, free of charge, to any person obtaining a copy
 
 - License source: https://files.pythonhosted.org/packages/42/d8/f053d43125ae4ad14f3e2a12a475a656128233f1f40a272c6e09a05c73e8/spacy_curated_transformers-0.3.1-py2.py3-none-any.whl#spacy_curated_transformers-0.3.1.dist-info/licenses/LICENSE
 - Source revision or version: `0.3.1`.
-- File or scope: `Supporting package spacy-curated-transformers 0.3.1; not a release selection.`.
+- Scope record:
+
+```text
+Supporting package spacy-curated-transformers 0.3.1; not a release selection.
+```
 
 License statement:
 
@@ -570,7 +627,11 @@ Permission is hereby granted, free of charge, to any person obtaining a copy
 
 - License source: https://files.pythonhosted.org/packages/d6/67/3b72b3fdfcadab61bc8f59c17e63770e526ffabd583ed32f174a7c01af85/curated_transformers-0.1.1-py2.py3-none-any.whl#curated_transformers-0.1.1.dist-info/LICENSE
 - Source revision or version: `0.1.1`.
-- File or scope: `Supporting package curated-transformers 0.1.1; not a release selection.`.
+- Scope record:
+
+```text
+Supporting package curated-transformers 0.1.1; not a release selection.
+```
 
 License statement:
 
@@ -588,7 +649,11 @@ Permission is hereby granted, free of charge, to any person obtaining a copy
 
 - License source: https://files.pythonhosted.org/packages/c3/bf/94fbdeaa195a896ff06ae49e85de6a65c47b18c580e869ed4025de6f9e05/curated_tokenizers-0.0.10-cp310-cp310-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl#curated_tokenizers-0.0.10.dist-info/licenses/LICENSE
 - Source revision or version: `0.0.10`.
-- File or scope: `Supporting package curated-tokenizers 0.0.10; not a release selection.`.
+- Scope record:
+
+```text
+Supporting package curated-tokenizers 0.0.10; not a release selection.
+```
 
 License statement:
 
@@ -599,20 +664,19 @@ Permission is hereby granted, free of charge, to any person obtaining a copy
 ## Release boundary and reproduction
 
 The manifest has an explicit empty `kokoro_default_voices` list.
-The tool refuses an unknown status or a blocked file in the release tree.
+The tool refuses an unknown status or a not-selected file in the release tree.
 It also refuses an unapproved default voice.
 The asset gate checks all nested components, the image inventory, and the download plan.
 
 No Kokoro component is in that plan. The Smart Turn record stays unchanged.
-An accepted blocked-absent decision is not satisfactory synthesis or a release approval.
+An accepted `not_selected` decision is not satisfactory synthesis or a release approval.
 
 ```sh
 uv run pytest tests/test_kokoro_licenses.py -q
 uv run python tools/probe_kokoro_licenses.py --record-decision \
-  --allow-blocked-absent --check assets/manifest.json \
+  --allow-not-selected --check assets/manifest.json \
   --report docs/research/q7-kokoro.md
 uv run python tools/check_assets.py --manifest assets/manifest.json --release
 ```
 
-A design decision is necessary before runtime work can continue.
-This inspection selects no replacement model or runtime.
+Piper is the selected local runtime. See `q7t-local-tts.md` for the measurements.

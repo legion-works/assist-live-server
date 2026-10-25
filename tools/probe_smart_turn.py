@@ -84,7 +84,7 @@ def verified_model(path: Path, record: dict[str, Any]) -> Path:
     return path
 
 
-def check_decision(manifest: Path, *, allow_blocked: bool) -> dict[str, Any]:
+def check_decision(manifest: Path, *, allow_not_selected: bool) -> dict[str, Any]:
     from tools.check_assets import check_assets
 
     errors = check_assets(manifest, release=True)
@@ -92,8 +92,8 @@ def check_decision(manifest: Path, *, allow_blocked: bool) -> dict[str, Any]:
         raise ValueError("; ".join(errors))
     document = json.loads(manifest.read_text())
     record = next(item for item in document["assets"] if item["id"] == MODEL_ID)
-    if record["status"] == "confirmed_blocked_absent" and not allow_blocked:
-        raise ValueError("blocked asset needs --allow-blocked-absent")
+    if record["status"] == "not_selected" and not allow_not_selected:
+        raise ValueError("not-selected asset needs --allow-not-selected")
     return dict(record)
 
 
@@ -177,9 +177,9 @@ def render_report(record: dict[str, Any], result: dict[str, Any] | None = None) 
     decision = (
         "Use the pinned model for local cost tests. "
         "Its rights let the server download it at startup."
-        if status == "confirmed_included"
-        else "Stop model inclusion. Rights stay blocked. "
-        "The release tree contains no blocked asset."
+        if status == "included"
+        else "Do not select this model. "
+        "The release tree contains no not-selected asset."
     )
     return f"""# Smart Turn rights and cost
 
@@ -211,6 +211,8 @@ Tests for safe turn endings are also necessary.
 
 These statements connect the model and pinned file to the full license text.
 This decision does not use a badge as a license source.
+The project page has the title `Smart Turn v3.2`.
+The selected file is `smart-turn-v3.2-cpu.onnx`.
 
 BSD-2-Clause lets users use and redistribute the model with or without changes.
 Source copies must keep the copyright notice, conditions, and disclaimer.
@@ -295,12 +297,12 @@ All values below are milliseconds for each candidate.
 ```sh
 uv run pytest tests/test_probe_smart_turn.py -q
 uv run python tools/probe_smart_turn.py --record-decision \\
-  --allow-blocked-absent --candidates 100 --report docs/research/q5-smart-turn.md
+  --allow-not-selected --candidates 100 --report docs/research/q5-smart-turn.md
 uv run python tools/check_assets.py --manifest assets/manifest.json --release
 ```
 
 The decision command checks release-asset rights before the measurement.
-It refuses an unknown status, a hash mismatch, or a blocked asset in the release tree.
+It refuses an unknown status, a hash mismatch, or a not-selected release-tree asset.
 An accepted rights record does not claim a built-image check.
 """
 
@@ -308,7 +310,7 @@ An accepted rights record does not claim a built-image check.
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--record-decision", action="store_true")
-    parser.add_argument("--allow-blocked-absent", action="store_true")
+    parser.add_argument("--allow-not-selected", action="store_true")
     parser.add_argument("--candidates", type=int, default=100)
     parser.add_argument("--reuse-measurements", type=Path)
     parser.add_argument(
@@ -320,7 +322,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     try:
         record = check_decision(
-            ROOT / "assets/manifest.json", allow_blocked=args.allow_blocked_absent
+            ROOT / "assets/manifest.json", allow_not_selected=args.allow_not_selected
         )
         SCRATCH.mkdir(parents=True, exist_ok=True)
         if args.reuse_measurements:
@@ -372,8 +374,8 @@ def main(argv: list[str] | None = None) -> int:
             print("PASS decision recorded")
         print(
             "PASS included rights"
-            if record["status"] == "confirmed_included"
-            else "PASS blocked asset absent"
+            if record["status"] == "included"
+            else "PASS not-selected asset absent"
         )
         return 0
     except (OSError, ValueError, KeyError, StopIteration) as error:

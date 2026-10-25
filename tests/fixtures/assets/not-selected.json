@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "assets": [
+    {
+      "id": "piper-runtime",
+      "kind": "runtime",
+      "status": "not_selected",
+      "reason": "technical",
+      "license": "GPL-3.0-or-later",
+      "url": "https://github.com/OHF-Voice/piper1-gpl",
+      "download": "none",
+      "license_sources": [{"kind": "license_text", "url": "https://github.com/OHF-Voice/piper1-gpl/blob/74ac24e7e8e2e57a5e1fada5505c74e3d9c1843a/COPYING", "quote": "GNU GENERAL PUBLIC LICENSE\n                       Version 3, 29 June 2007", "revision_or_version": "74ac24e7e8e2e57a5e1fada5505c74e3d9c1843a", "scope": "Runtime source only. This fixture tests a component that is not selected."}],
+      "paths": ["piper.bin"],
+      "components": []
+    }
+  ],
+  "image_inventory": [],
+  "download_plan": []
+}

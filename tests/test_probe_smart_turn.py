@@ -180,7 +180,7 @@ def test_record_only_mode_reuses_saved_cost_without_network_or_measurement(
                 "--record-decision",
                 "--reuse-measurements",
                 str(saved),
-                "--allow-blocked-absent",
+                "--allow-not-selected",
                 "--report",
                 str(report),
             ]
@@ -200,32 +200,35 @@ def test_manifest_decision_runs_release_gate(tmp_path):
     manifest = json.loads((ROOT / "assets/manifest.json").read_text())
     original = deepcopy(manifest)
     manifest["release_root"] = "."
+    (tmp_path / "THIRD_PARTY_NOTICES.md").write_text(
+        (ROOT / "THIRD_PARTY_NOTICES.md").read_text()
+    )
     path = tmp_path / "manifest.json"
     path.write_text(json.dumps(manifest))
-    assert check_decision(path, allow_blocked=True)["status"] in {
-        "confirmed_included",
-        "confirmed_blocked_absent",
+    assert check_decision(path, allow_not_selected=True)["status"] in {
+        "included",
+        "not_selected",
     }
     record = next(a for a in manifest["assets"] if a["id"] == "smart-turn-v3.2-cpu")
     record["status"] = "unknown"
     path.write_text(json.dumps(manifest))
-    with pytest.raises(ValueError, match="confirmed investigation status"):
-        check_decision(path, allow_blocked=True)
+    with pytest.raises(ValueError, match="included or not_selected status"):
+        check_decision(path, allow_not_selected=True)
     manifest = original
     manifest["release_root"] = "."
     record = next(a for a in manifest["assets"] if a["id"] == "smart-turn-v3.2-cpu")
-    record.update(status="confirmed_blocked_absent", download="none")
-    manifest["download_plan"] = []
+    record.update(status="not_selected", download="none", reason="technical")
+    manifest["download_plan"] = [
+        entry for entry in manifest["download_plan"] if entry["id"] != record["id"]
+    ]
     path.write_text(json.dumps(manifest))
-    with pytest.raises(ValueError, match="blocked asset needs"):
-        check_decision(path, allow_blocked=False)
-    assert (
-        check_decision(path, allow_blocked=True)["status"] == "confirmed_blocked_absent"
-    )
+    with pytest.raises(ValueError, match="not-selected asset needs"):
+        check_decision(path, allow_not_selected=False)
+    assert check_decision(path, allow_not_selected=True)["status"] == "not_selected"
     (tmp_path / record["paths"][0]).parent.mkdir(parents=True, exist_ok=True)
-    (tmp_path / record["paths"][0]).write_bytes(b"blocked")
-    with pytest.raises(ValueError, match="blocked asset path"):
-        check_decision(path, allow_blocked=True)
+    (tmp_path / record["paths"][0]).write_bytes(b"not selected")
+    with pytest.raises(ValueError, match="not-selected asset path"):
+        check_decision(path, allow_not_selected=True)
 
 
 def test_cli_refuses_fewer_than_100_candidates(capsys):
@@ -259,6 +262,7 @@ def test_report_keeps_cpu_and_wall_columns_and_no_image_claim():
     assert "| `total` | 2.000 | 3.000 | 9.000 | 10.000 |" in report
     assert "The measured count is 100." in report
     assert "Image inventory: `NOT CHECKED`" in report
+    assert "The project page has the title `Smart Turn v3.2`." in report
     assert record["sha256"] in report
     assert (
         next(s["url"] for s in record["license_sources"] if s["kind"] == "license_text")

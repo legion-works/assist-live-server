@@ -718,3 +718,222 @@ Date: 2026-10-24.
 Workspace analysis reports 31 unresolved imports and 0 warnings.
 Its workspace root is not the repository root.
 Configured Mypy and pytest resolve those modules. No import or type exemption is in use.
+
+## Component records and checks (2026-10-25)
+
+Date: 2026-10-25.
+The sections above keep the 2026-10-24 commands and results without changes.
+Their historical commands and policies do not give the current repository state.
+Use the commands and rules in this section for the current repository.
+
+### Current source-record contract
+
+Decision statuses use `included` and `not_selected`.
+Each `not_selected` record must have a `reason` code.
+The consent option is `--allow-not-selected`. There are no aliases for previous status or flag names.
+
+The release gate checks records, not permission for commercial use.
+GPL and non-commercial components can have an `included` decision.
+Missing quotations, file bindings, or attribution notices stay release errors.
+The measured TTS candidates use `reason: technical`.
+
+The `license` field accepts known SPDX identifiers, `NOASSERTION`, or a specified custom term.
+An expression can connect known identifiers with `AND` or `OR`.
+The field does not accept arbitrary custom identifiers.
+`NOASSERTION` records no file-level grant without an invented license name.
+`LicenseRef-Blizzard-2013-Research` is a descriptive `dataset_license` field.
+It is not the model's `license` value.
+
+A custom identifier must have an entry in `CUSTOM_LICENSE_TERMS`.
+Its source `kind` must equal that identifier.
+The SHA-256 of its `quote` must equal the stored term digest.
+The only current custom entry is `LicenseRef-OpenRAIL-M` for Supertonic weights.
+Its pinned license source has the actual grant and points to the use restrictions.
+An invented MIT name or a quotation with no grant does not satisfy that rule.
+
+Each source must have `kind`, `url`, `quote`, and `revision_or_version`.
+Each source must also have a `file_binding` or a non-empty `scope`.
+An included record must have a `license_text`, `model_card`, or `owner_statement` source with the asset's SHA-256 in `file_binding`.
+The gate does not accept a badge URL as the file-level source.
+
+An `owner_statement` uses a specified issue-comment URL and names the selected model release.
+A dataset-license snapshot uses the captured HTML SHA-256 and a dataset-only scope.
+Its URL is not immutable, and its terms are not a model-weight grant.
+
+Included attribution must occur in `THIRD_PARTY_NOTICES.md`.
+Not-selected assets must not be in the release tree, runtime inputs, image inventory, or download plan.
+Image inventory stays `NOT CHECKED` when there is no image inventory.
+
+### Planned model files
+
+The download plan has 10 explicit entries. Each entry has `id`, `url`, `sha256`, and `path`.
+The URL and digest must agree with the selected asset record.
+The target must be a declared relative artifact path. Duplicate entry IDs are errors.
+The plan can be inline or in a JSON file below the release root.
+
+Each included model, voice, and tokenizer file not in the image must have a pinned plan entry.
+An ID alone is not sufficient for those files. There is no implicit model download list.
+Image-inventory IDs show image contents for this gate.
+The asset record and its license sources must also have the same file digest.
+
+The plan has these model-file targets:
+
+- Smart Turn: `models/smart-turn-v3.2-cpu.onnx`.
+- Silero: `models/silero_vad.onnx`.
+- Piper voice: `models/piper/en_US-lessac-medium.onnx`.
+- Piper configuration: `models/piper/en_US-lessac-medium.onnx.json`.
+
+Silero uses its primary GitHub source at commit `5cd7945676eb32225748052e2e6a0580e4686a08`.
+Its SHA-256 is `1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3`.
+The Piper source URLs use the pinned voice repository commit `5041a7a49ae5b3a0f30e6837769eb03fdbb231bd`.
+The plan records each voice-file digest, not a package-level digest.
+Runtime wheel entries also have explicit URLs, digests, and targets.
+The bundled Piper bridge and data use the same wheel URL, digest, and target as the runtime.
+
+### Selected components
+
+The repository owner answered the Silero file-scoped question with this text:
+
+```text
+MIT
+```
+
+Command: `gh api repos/snakers4/silero-vad/issues/comments/6393620007`.
+Result: `author_association: OWNER`, `created_at: 2026-10-25T04:51:19Z`, and `body: MIT`.
+The issue closed as completed at `2026-10-25T04:51:32Z`.
+Source: https://github.com/snakers4/silero-vad/issues/816#issuecomment-6393620007
+The source entry names `v6.2.3` and gives the selected model SHA-256.
+The earlier MIT and badge statements stay in `license_sources`.
+
+Piper 1.8.0 is the selected local TTS, with `en_US-lessac-medium` and four intra-op `threads`.
+The runtime package declares GPL-3.0-or-later and Python `>=3.9`.
+Source: https://pypi.org/pypi/piper-tts/1.8.0/json
+The Lessac `model card` supplies a dataset-license URL, not a model-weight grant.
+The weights and configuration records use `NOASSERTION`.
+The custom dataset terms and their captured HTML digest stay explicit.
+This record does not change the test-audio license rule or give publication approval.
+
+### Record failure tests
+
+The tests ran before the record-rule changes.
+
+Command: `UV_LINK_MODE=copy uv run --locked pytest tests/test_asset_gate.py tests/test_probe_tts.py -q`.
+Result: `23 failed, 72 passed`.
+
+The GPL and non-commercial acceptance tests reported this error:
+
+```text
+AssertionError: assert ['test-voice: license does not permit this Apache image policy'] == []
+```
+
+The missing-notice test reported `AssertionError: assert False`.
+The owner-comment test reported `license source immutable revision or version required`.
+The renderer test found Python dictionary syntax in a public report.
+The new TTS tests reported `ModuleNotFoundError: No module named 'tools.probe_tts'`.
+The `quote` and `file_binding` checks gave `PASS` before these changes.
+The new tests keep those checks for GPL and non-commercial records.
+
+Command: `uv run --locked pytest tests/test_asset_gate.py -q -k 'unrecognized_license_reference or noassertion_records'`.
+Result before the identifier check changed: `3 failed, 1 passed, 82 deselected`.
+The three unrecognized-reference tests reported `AssertionError: assert 0 == 1` and printed `PASS asset licenses`.
+The `NOASSERTION` test gave `PASS`.
+The repaired gate rejects the unrecognized identifiers with a named error.
+
+The pinned-download tests ran before their implementation.
+Command: `uv run --locked pytest tests/test_asset_gate.py -q -k 'model_outside_image or image_model or download_entry or pinned_model_download or unrecognized_license_reference'`.
+Result: `16 failed, 4 passed, 83 deselected`.
+These tests found missing explicit file entries, incorrect URL/hash/target bindings, duplicate IDs, and an unrecognized non-SPDX identifier.
+
+The custom-term test also ran before its implementation.
+Command: `uv run --locked pytest tests/test_asset_gate.py -q -k registered_custom_license`.
+Result: `1 failed, 3 passed, 103 deselected`.
+The correct term must have the named source `kind` and its grant quotation.
+Negative source mutations stay errors.
+
+Command: `uv run --locked python $PROBE/mutations.py`.
+Result: `PASS mutation evidence: 12 compiled mutants killed`.
+Each mutant has correct Python syntax. Its behavioral test gave exit 1.
+The mutation names are `license-reference`, `license-policy`, `quote`, `binding`, `notice`, `reason`, and `owner-binding`.
+The other names are `custom-term-kind`, `custom-term-quote`, `model-download-required`, `model-download-binding`, and `model-download-duplicates`.
+
+### Offline TTS metrics
+
+Set `ASSIST_LIVE_PROBE_DIRECTORY` to temporary storage external to the repository.
+Set `UV_LINK_MODE=copy`. `$PROBE` below means that temporary storage.
+The metric inputs stay external to the repository. No synthesis ran for these checks.
+
+```sh
+uv run --locked python tools/probe_tts.py --timings $PROBE/timings.csv --transcripts $PROBE/transcripts.csv --scores $PROBE/mos-scores.csv --record-decision --report docs/research/q7t-local-tts.md
+```
+
+```text
+PASS offline TTS metrics
+PASS TTS selection recorded
+PASS TTS records
+```
+
+The metrics use pooled word edits and audio time, plus linear interpolation for the naturalness 10th percentile.
+The probe does not include warm-up transcripts. It keeps engine, `thread`, and input-length groups apart.
+The live path must have `--live`, an installed Piper 1.8.0 runtime, and local files with the recorded hashes.
+It downloads no model and installs no package.
+
+### Current probe and release checks
+
+The Smart Turn command uses the saved 100-candidate measurement and its initial model digest.
+No Smart Turn model download or new cost measurement ran.
+
+The three rights probes can render all 28 asset and component records.
+The Smart Turn measurement values stay unchanged.
+The earlier report diff also removed the project-page title sentence.
+The current report has that sentence and readable file bindings.
+
+```sh
+uv run --locked pytest tests/test_probe_smart_turn.py -q
+uv run --locked python tools/probe_smart_turn.py --record-decision --reuse-measurements $PROBE/smart-measurements.json --candidates 100 --report docs/research/q5-smart-turn.md
+uv run --locked pytest tests/test_kokoro_licenses.py -q
+uv run --locked python tools/probe_kokoro_licenses.py --record-decision --allow-not-selected --check assets/manifest.json --report docs/research/q7-kokoro.md
+uv run --locked pytest tests/test_silero_license.py -q
+uv run --locked python tools/probe_silero_license.py --record-decision --check assets/manifest.json --report docs/research/q8-silero.md
+uv run --locked python tools/probe_tts.py --record-decision --report docs/research/q7t-local-tts.md
+uv run --locked python tools/check_assets.py --manifest assets/manifest.json --release
+```
+
+Results: the three rights probes report `PASS decision recorded`.
+Smart Turn tests report `15 passed`. Kokoro tests report `21 passed`. Silero tests report `31 passed`.
+
+Smart Turn and Silero report `PASS included rights`.
+Kokoro reports `PASS not-selected asset absent`.
+The TTS probe reports `PASS TTS selection recorded` and `PASS TTS records`.
+The asset gate reports `NOT CHECKED image inventory: no image inventory exists` and `PASS asset licenses`.
+
+Command: `task check`.
+
+```text
+32 files already formatted
+All checks passed!
+PASS CI boundaries
+Success: no issues found in 10 source files
+205 passed
+PASS server bootstrap
+PASS isolated client and server packages
+NOT CHECKED image inventory: no image inventory exists
+PASS asset licenses
+no leaks found
+```
+
+Command: `UV_PROJECT_ENVIRONMENT=$PROBE/venv3142 uv run --locked --python 3.14.2 pytest tests/ -q`.
+Result: `205 passed`. CI-version Python 3.14.3 also reports `205 passed` through `task check`.
+
+Command: `unshare -rn sh -c 'UV_LINK_MODE=copy uv run --offline --no-sync pytest tests/ -q'`.
+Result: `205 passed` without network access.
+
+The last analysis snapshot reports 0 errors and 0 warnings across 11 Python files.
+The ASD-STE100 checker reports 0 findings for each of the six changed Markdown files.
+The public-file self-check reads 53 files, with 0 private terms, 0 home paths, and 0 private addresses.
+The public-tree check with `--history` reports `PASS own Git root`, `PASS history secrets commits=8`, and `PASS public data matches=0`.
+Package metadata, `uv.lock`, and CI stay unchanged. This change adds no TTS runtime dependency.
+
+The filesystem check examines all 53 publishable files.
+It finds 0 current retired-decision words, with 18 occurrences in the historical record.
+The full historical prefix agrees byte-for-byte with `04372a7`.
+There is one new dated section, with the current commands, counts, and rules.

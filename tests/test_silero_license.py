@@ -5,10 +5,10 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_conflicting_evidence_blocks_asset():
+def test_conflicting_evidence_is_recorded_without_inventing_a_license():
     from tools.probe_silero_license import resolve_license
 
-    assert resolve_license(["MIT", "CC-BY-NC-4.0"]) == "blocked"
+    assert resolve_license(["MIT", "CC-BY-NC-4.0"]) == "NOASSERTION"
 
 
 @pytest.mark.parametrize(
@@ -17,7 +17,6 @@ def test_conflicting_evidence_blocks_asset():
         [],
         ["MIT", ""],
         ["MIT", "Apache-2.0"],
-        ["CC-BY-NC-4.0"],
         ["NOASSERTION"],
         ["mit"],
         [None],
@@ -26,13 +25,14 @@ def test_conflicting_evidence_blocks_asset():
 def test_unknown_or_mixed_terms_do_not_select_a_permissive_license(statements):
     from tools.probe_silero_license import resolve_license
 
-    assert resolve_license(statements) == "blocked"
+    assert resolve_license(statements) == "NOASSERTION"
 
 
 def test_repeated_consistent_terms_have_a_single_result():
     from tools.probe_silero_license import resolve_license
 
     assert resolve_license(["MIT", "MIT"]) == "MIT"
+    assert resolve_license(["CC-BY-NC-4.0"]) == "CC-BY-NC-4.0"
 
 
 def copied_manifest(tmp_path):
@@ -40,33 +40,33 @@ def copied_manifest(tmp_path):
 
     document = json.loads((ROOT / "assets/manifest.json").read_text())
     document["release_root"] = "."
+    (tmp_path / "THIRD_PARTY_NOTICES.md").write_text(
+        (ROOT / "THIRD_PARTY_NOTICES.md").read_text()
+    )
     path = tmp_path / "manifest.json"
     record = next(a for a in document["assets"] if a["id"] == "silero-vad")
     return path, document, record
 
 
-def test_current_conflicting_record_is_blocked_and_requires_explicit_consent(tmp_path):
+def test_owner_statement_resolves_the_included_license(tmp_path):
     import json
 
     from tools.probe_silero_license import check_decision
 
     path, document, record = copied_manifest(tmp_path)
     path.write_text(json.dumps(document))
-    assert (
-        check_decision(path, allow_blocked=True)["status"] == "confirmed_blocked_absent"
-    )
-    with pytest.raises(ValueError, match="--allow-blocked-absent"):
-        check_decision(path, allow_blocked=False)
-    record["license"] = "MIT"
+    assert check_decision(path, allow_not_selected=True)["status"] == "included"
+    assert check_decision(path, allow_not_selected=False)["license"] == "MIT"
+    record["license"] = "CC-BY-NC-4.0"
     path.write_text(json.dumps(document))
-    with pytest.raises(ValueError, match="unresolved file license"):
-        check_decision(path, allow_blocked=True)
+    with pytest.raises(ValueError, match="owner statement"):
+        check_decision(path, allow_not_selected=True)
 
 
 @pytest.mark.parametrize(
     "mutation", ["unknown_status", "included", "tree", "download", "image"]
 )
-def test_release_state_cannot_bypass_the_conflict(tmp_path, mutation):
+def test_included_model_still_needs_correct_release_records(tmp_path, mutation):
     import json
 
     from tools.probe_silero_license import check_decision
@@ -75,24 +75,20 @@ def test_release_state_cannot_bypass_the_conflict(tmp_path, mutation):
     if mutation == "unknown_status":
         record["status"] = "unknown"
     elif mutation == "included":
-        record.update(
-            status="confirmed_included",
-            license="MIT",
-            redistribution=True,
-            download="startup",
-        )
-        document["download_plan"].append(record["id"])
+        record["license_sources"][0]["file_binding"]["sha256"] = "0" * 64
     elif mutation == "tree":
         target = tmp_path / record["paths"][0]
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(b"blocked model")
+        target.write_bytes(b"not-selected model")
     elif mutation == "download":
-        document["download_plan"].append(record["id"])
+        document["download_plan"] = [
+            entry for entry in document["download_plan"] if entry["id"] != record["id"]
+        ]
     else:
-        document["image_inventory"] = [record["id"]]
+        document["image_inventory"] = ["unlisted"]
     path.write_text(json.dumps(document))
     with pytest.raises(ValueError):
-        check_decision(path, allow_blocked=True)
+        check_decision(path, allow_not_selected=True)
 
 
 @pytest.mark.parametrize(
@@ -107,11 +103,11 @@ def test_source_records_must_have_quotes_pins_and_matching_file_digest(tmp_path,
     record["license_sources"][0][field] = ""
     path.write_text(json.dumps(document))
     with pytest.raises(ValueError, match="license source"):
-        check_decision(path, allow_blocked=True)
+        check_decision(path, allow_not_selected=True)
 
 
 @pytest.mark.parametrize("field", ["revision", "sha256", "package_hash", "member_hash"])
-def test_model_and_package_pins_are_required_even_when_blocked(tmp_path, field):
+def test_model_and_package_pins_are_required(tmp_path, field):
     import json
 
     from tools.probe_silero_license import check_decision
@@ -124,8 +120,10 @@ def test_model_and_package_pins_are_required_even_when_blocked(tmp_path, field):
     else:
         record["package"]["model_sha256"] = "0" * 64
     path.write_text(json.dumps(document))
-    with pytest.raises(ValueError, match="model or package pin"):
-        check_decision(path, allow_blocked=True)
+    with pytest.raises(
+        ValueError, match="model or package pin|immutable revision|SHA-256 required"
+    ):
+        check_decision(path, allow_not_selected=True)
 
 
 def test_badge_alone_never_approves_a_file(tmp_path):
@@ -138,19 +136,18 @@ def test_badge_alone_never_approves_a_file(tmp_path):
         next(c for c in record["license_sources"] if c["kind"] == "badge_image")
     ]
     path.write_text(json.dumps(document))
-    assert (
-        check_decision(path, allow_blocked=True)["status"] == "confirmed_blocked_absent"
-    )
+    with pytest.raises(ValueError, match="exact file binding"):
+        check_decision(path, allow_not_selected=True)
     record.update(
-        status="confirmed_included",
+        status="included",
         license="MIT",
         redistribution=True,
         download="startup",
     )
-    document["download_plan"].append(record["id"])
+    assert any(entry["id"] == record["id"] for entry in document["download_plan"])
     path.write_text(json.dumps(document))
     with pytest.raises(ValueError, match="pinned license text or model card required"):
-        check_decision(path, allow_blocked=True)
+        check_decision(path, allow_not_selected=True)
 
 
 def test_consistent_file_scoped_license_can_pass_the_existing_asset_gate(
@@ -165,17 +162,19 @@ def test_consistent_file_scoped_license_can_pass_the_existing_asset_gate(
     claim.update(
         kind="license_text",
         quote="This exact model file is licensed under MIT.",
+        url=f"https://github.com/snakers4/silero-vad/blob/{record['revision']}/LICENSE",
+        revision_or_version=record["revision"],
     )
     record["license_sources"] = [claim]
     record.update(
-        status="confirmed_included",
+        status="included",
         license="MIT",
         redistribution=True,
         download="startup",
     )
-    document["download_plan"].append(record["id"])
+    assert any(entry["id"] == record["id"] for entry in document["download_plan"])
     path.write_text(json.dumps(document))
-    assert check_decision(path, allow_blocked=False)["status"] == "confirmed_included"
+    assert check_decision(path, allow_not_selected=False)["status"] == "included"
     monkeypatch.setenv("ASSIST_LIVE_PROBE_DIRECTORY", str(tmp_path))
     report = tmp_path / "included.md"
     assert (
@@ -183,9 +182,9 @@ def test_consistent_file_scoped_license_can_pass_the_existing_asset_gate(
     )
     output = capsys.readouterr().out
     assert output.count("PASS included rights") == 1
-    assert "PASS blocked asset absent" not in output
-    assert "confirmed_included" in report.read_text()
-    assert "stays blocked" not in report.read_text()
+    assert "PASS not-selected asset absent" not in output
+    assert "included" in report.read_text()
+    assert "not_selected" not in report.read_text()
 
 
 def test_conflict_is_extracted_from_quotes_in_the_single_source_shape(tmp_path):
@@ -200,14 +199,12 @@ def test_conflict_is_extracted_from_quotes_in_the_single_source_shape(tmp_path):
     )
     assert "license_claims" not in record
     assert "evidence" not in record
-    source = record["license_sources"][0]
+    source = next(s for s in record["license_sources"] if s["kind"] == "license_text")
     source["quote"] = "The README states MIT and CC BY-NC 4.0."
     assert set(source_statements([source])) == {"MIT", "CC-BY-NC-4.0"}
     record["license_sources"] = [source]
     path.write_text(json.dumps(document))
-    assert (
-        check_decision(path, allow_blocked=True)["status"] == "confirmed_blocked_absent"
-    )
+    assert check_decision(path, allow_not_selected=True)["status"] == "included"
 
 
 @pytest.mark.parametrize("field", ["path", "sha256"])
@@ -220,7 +217,7 @@ def test_source_binding_must_name_the_selected_file_and_digest(tmp_path, field):
     record["license_sources"][0]["file_binding"][field] = "wrong"
     path.write_text(json.dumps(document))
     with pytest.raises(ValueError, match="license source"):
-        check_decision(path, allow_blocked=True)
+        check_decision(path, allow_not_selected=True)
 
 
 def test_report_uses_manifest_file_path_in_the_record_and_question():
@@ -253,10 +250,10 @@ def test_parallel_rights_fields_are_rejected(tmp_path, field):
     record[field] = []
     path.write_text(json.dumps(document))
     with pytest.raises(ValueError, match="use license_sources"):
-        check_decision(path, allow_blocked=True)
+        check_decision(path, allow_not_selected=True)
 
 
-def test_cli_records_one_blocked_result_and_all_conflicting_sources(
+def test_cli_records_inclusion_and_all_initial_conflicting_sources(
     tmp_path, capsys, monkeypatch
 ):
     from tools.probe_silero_license import main
@@ -267,7 +264,7 @@ def test_cli_records_one_blocked_result_and_all_conflicting_sources(
         main(
             [
                 "--record-decision",
-                "--allow-blocked-absent",
+                "--allow-not-selected",
                 "--check",
                 str(ROOT / "assets/manifest.json"),
                 "--report",
@@ -278,8 +275,8 @@ def test_cli_records_one_blocked_result_and_all_conflicting_sources(
     )
     output = capsys.readouterr().out
     assert output.count("PASS decision recorded") == 1
-    assert output.count("PASS blocked asset absent") == 1
-    assert "PASS included rights" not in output
+    assert output.count("PASS included rights") == 1
+    assert "PASS not-selected asset absent" not in output
     text = report.read_text()
     for value in (
         "CC-BY-NC-4.0",
@@ -287,7 +284,7 @@ def test_cli_records_one_blocked_result_and_all_conflicting_sources(
         "METADATA",
         "NOT CHECKED",
         "Prototype byte identity: `unverified`",
-        "Upstream clarification draft",
+        "File-scoped question",
     ):
         assert value in text
     assert (tmp_path / "decision.json").is_file()

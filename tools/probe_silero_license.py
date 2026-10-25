@@ -1,4 +1,4 @@
-"""Keep conflicting Silero model rights out of release assets."""
+"""Record the pinned Silero model license and the upstream owner statement."""
 
 import argparse
 import json
@@ -8,7 +8,6 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSET_ID = "silero-vad"
@@ -19,25 +18,25 @@ if __package__ in (None, ""):
 
 
 def resolve_license(statements: list[str]) -> str:
-    from tools.check_assets import ALLOWED
+    from tools.asset_rights import LICENSE_IDS
 
     if not statements or not all(isinstance(value, str) for value in statements):
-        return "blocked"
+        return "NOASSERTION"
     licenses = set(statements)
-    if len(licenses) != 1 or statements[0] not in ALLOWED:
-        return "blocked"
+    if len(licenses) != 1 or statements[0] not in LICENSE_IDS:
+        return "NOASSERTION"
     return statements[0]
 
 
 def source_statements(sources: list[dict[str, Any]]) -> list[str]:
-    from tools.check_assets import ALLOWED
+    from tools.asset_rights import LICENSE_IDS
 
     statements = []
     for source in sources:
         quote = source["quote"]
         identifiers = [
             value
-            for value in sorted(ALLOWED)
+            for value in sorted(LICENSE_IDS)
             if re.search(r"\b" + re.escape(value) + r"\b", quote)
         ]
         if re.search(r"\bCC[ -]+BY[ -]+NC[ -]+4\.0\b", quote):
@@ -48,7 +47,7 @@ def source_statements(sources: list[dict[str, Any]]) -> list[str]:
     return statements
 
 
-def check_decision(manifest: Path, *, allow_blocked: bool) -> dict[str, Any]:
+def check_decision(manifest: Path, *, allow_not_selected: bool) -> dict[str, Any]:
     from tools.asset_rights import license_sources
     from tools.check_assets import check_assets, https_url
 
@@ -77,269 +76,91 @@ def check_decision(manifest: Path, *, allow_blocked: bool) -> dict[str, Any]:
     for source in sources:
         if source.get("file_binding") != {"path": MODEL_PATH, "sha256": digest}:
             raise ValueError("invalid or unpinned license source record")
-    resolved = resolve_license(source_statements(sources))
-    file_scoped = any(
-        source.get("kind") in ("license_text", "model_card")
-        and resolved in source_statements([source])
-        for source in sources
-    )
-    expected = (
-        "confirmed_included"
-        if resolved != "blocked" and file_scoped
-        else "confirmed_blocked_absent"
-    )
-    if record["status"] != expected:
-        raise ValueError("decision does not agree with file-scoped license evidence")
-    if expected == "confirmed_blocked_absent":
-        if record["license"] != "NOASSERTION":
-            raise ValueError("unresolved file license must remain NOASSERTION")
-        if not allow_blocked:
-            raise ValueError("blocked asset needs --allow-blocked-absent")
-    elif record["license"] != resolved:
-        raise ValueError("included license does not agree with source records")
+    owners = [source for source in sources if source["kind"] == "owner_statement"]
+    if owners:
+        if any(source["revision_or_version"] != record["tag"] for source in owners):
+            raise ValueError("owner statement release does not match selected model")
+        if record["license"] != resolve_license(source_statements(owners)):
+            raise ValueError("included license does not agree with owner statement")
+    if record["status"] == "not_selected":
+        if not allow_not_selected:
+            raise ValueError("not-selected asset needs --allow-not-selected")
     return dict(record)
 
 
 def render_report(record: dict[str, Any]) -> str:
-    from tools.asset_rights import license_sources, render_record
+    from tools.asset_rights import license_sources, render_record, render_sources
 
     if record.get("id") != ASSET_ID:
         return render_record(record)
+    sources = license_sources(record)
     package = record["package"]
-    model_path = license_sources(record)[0]["file_binding"]["path"]
-    sources = []
-    for source in license_sources(record):
-        statement = ", ".join(source_statements([source])) or "navigation only"
-        sources.append(
-            f"### `{source['kind']}` at `{urlparse(source['url']).fragment}`\n\n"
-            f"- Statement from source: `{statement}`.\n"
-            f"- Type: `{source['kind']}`.\n"
-            f"- Source: {source['url']}\n"
-            f"- Source revision or version: `{source['revision_or_version']}`.\n"
-            f"- Bound file: `{source['file_binding']['path']}`.\n"
-            f"- File SHA-256: `{source['file_binding']['sha256']}`.\n\n"
-            f"```text\n{source['quote']}\n```"
+    model_path = sources[0]["file_binding"]["path"]
+    owners = [source for source in sources if source["kind"] == "owner_statement"]
+    owner_text = (
+        "\n\n".join(
+            f"Source: {source['url']}\n\n```text\n{source['quote']}\n```"
+            for source in owners
         )
-    if record["status"] == "confirmed_included":
-        return (
-            "# Silero model rights\n\n## Decision\n\n"
-            "Use only the pinned file with its confirmed license and attribution.\n"
-            f"Status: `{record['status']}`. License: `{record['license']}`.\n"
-            "The project is experimental and has no release.\n"
-            "Image inventory: `NOT CHECKED`. There is no image.\n\n"
-            f"Model source: {record['url']}\n\n"
-            f"Revision: `{record['revision']}`.\n\n"
-            f"SHA-256: `{record['sha256']}`.\n\n"
-            f"Download behavior: `{record['download']}`.\n\n"
-            f"Attribution: `{record['attribution']}`.\n\n"
-            "## File-scoped source statements\n\n" + "\n\n".join(sources)
-        )
-    search = record["clarification_search"]
-    owners = []
-    for source in search["owner_examples"]:
-        owners.append(
-            f"- Source: {source['url']}\n"
-            f"- Date: `{source['date']}`.\n"
-            f"- Author association: `{source['author_association']}`.\n\n"
-            f"```text\n{source['quote']}\n```\n\n"
-            f"Scope record: `{source['scope']}`."
-        )
-    history = []
-    for source in search["badge_history"]:
-        history.append(
-            f"- Source: {source['url']}\n"
-            f"- Date: `{source['date']}`.\n"
-            f"- Location: `{source['location']}`.\n\n"
-            f"```text\n{source['quote']}\n```"
-        )
-    decision = (
-        "Stop model inclusion and the VAD-dependent server runtime."
-        if record["status"] == "confirmed_blocked_absent"
-        else "Use only the pinned file with its confirmed license and attribution."
+        or "No owner statement is in this record."
     )
     return (
-        f"""# Silero model rights
-
-## Decision
-
-{decision}
-Status: `{record["status"]}`. File license: `{record["license"]}`.
-
-The project is experimental and has no release.
-The release tree and startup download plan do not include the model file.
-Image inventory: `NOT CHECKED`. There is no image.
-
-The general MIT statements conflict with the non-commercial badge text.
-This investigation found no file-scoped clarification in the examined sources.
-It does not select the more permissive statement or a replacement VAD.
-A badge supplies no file-license approval.
-
-## Selected file and package
-
-- Tag: `{record["tag"]}`.
-- Commit: `{record["revision"]}`.
-- File: `{model_path}`.
-- Source: {record["url"]}
-- SHA-256: `{record["sha256"]}`.
-- Size: `{record["bytes"]}` bytes.
-- PyPI version: `{package["version"]}`.
-- Wheel source: {package["url"]}
-- Wheel SHA-256: `{package["sha256"]}`.
-- Wheel member: `{package["model_member"]}`.
-- Member SHA-256: `{package["model_sha256"]}`.
-
-The release file and packaged model bytes are the same.
-The model and wheel stayed in scratch storage during inspection.
-No model bytes, package, or new dependency are in this repository.
-The decision checker uses the standard library only.
-`ASSIST_LIVE_PROBE_DIRECTORY` selects scratch storage for the decision record.
-
-Package metadata source: {package["metadata_url"]}
-`Requires-Python` is `{package["requires_python"]}`.
-This includes the server floor `3.14.2`.
-The PyPI `license` and `license_expression` fields are `null`.
-The classifier says `MIT License`. The wheel also includes the complete MIT text.
-The attached license digest is `{package["license_sha256"]}`.
-
-## Prototype contract and model metadata
-
-Prototype byte identity: `unverified`.
-The prototype names `silero_vad.onnx` and inputs `input`, `state`, and `sr`.
-Its binary, download URL, revision, and digest are not available.
-This decision is for the selected release file.
-It does not claim prototype byte identity.
-
-The installed ONNX Runtime `{record["inspection"]["onnxruntime_version"]}`
-loaded this file.
-Its actual input names agree with the prototype contract:
-
-```json
-{json.dumps(record["inspection"]["inputs"], indent=2)}
-```
-
-The model metadata has no license statement:
-
-```json
-{json.dumps(record["inspection"]["model_metadata"], indent=2)}
-```
-
-The package and selected model directory have no `model card`.
-The investigation examined all textual package members for license statements.
-The six license statements are in `METADATA` and its attached `LICENSE`.
-The statements below include the complete license text and each badge part.
-
-## License statements
-
-Access date for all sources: `2026-10-24`.
-The package source has a pinned version and wheel SHA-256.
-Repository sources have the selected commit as their pin.
-General declarations do not supply file-scoped clarification.
-No source below resolves the contradictory model-rights statements.
-
-This model uses only `license_sources` for rights statements.
-Each entry has `kind`, `url`, `quote`, and `revision_or_version`.
-The same entry has `file_binding` with `path` and `sha256`.
-The checker reads license identifiers from `quote`.
-The decision uses no other source list.
-
-"""
-        + "\n\n".join(sources)
-        + f"""
-
-## Read-only clarification search
-
-The repository issue search used `license`, `CC BY-NC`, `badge`, and `commercial`.
-Result counts were `{json.dumps(search["issue_queries"], sort_keys=True)}`.
-The positive `license` result set checked that the search could find known issues.
-The investigation read the nine issues and their comments:
-`{json.dumps(search["issue_threads_read"])}`.
-
-It examined titles and bodies for all
-`{search["discussion_titles_and_bodies"]}` discussions.
-The three term results were discussion numbers
-`{json.dumps(search["discussion_matches"])}`.
-The `license` term in discussion `111` is part of a Python startup message.
-Discussions `246` and `336` are about custom training and tuning.
-The investigation examined their replies for an `OWNER` or `MEMBER` license statement.
-
-No examined owner or member statement gives a license for this file and revision.
-The owner replies below are about paid services, not a model-weight license grant.
-
-"""
-        + "\n\n".join(owners)
-        + f"""
-
-## Badge history
-
-The investigation examined `{search["readme_commits"]}` root README commits.
-It followed the renamed README to its initial path and first commit.
-The first commit includes the alt text, before the selected model was available.
-The historical image and `link target` referred to a different model project.
-A subsequent diff changed the image to MIT but kept the non-commercial alt text.
-
-"""
-        + "\n\n".join(history)
-        + f"""
-
-This history suggests inherited text.
-It supplies no license statement for the selected model.
-Historical AGPL image text is not a license finding for this release.
-The current conflict stays unresolved in the file-license policy.
-
-## Upstream clarification draft
-
-This investigation sent no upstream message and opened no issue.
-Do not send this proposed question without operator approval:
-
-What license applies to `{model_path}` at `{record["tag"]}`,
-commit `{record["revision"]}`, SHA-256 `{record["sha256"]}`?
-
-The PyPI `silero-vad=={package["version"]}` wheel contains the same model bytes.
-Its SHA-256 is `{package["sha256"]}`.
-The `LICENSE`, README body, and package classifier state `MIT`.
-The README badge alt text states `CC BY-NC 4.0` in the repository and package.
-
-Does MIT apply to these model weights for commercial use and redistribution,
-with no non-commercial restriction?
-Please give a file-scoped license statement for this revision or digest.
-Please also make the badge text agree with the model license.
-
-## Release checks and reproduction
-
-The checker rejects conflicting or unknown terms and a badge-only approval.
-It checks the source locations, pinned URLs, source statements, and file digest.
-The asset gate also checks blocked paths and runtime source.
-It checks the download plan.
-
-It examines the image inventory when a record is available.
-There is no image to examine here.
-The Piper, Smart Turn, and Kokoro records stay unchanged.
-
-```sh
-uv run pytest tests/test_silero_license.py -q
-uv run python tools/probe_silero_license.py --record-decision \\
-  --allow-blocked-absent --check assets/manifest.json \\
-  --report docs/research/q8-silero.md
-uv run python tools/check_assets.py --manifest assets/manifest.json --release
-```
-
-The VAD-dependent runtime stays blocked until file rights have a satisfactory result.
-This investigation selects no alternative model.
-"""
+        "# Silero model rights\n\n## Decision\n\n"
+        f"Status: `{record['status']}`. License: `{record['license']}`.\n"
+        "The project is experimental and has no release.\n"
+        "Image inventory: `NOT CHECKED`. There is no image.\n\n"
+        "## Owner statement\n\n"
+        "The repository owner answered the file-scoped question with this text:\n\n"
+        f"{owner_text}\n\n"
+        "Author association: `OWNER`. Access date: 2026-10-25.\n"
+        "Statement time: `2026-10-25T04:51:19Z`.\n"
+        "The issue closed as completed at `2026-10-25T04:51:32Z`.\n"
+        "\n"
+        "The README badge alt text states `CC BY-NC 4.0`.\n"
+        "That identifier is `CC-BY-NC-4.0`.\n"
+        "The owner statement resolves that text for this file and revision.\n\n"
+        "## Selected file and package\n\n"
+        f"- File: `{model_path}`.\n"
+        f"- Tag: `{record['tag']}`.\n"
+        f"- Revision: `{record['revision']}`.\n"
+        f"- Model source: {record['url']}\n"
+        f"- SHA-256: `{record['sha256']}`.\n"
+        f"- Package: `silero-vad=={package['version']}`.\n"
+        f"- Package source: {package['url']}\n"
+        f"- Package SHA-256: `{package['sha256']}`.\n"
+        f"- Package model SHA-256: `{package['model_sha256']}`.\n"
+        f"- Download behavior: `{record['download']}`.\n"
+        f"- Attribution:\n\n```text\n{record['attribution']}\n```\n\n"
+        "The package contains the same model bytes. No model is in this repository.\n"
+        "Prototype byte identity: `unverified`.\n"
+        "The prototype binary and digest are not available.\n\n"
+        "## File-scoped question\n\n"
+        f"What license applies to `{model_path}` at `{record['tag']}`, "
+        f"commit `{record['revision']}`, SHA-256 `{record['sha256']}`?\n\n"
+        "The source records below keep the initial MIT and badge statements.\n"
+        "The package statements come from `METADATA` and its attached license.\n"
+        "Sources accessed: 2026-10-24 and 2026-10-25.\n\n"
+        "## Source statements\n\n" + render_sources(record) + "\n\n"
+        "## Reproduction\n\n"
+        "```sh\nuv run pytest tests/test_silero_license.py -q\n"
+        "uv run python tools/probe_silero_license.py --record-decision \\\n"
+        "  --check assets/manifest.json --report docs/research/q8-silero.md\n"
+        "uv run python tools/check_assets.py "
+        "--manifest assets/manifest.json --release\n```\n"
     )
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--record-decision", action="store_true")
-    parser.add_argument("--allow-blocked-absent", action="store_true")
+    parser.add_argument("--allow-not-selected", action="store_true")
     parser.add_argument("--check", type=Path, default=ROOT / "assets/manifest.json")
     parser.add_argument(
         "--report", type=Path, default=ROOT / "docs/research/q8-silero.md"
     )
     args = parser.parse_args(argv)
     try:
-        record = check_decision(args.check, allow_blocked=args.allow_blocked_absent)
+        record = check_decision(args.check, allow_not_selected=args.allow_not_selected)
         if args.record_decision:
             directory = Path(
                 os.environ.get(
@@ -365,8 +186,8 @@ def main(argv: list[str] | None = None) -> int:
             print("PASS decision recorded")
         print(
             "PASS included rights"
-            if record["status"] == "confirmed_included"
-            else "PASS blocked asset absent"
+            if record["status"] == "included"
+            else "PASS not-selected asset absent"
         )
         return 0
     except (OSError, ValueError, KeyError, StopIteration) as error:

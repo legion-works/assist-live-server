@@ -34,7 +34,7 @@ def voice_allowlist(record: dict[str, Any]) -> list[dict[str, str]]:
 
 
 def check_decision(
-    manifest: Path, *, allow_blocked: bool
+    manifest: Path, *, allow_not_selected: bool
 ) -> tuple[dict[str, Any], list[dict[str, str]]]:
     from tools.check_assets import check_assets
 
@@ -43,9 +43,9 @@ def check_decision(
         raise ValueError("; ".join(errors))
     document = json.loads(manifest.read_text())
     record = next(item for item in document["assets"] if item["id"] == ASSET_ID)
-    if record["status"] == "confirmed_blocked_absent" and not allow_blocked:
-        raise ValueError("blocked asset needs --allow-blocked-absent")
-    if record["status"] == "confirmed_included" and (
+    if record["status"] == "not_selected" and not allow_not_selected:
+        raise ValueError("not-selected asset needs --allow-not-selected")
+    if record["status"] == "included" and (
         record.get("stop_causes") or not permitted(record)
     ):
         raise ValueError("included Kokoro chain lacks file-scoped evidence")
@@ -123,8 +123,8 @@ def render_report(
             + render_sources(item)
         )
     decision = (
-        "Stop Kokoro runtime inclusion and its release."
-        if record["status"] == "confirmed_blocked_absent"
+        "Do not select Kokoro. Its measured cost is more than Piper."
+        if record["status"] == "not_selected"
         else "Use only the confirmed files and default voice digests below."
     )
     return (
@@ -141,8 +141,9 @@ No Kokoro model, voice, dictionary, or runtime is in this release tree.
 Image inventory: `NOT CHECKED`. There is no image.
 
 The packaged Python requirements do not include the server interpreter.
-The English phonemizer chain also contains GPL and LGPL components.
-The recorded stop causes are:
+The English phonemizer chain contains GPL and LGPL components.
+These licenses are records, not selection stop causes.
+The technical causes are:
 
 """
         + "```json\n"
@@ -201,7 +202,8 @@ No rights approval applies to those paths or to other voices.
 
 Access date for all sources: 2026-10-24.
 The manifest records the source statement that sets each license decision.
-`NOASSERTION` is a blocked rights finding, not permission to use a file.
+`NOASSERTION` records a missing file-level grant.
+It does not stop technical selection.
 
 The weights have an Apache statement and a complete digest in the same model page.
 The voice table supplies a name and short digest.
@@ -221,7 +223,8 @@ The attached package licenses supply these statements.
 These declarations do not supply approval for all bundled third-party parts.
 They also do not supply approval for all their dependencies.
 
-The complete Kokoro chain stays blocked. No package below is a new release selection.
+The Kokoro chain is not selected because of technical causes.
+No package below is a release selection.
 NumPy has the same license expression as the recorded probe dependency in the notices.
 
 """
@@ -231,23 +234,22 @@ NumPy has the same license expression as the recorded probe dependency in the no
 ## Release boundary and reproduction
 
 The manifest has an explicit empty `kokoro_default_voices` list.
-The tool refuses an unknown status or a blocked file in the release tree.
+The tool refuses an unknown status or a not-selected file in the release tree.
 It also refuses an unapproved default voice.
 The asset gate checks all nested components, the image inventory, and the download plan.
 
 No Kokoro component is in that plan. The Smart Turn record stays unchanged.
-An accepted blocked-absent decision is not satisfactory synthesis or a release approval.
+An accepted `not_selected` decision is not satisfactory synthesis or a release approval.
 
 ```sh
 uv run pytest tests/test_kokoro_licenses.py -q
 uv run python tools/probe_kokoro_licenses.py --record-decision \\
-  --allow-blocked-absent --check assets/manifest.json \\
+  --allow-not-selected --check assets/manifest.json \\
   --report docs/research/q7-kokoro.md
 uv run python tools/check_assets.py --manifest assets/manifest.json --release
 ```
 
-A design decision is necessary before runtime work can continue.
-This inspection selects no replacement model or runtime.
+Piper is the selected local runtime. See `q7t-local-tts.md` for the measurements.
 """
     )
 
@@ -255,7 +257,7 @@ This inspection selects no replacement model or runtime.
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--record-decision", action="store_true")
-    parser.add_argument("--allow-blocked-absent", action="store_true")
+    parser.add_argument("--allow-not-selected", action="store_true")
     parser.add_argument("--check", type=Path, default=ROOT / "assets/manifest.json")
     parser.add_argument(
         "--report", type=Path, default=ROOT / "docs/research/q7-kokoro.md"
@@ -263,7 +265,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         record, defaults = check_decision(
-            args.check, allow_blocked=args.allow_blocked_absent
+            args.check, allow_not_selected=args.allow_not_selected
         )
         if args.record_decision:
             directory = Path(
@@ -289,8 +291,8 @@ def main(argv: list[str] | None = None) -> int:
             print("PASS decision recorded")
         print(
             "PASS included rights"
-            if record["status"] == "confirmed_included"
-            else "PASS blocked asset absent"
+            if record["status"] == "included"
+            else "PASS not-selected asset absent"
         )
         return 0
     except (OSError, ValueError, KeyError, StopIteration) as error:

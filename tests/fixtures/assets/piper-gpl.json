@@ -2,7 +2,7 @@
   {
     "id": "piper-runtime",
     "kind": "runtime",
-    "status": "confirmed_included",
+    "status": "included",
     "url": "https://example.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/piper.bin",
     "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",

@@ -3,7 +3,7 @@
 ## Decision
 
 Use the pinned model for local cost tests. Its rights let the server download it at startup.
-Status: `confirmed_included`. The project is experimental and has no release.
+Status: `included`. The project is experimental and has no release.
 
 No model file or audio file is in this repository.
 Image inventory: `NOT CHECKED`. There is no image.
@@ -26,7 +26,7 @@ Tests for safe turn endings are also necessary.
 
 - License source: https://huggingface.co/pipecat-ai/smart-turn-v3/blob/f766f81d3cfdf7737ac64aad813d91bbfd56bf93/README.md
 - Source revision or version: `f766f81d3cfdf7737ac64aad813d91bbfd56bf93`.
-- File or scope: `{'path': 'smart-turn-v3.2-cpu.onnx', 'sha256': '2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f'}`.
+- File: `smart-turn-v3.2-cpu.onnx`. SHA-256: `2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f`.
 
 License statement:
 
@@ -36,7 +36,7 @@ license: bsd-2-clause
 
 - License source: https://github.com/pipecat-ai/smart-turn/blob/4786657e242dfe77dd138699ac564ee074a2a543/LICENSE
 - Source revision or version: `4786657e242dfe77dd138699ac564ee074a2a543`.
-- File or scope: `{'path': 'smart-turn-v3.2-cpu.onnx', 'sha256': '2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f'}`.
+- File: `smart-turn-v3.2-cpu.onnx`. SHA-256: `2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f`.
 
 License statement:
 
@@ -70,7 +70,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 - License source: https://github.com/pipecat-ai/smart-turn/blob/4786657e242dfe77dd138699ac564ee074a2a543/README.md
 - Source revision or version: `4786657e242dfe77dd138699ac564ee074a2a543`.
-- File or scope: `{'path': 'smart-turn-v3.2-cpu.onnx', 'sha256': '2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f'}`.
+- File: `smart-turn-v3.2-cpu.onnx`. SHA-256: `2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f`.
 
 License statement:
 
@@ -80,7 +80,7 @@ This is a truly open model (BSD 2-clause license).
 
 - License source: https://github.com/pipecat-ai/smart-turn/blob/4786657e242dfe77dd138699ac564ee074a2a543/README.md
 - Source revision or version: `4786657e242dfe77dd138699ac564ee074a2a543`.
-- File or scope: `{'path': 'smart-turn-v3.2-cpu.onnx', 'sha256': '2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f'}`.
+- File: `smart-turn-v3.2-cpu.onnx`. SHA-256: `2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f`.
 
 License statement:
 
@@ -90,7 +90,7 @@ The datasets, training script, and model weights are all open source.
 
 - License source: https://github.com/pipecat-ai/smart-turn/blob/4786657e242dfe77dd138699ac564ee074a2a543/README.md
 - Source revision or version: `4786657e242dfe77dd138699ac564ee074a2a543`.
-- File or scope: `{'path': 'smart-turn-v3.2-cpu.onnx', 'sha256': '2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f'}`.
+- File: `smart-turn-v3.2-cpu.onnx`. SHA-256: `2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f`.
 
 License statement:
 
@@ -100,6 +100,8 @@ License statement:
 
 These statements connect the model and pinned file to the full license text.
 This decision does not use a badge as a license source.
+The project page has the title `Smart Turn v3.2`.
+The selected file is `smart-turn-v3.2-cpu.onnx`.
 
 BSD-2-Clause lets users use and redistribute the model with or without changes.
 Source copies must keep the copyright notice, conditions, and disclaimer.
@@ -186,10 +188,10 @@ All values below are milliseconds for each candidate.
 ```sh
 uv run pytest tests/test_probe_smart_turn.py -q
 uv run python tools/probe_smart_turn.py --record-decision \
-  --allow-blocked-absent --candidates 100 --report docs/research/q5-smart-turn.md
+  --allow-not-selected --candidates 100 --report docs/research/q5-smart-turn.md
 uv run python tools/check_assets.py --manifest assets/manifest.json --release
 ```
 
 The decision command checks release-asset rights before the measurement.
-It refuses an unknown status, a hash mismatch, or a blocked asset in the release tree.
+It refuses an unknown status, a hash mismatch, or a not-selected release-tree asset.
 An accepted rights record does not claim a built-image check.
