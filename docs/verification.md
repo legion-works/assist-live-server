@@ -1384,3 +1384,108 @@ PASS own Git root
 PASS history secrets commits=17
 PASS public data matches=0
 ```
+
+## Store resilience and record integrity
+
+Date: 2026-10-25.
+
+Acceptance errors refuse the current event, resolve its result, count the error, and log no event data.
+The acceptance and maintenance tasks continue with intervals that have a five-second maximum.
+Device result waits have a two-second limit.
+Shutdown counts queued and in-flight discards and resolves their results.
+
+The audio and subscription routes share 64 connection slots, with a limit of 16 for each integration token.
+The device route keeps its 64-slot limit and a four-slot limit for each authenticated device.
+A device connection cannot change its authenticated identity.
+
+Credential changes must use the store and its bound registry.
+The protocol gives the recovery steps for a process crash between the credential-file write and the SQLite commit.
+`Registry.rotate` cannot clear the replay window.
+
+### Behavioral checks
+
+Command before the implementation:
+
+```sh
+uv run --locked pytest tests/contract/test_event_store.py \
+  tests/contract/test_connection_limits.py -q \
+  -k 'worker_store_error or maintenance_recovers or shutdown_counts or result_wait or share_global or reserves_slots'
+```
+
+Result: `6 failed, 18 deselected`.
+The failures include `TimeoutError`, unresolved results, and `DID NOT RAISE WSServerHandshakeError`.
+
+The query-plan test first gave `SCAN events` for the retention delete.
+The direct-rotation test first gave `DID NOT RAISE ValueError`.
+All 11 historical-evidence changes first gave exit code 0. The necessary exit code is 1.
+The stored canonical SHA-256 checks the complete `stt_benchmark_evidence`, not selected report strings.
+
+Command: `uv run --locked pytest tests/test_store.py tests/test_probe_tts.py tests/test_benchmark_stt.py tests/contract/ -q`.
+The full test suite also runs these checks.
+The mutation checks remove task guards, result resolution, indexes, connection limits, credential-change guards, and record protection.
+Each changed guard must cause a test failure. The historical-evidence test checks all 11 reported summary changes.
+
+### Writer measurements
+
+The timing probe seeds 10,000 rows, then accepts 10,000 device events through the SQLite writer.
+A different run seeds 100,000 rows and accepts 10,000 events.
+The two runs include the 100 ms maintenance task and a 5 ms event-loop timer.
+Times include the writer queue wait and commit. Other processes share the host.
+
+`PROBE` names the external directory with the timing probe and its output.
+Command for each source tree: `uv run --locked python "$PROBE/bench.py" "$PROBE/output"`.
+
+| Seeded rows | Commit p50 before / after ms | Commit p99 before / after ms | Loop-lag p99 before / after ms |
+|---:|---:|---:|---:|
+| 10,000 | 0.922 / 0.186 | 40.730 / 0.757 | 1.060 / 1.103 |
+| 100,000 | 4.039 / 0.181 | 58.402 / 0.550 | 1.072 / 0.851 |
+
+The 10,000-row loop-lag difference is 0.043 ms. The 100,000-row result decreases.
+These measurements do not give a target-host performance guarantee.
+Retention runs each minute, not in the acceptance transaction. Status updates check each turn's deadlines.
+The query-plan checks use range searches and an expression-index search for unmatched-event counts.
+
+### Probe records
+
+Command:
+
+```sh
+uv run --locked python tools/probe_tts.py --record-decision \
+  --report docs/research/q7t-local-tts.md
+```
+
+Results: `PASS TTS selection recorded` and `PASS TTS records`.
+The record is byte-identical. A copied-tree test compares the complete file after this command.
+The `Dataset` and `Training` sections come from the manifest's model-card text.
+The renderer keeps those sections. A mutation that removes the source text causes a copied-tree test failure.
+
+The documented STT command also ran with the pinned model files and corpus audio in external storage.
+The command used the same arguments as the complete-comparison command above, in a copied tree.
+Result: `PASS Q6 comparison: parakeet; no streaming default`.
+The record is different only in host load, uptime, and the first-partial and `final_latency_ms` columns.
+The selected trajectory export is byte-identical, with 250 rows.
+
+### Repository checks
+
+Command: `task check`.
+Results: `All checks passed!`, `PASS CI boundaries`, `Success: no issues found in 23 source files`, and `347 passed`.
+The bootstrap, isolated-package, asset-license, and secret-scan checks give exit code 0.
+Image inventory stays `NOT CHECKED`: there is no image inventory.
+
+Command: `UV_LINK_MODE=copy uv run --locked --python 3.14.2 pytest -q`.
+Result: `347 passed`.
+
+Command: `unshare -rn sh -c 'ip link set lo up && UV_OFFLINE=1 uv run --locked pytest -q'`.
+Result: `347 passed`.
+
+The public-tree checker with `--history` reports:
+
+```text
+PASS own Git root
+PASS history secrets commits=23
+PASS public data matches=0
+```
+
+The ASD-STE100 checker reports 0 findings in the protocol and verification records.
+The privacy self-scan checks 82 publishable files and gives `private_terms=0 home_paths=0 private_addresses=0`.
+All 24 numbered behavioral mutations cause test failures. The 11 historical-evidence changes also give the necessary command failure.

@@ -67,6 +67,7 @@ class SQLiteStore:
         self.record_transcripts = record_transcripts
         self.retention_ns = retention_days * 86_400_000_000_000
         self.now_ns = now_ns
+        self.last_retention_ns: int | None = None
         self.changed = asyncio.Event()
         self.loop: asyncio.AbstractEventLoop | None = None
         self.writer = ThreadPoolExecutor(
@@ -84,12 +85,18 @@ class SQLiteStore:
                 status TEXT NOT NULL, closed_ns INTEGER
             );
             CREATE INDEX IF NOT EXISTS turns_satellite ON turns(satellite, status);
+            CREATE INDEX IF NOT EXISTS turns_opened ON turns(opened_ns);
+            CREATE INDEX IF NOT EXISTS turns_status ON turns(status, opened_ns);
             CREATE TABLE IF NOT EXISTS events (
                 event_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 satellite TEXT NOT NULL, turn_id TEXT, utc_ns INTEGER NOT NULL,
                 payload TEXT NOT NULL, stored_ns INTEGER NOT NULL
             );
             CREATE INDEX IF NOT EXISTS events_satellite ON events(satellite, event_id);
+            CREATE INDEX IF NOT EXISTS events_stored ON events(stored_ns);
+            CREATE INDEX IF NOT EXISTS events_turn ON events(turn_id, event_id);
+            CREATE INDEX IF NOT EXISTS events_stage
+                ON events(json_extract(payload, '$.stage'), satellite);
             CREATE TABLE IF NOT EXISTS counters (
                 satellite TEXT PRIMARY KEY, events_total INTEGER NOT NULL
             );
@@ -98,11 +105,13 @@ class SQLiteStore:
                 arrival_ns INTEGER NOT NULL, payload TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS pending_satellite ON pending(satellite);
+            CREATE INDEX IF NOT EXISTS pending_arrival ON pending(arrival_ns);
             CREATE TABLE IF NOT EXISTS device_events (
                 device TEXT NOT NULL, boot TEXT NOT NULL, seq TEXT NOT NULL,
                 payload TEXT NOT NULL, stored_ns INTEGER NOT NULL,
                 UNIQUE(device, boot, seq)
             );
+            CREATE INDEX IF NOT EXISTS device_events_stored ON device_events(stored_ns);
             UPDATE turns SET status='incomplete' WHERE status IN ('open','closing');
         """)
 
@@ -127,9 +136,11 @@ class SQLiteStore:
         await self._call(self._rotate, registry, device, secret)
 
     def _rotate(self, registry: Registry, device: str, secret: bytes) -> None:
+        if registry.replay_store is not self.replay:
+            raise ValueError("registry must use this store")
         with self.connection:
             self.connection.execute("BEGIN IMMEDIATE")
-            registry.rotate(device, secret)
+            registry._rotate(device, secret)
             self.connection.execute(
                 "DELETE FROM device_events WHERE device=?", (device,)
             )
@@ -160,23 +171,36 @@ class SQLiteStore:
                     credential_epoch=device.credential_epoch,
                 ):
                     return False
-                event = convert(
-                    replace(device, new_boot=original.boot != device.event["boot"])
-                )
                 self.connection.execute(
                     "INSERT INTO device_events VALUES(?,?,?,?,?)",
                     (
                         name,
                         str(device.event["boot"]),
                         str(device.event["seq"]),
-                        self._encode(event),
+                        "",
                         self.now_ns(),
                     ),
                 )
+                # Reserve the unique key before the clock accepts a sample.
+                event = convert(
+                    replace(device, new_boot=original.boot != device.event["boot"])
+                )
+                self.connection.execute(
+                    "UPDATE device_events SET payload=? "
+                    "WHERE device=? AND boot=? AND seq=?",
+                    (
+                        self._encode(event),
+                        name,
+                        str(device.event["boot"]),
+                        str(device.event["seq"]),
+                    ),
+                )
                 self._append_device_rows(event, device.arrival_ns)
-        except sqlite3.Error, ValueError, TypeError, OverflowError:
+        except Exception as error:
             registry.replay[name] = original
-            return False
+            if isinstance(error, (sqlite3.Error, ValueError, TypeError, OverflowError)):
+                return False
+            raise
         self._notify()
         return True
 
@@ -188,6 +212,13 @@ class SQLiteStore:
         return row
 
     def _insert(self, event: TimingEvent) -> None:
+        if event.turn_id is not None:
+            self.connection.execute(
+                "UPDATE turns SET status='incomplete' "
+                "WHERE turn_id=? AND status='open' AND opened_ns<=?",
+                (event.turn_id, self.now_ns() - 120_000_000_000),
+            )
+            self._refresh_status(event.turn_id)
         self.connection.execute(
             "INSERT INTO events(satellite,turn_id,utc_ns,payload,stored_ns) "
             "VALUES(?,?,?,?,?)",
@@ -264,7 +295,7 @@ class SQLiteStore:
             self._refresh_status(turn_id)
         expired = self.connection.execute(
             "SELECT pending_id,payload FROM pending WHERE arrival_ns<=? "
-            "ORDER BY pending_id",
+            "ORDER BY arrival_ns,pending_id",
             (now - 5_000_000_000,),
         ).fetchall()
         for pending_id, raw in expired:
@@ -279,12 +310,6 @@ class SQLiteStore:
             self.connection.execute(
                 "DELETE FROM pending WHERE pending_id=?", (pending_id,)
             )
-        cutoff = now - self.retention_ns
-        self.connection.execute("DELETE FROM events WHERE stored_ns<?", (cutoff,))
-        self.connection.execute("DELETE FROM turns WHERE opened_ns<?", (cutoff,))
-        self.connection.execute(
-            "DELETE FROM device_events WHERE stored_ns<?", (cutoff,)
-        )
         if expired:
             self._notify()
 
@@ -292,10 +317,28 @@ class SQLiteStore:
         await self._call(self._maintain_transaction)
 
     def _maintain_transaction(self) -> None:
+        now = self.now_ns()
+        retention_due = (
+            self.last_retention_ns is None
+            or now - self.last_retention_ns >= 60_000_000_000
+        )
         with self.connection:
             self.connection.execute("BEGIN IMMEDIATE")
             self._maintain()
-        self.connection.execute("PRAGMA wal_checkpoint(PASSIVE)")
+            if retention_due:
+                cutoff = now - self.retention_ns
+                self.connection.execute(
+                    "DELETE FROM events WHERE stored_ns<?", (cutoff,)
+                )
+                self.connection.execute(
+                    "DELETE FROM turns WHERE opened_ns<?", (cutoff,)
+                )
+                self.connection.execute(
+                    "DELETE FROM device_events WHERE stored_ns<?", (cutoff,)
+                )
+        if retention_due:
+            self.connection.execute("PRAGMA wal_checkpoint(PASSIVE)")
+            self.last_retention_ns = now
 
     async def open_turn(self, turn: TurnOpen) -> None:
         await self._call(self._open_turn, turn)
@@ -360,7 +403,6 @@ class SQLiteStore:
             return
         with self.connection:
             self.connection.execute("BEGIN IMMEDIATE")
-            self._maintain()
             self._insert(self._sanitize(event))
         self._notify()
 
@@ -376,12 +418,16 @@ class SQLiteStore:
         self._notify()
 
     def _append_device_rows(self, event: TimingEvent, arrival_ns: int) -> None:
-        self._maintain()
         row = self.connection.execute(
             "SELECT turn_id,opened_ns FROM turns "
-            "WHERE satellite=? AND status IN ('open','closing') "
+            "WHERE satellite=? AND ((status='open' AND opened_ns>?) "
+            "OR (status='closing' AND closed_ns>?)) "
             "ORDER BY opened_ns DESC LIMIT 1",
-            (event.satellite,),
+            (
+                event.satellite,
+                self.now_ns() - 120_000_000_000,
+                self.now_ns() - 5_000_000_000,
+            ),
         ).fetchone()
         event = replace(event, data=safe_data(event))
         if row is not None and row[1] < arrival_ns + 5_000_000_000:

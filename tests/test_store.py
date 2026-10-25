@@ -7,6 +7,119 @@ import pytest
 from assist_live_client import TimingEvent, TurnOpen
 
 
+def test_retention_and_status_queries_use_indexes_and_acceptance_has_no_scans(tmp_path):
+    from assist_live_server.auth import Registry
+    from assist_live_server.event_gateway import EventGateway
+    from assist_live_server.protocol import DeviceEvent
+    from assist_live_server.store import SQLiteStore
+
+    async def run():
+        store = SQLiteStore(tmp_path / "timing.db")
+        registry = Registry()
+        registry.bind("device-a", "satellite-a", b"synthetic-key")
+        await store.configure_registry(registry)
+        statements = []
+
+        def plans():
+            queries = [
+                "DELETE FROM events WHERE stored_ns<0",
+                "DELETE FROM turns WHERE opened_ns<0",
+                "DELETE FROM device_events WHERE stored_ns<0",
+                "SELECT payload FROM events WHERE turn_id='test' ORDER BY event_id",
+                "SELECT count(*) FROM events "
+                "WHERE json_extract(payload, '$.stage')='unmatched' "
+                "AND satellite='satellite-a'",
+                "SELECT turn_id FROM turns WHERE status='closing'",
+                "SELECT pending_id,payload FROM pending WHERE arrival_ns<=0 "
+                "ORDER BY arrival_ns,pending_id",
+            ]
+            for query in queries:
+                plan = " ".join(
+                    str(row)
+                    for row in store.connection.execute("EXPLAIN QUERY PLAN " + query)
+                )
+                assert "SEARCH" in plan, (query, plan)
+                if "json_extract" in query:
+                    assert "<expr>=?" in plan, (query, plan)
+            store.connection.set_trace_callback(statements.append)
+
+        try:
+            await store._call(plans)
+            gateway = EventGateway(store)
+            event = DeviceEvent(
+                "satellite-a",
+                {
+                    "device": "device-a",
+                    "boot": 1,
+                    "seq": 0,
+                    "device_ms": 0,
+                    "stage": "mic_open",
+                    "data": {},
+                },
+                False,
+                store.now_ns(),
+            )
+            assert await store.accept_device(registry, event, gateway.convert)
+            assert not any(
+                "DELETE FROM events" in query
+                or "DELETE FROM turns" in query
+                or "FROM pending WHERE arrival_ns" in query
+                for query in statements
+            )
+            statements.clear()
+            await store.maintain()
+            assert any("DELETE FROM events" in query for query in statements)
+            statements.clear()
+            await store.maintain()
+            assert not any("DELETE FROM events" in query for query in statements)
+        finally:
+            store.close()
+
+    asyncio.run(run())
+
+
+def test_direct_registry_rotation_cannot_clear_replay(tmp_path):
+    from assist_live_server.auth import Registry
+    from assist_live_server.replay_store import SQLiteReplayStore
+
+    replay = SQLiteReplayStore(tmp_path / "timing.db")
+    registry = Registry(tmp_path / "credentials", replay_store=replay)
+    registry.bind("device-a", "satellite-a", b"synthetic-old-key")
+    assert registry.accept_sequence("device-a", 1, 0)
+    before = (tmp_path / "credentials").read_bytes()
+    try:
+        with pytest.raises(ValueError, match="SQLiteStore.rotate"):
+            registry.rotate("device-a", b"synthetic-new-key")
+        assert (tmp_path / "credentials").read_bytes() == before
+        assert replay.load_replay("device-a").high == 0
+        assert not registry.accept_sequence("device-a", 1, 0)
+    finally:
+        replay.close()
+
+
+def test_rotation_refuses_a_registry_bound_to_a_different_store(tmp_path):
+    from assist_live_server.auth import Registry
+    from assist_live_server.store import SQLiteStore
+
+    async def run():
+        registry = Registry(tmp_path / "credentials")
+        registry.bind("device-a", "satellite-a", b"synthetic-old-key")
+        first = SQLiteStore(tmp_path / "first.db")
+        second = SQLiteStore(tmp_path / "second.db")
+        try:
+            await first.configure_registry(registry)
+            before = (tmp_path / "credentials").read_bytes()
+            with pytest.raises(ValueError, match="registry must use this store"):
+                await second.rotate(registry, "device-a", b"synthetic-new-key")
+            assert (tmp_path / "credentials").read_bytes() == before
+            assert registry.device("device-a") == ("satellite-a", b"synthetic-old-key")
+        finally:
+            first.close()
+            second.close()
+
+    asyncio.run(run())
+
+
 def test_store_restart_retention_cursor_and_isolation(tmp_path):
     from assist_live_server.store import SQLiteStore
 
@@ -124,10 +237,23 @@ def test_durable_replay_rejects_event_and_previous_boot_after_restart(tmp_path):
     assert not registry.accept_sequence("satellite-a", 2**64 - 1, 1)
     assert registry.accept_sequence("satellite-a", 2, 1)
     assert registry.missing("satellite-a") == 0
-    registry.rotate("satellite-a", b"new-synthetic-key")
-    assert replay.load_replay("satellite-a") is None
-    assert registry.accept_sequence("satellite-a", 2**64 - 1, 1)
     replay.close()
+
+    async def rotate():
+        from assist_live_server.store import SQLiteStore
+
+        store = SQLiteStore(path)
+        try:
+            await store.configure_registry(registry)
+            await store.rotate(registry, "satellite-a", b"new-synthetic-key")
+            assert await store._call(store.replay.load_replay, "satellite-a") is None
+            assert await store._call(
+                registry.accept_sequence, "satellite-a", 2**64 - 1, 1
+            )
+        finally:
+            store.close()
+
+    asyncio.run(rotate())
 
 
 def test_worker_keeps_replay_and_event_atomic_without_blocking_loop(
@@ -244,6 +370,51 @@ def test_turn_completeness_and_reorder_deadline(tmp_path, turn_type):
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("expired", ["open", "closing"])
+def test_append_cannot_complete_a_turn_after_its_deadline(tmp_path, expired):
+    from assist_live_server.store import SQLiteStore
+
+    async def run():
+        now = [1_000_000_000]
+        store = SQLiteStore(tmp_path / "timing.db", now_ns=lambda: now[0])
+        turn = TurnOpen(str(uuid7()), "satellite-a", "tts_only", None, None)
+
+        async def append(stage):
+            await store.append(
+                TimingEvent(
+                    turn.turn_id,
+                    turn.satellite,
+                    "integration",
+                    stage,
+                    now[0],
+                    "proxy",
+                    0,
+                )
+            )
+
+        try:
+            await store.open_turn(turn)
+            if expired == "closing":
+                for stage in ("tts_first_text", "playback_start", "playback_end"):
+                    await append(stage)
+                now[0] += 5_000_000_000
+                await append("tts_first_byte")
+            else:
+                now[0] += 120_000_000_000
+                for stage in (
+                    "tts_first_text",
+                    "tts_first_byte",
+                    "playback_start",
+                    "playback_end",
+                ):
+                    await append(stage)
+            assert (await store.get_turn(turn.turn_id))["status"] == "incomplete"
+        finally:
+            store.close()
+
+    asyncio.run(run())
+
+
 def test_one_writer_prevents_overlapping_acceptance(tmp_path, monkeypatch):
     import threading
 
@@ -342,7 +513,11 @@ def test_device_transaction_failure_and_unique_guard(tmp_path):
             assert registry.replay["satellite-a"].high == -1
             assert await store.accept_device(registry, device, gateway.convert)
             registry.replay["satellite-a"] = ReplayState()
+            samples = list(gateway.clocks["satellite-a"].samples)
+            sequences = gateway.sequences.copy()
             assert not await store.accept_device(registry, device, gateway.convert)
+            assert list(gateway.clocks["satellite-a"].samples) == samples
+            assert gateway.sequences == sequences
             assert (await store.diagnostics())["pending_events"] == 1
         finally:
             store.close()

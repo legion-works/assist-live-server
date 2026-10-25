@@ -440,6 +440,14 @@ def render_report(
     from tools.asset_rights import render_sources
 
     evidence = manifest["stt_benchmark_evidence"]
+    encoded = json.dumps(
+        evidence, sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode()
+    if (
+        hashlib.sha256(encoded).hexdigest()
+        != "73b92e15225002336d512af3477981d79dc40c911252b135780bb9dc9f81d303"
+    ):
+        raise ValueError("historical evidence digest mismatch")
     table = []
     intervals = []
     for split in ("tuning", "held_out"):

@@ -82,6 +82,143 @@ def packet(seq, stage="wake_detected", satellite="satellite-a"):
     ).encode()
 
 
+def test_worker_store_error_resolves_result_and_accepts_next_event(
+    tmp_path, monkeypatch, caplog
+):
+    async def run():
+        async with service(tmp_path) as (_, _, store, ingress, _):
+            original = store.accept_device
+
+            async def broken(registry, device, convert):
+                if device.event["seq"] == 0:
+                    raise RuntimeError("synthetic store failure")
+                return await original(registry, device, convert)
+
+            monkeypatch.setattr(store, "accept_device", broken)
+            results = [asyncio.get_running_loop().create_future() for _ in range(2)]
+            for seq, result in enumerate(results):
+                assert ingress.accept(packet(seq), result=result)
+            async with asyncio.timeout(2):
+                assert await asyncio.gather(*results) == [False, True]
+                await ingress.queue.join()
+            assert ingress.worker_errors == 1
+            assert ingress.refused == 1 and ingress.accepted == 1
+            assert "timing acceptance failed" in caplog.text
+            assert "synthetic store failure" not in caplog.text
+
+    asyncio.run(run())
+
+
+def test_maintenance_recovers_after_store_error(tmp_path, monkeypatch, caplog):
+    from assist_live_server.store import SQLiteStore
+
+    async def run():
+        recovered = asyncio.Event()
+        original = SQLiteStore.maintain
+        calls = 0
+
+        async def broken(self):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise RuntimeError("synthetic maintenance failure")
+            await original(self)
+            recovered.set()
+
+        monkeypatch.setattr(SQLiteStore, "maintain", broken)
+        async with service(tmp_path) as (client, session, _, _, _):
+            async with asyncio.timeout(2):
+                await recovered.wait()
+            async with session.get(
+                "http://service.invalid/metrics", headers=client._headers
+            ) as response:
+                assert "assist_live_maintenance_errors_total 1" in await response.text()
+            assert "timing maintenance failed" in caplog.text
+            assert "synthetic maintenance failure" not in caplog.text
+
+    asyncio.run(run())
+
+
+def test_concurrent_open_turn_returns_conflict_not_invalid_request(
+    tmp_path, monkeypatch
+):
+    from dataclasses import asdict
+
+    async def run():
+        async with service(tmp_path) as (client, session, store, _, _):
+            original = store.get_turn
+            release = asyncio.Event()
+            reads = 0
+
+            async def simultaneous(turn_id):
+                nonlocal reads
+                result = await original(turn_id)
+                reads += 1
+                if reads == 2:
+                    release.set()
+                await release.wait()
+                return result
+
+            monkeypatch.setattr(store, "get_turn", simultaneous)
+            turn = TurnOpen(str(uuid7()), "satellite-a", "voice", None, None)
+
+            async def post():
+                async with session.post(
+                    "http://service.invalid/v1/turns",
+                    headers=client._headers,
+                    json=asdict(turn),
+                ) as response:
+                    return response.status
+
+            async with asyncio.timeout(2):
+                assert sorted(await asyncio.gather(post(), post())) == [200, 409]
+
+    asyncio.run(run())
+
+
+def test_shutdown_counts_inflight_and_queued_drops_and_resolves_results(
+    tmp_path, monkeypatch
+):
+    from assist_live_server.app import create_app
+    from assist_live_server.auth import Registry
+    from assist_live_server.protocol import TimingIngress
+    from assist_live_server.store import SQLiteStore
+
+    async def run():
+        store = SQLiteStore(tmp_path / "timing.db")
+        registry = Registry()
+        registry.bind("satellite-a", "satellite-a", b"synthetic-device-key")
+        ingress = TimingIngress(registry)
+        entered = asyncio.Event()
+
+        async def blocked(*args):
+            entered.set()
+            await asyncio.Event().wait()
+
+        monkeypatch.setattr(store, "accept_device", blocked)
+        runner = web.AppRunner(create_app(registry, store, ingress=ingress))
+        await runner.setup()
+        results = [asyncio.get_running_loop().create_future() for _ in range(3)]
+        try:
+            assert ingress.accept(packet(0), result=results[0])
+            async with asyncio.timeout(1):
+                await entered.wait()
+            for seq in (1, 2):
+                assert ingress.accept(packet(seq), result=results[seq])
+            await runner.cleanup()
+            assert all(result.done() and result.result() is False for result in results)
+            assert ingress.dropped == 3
+            assert not ingress.accept(packet(3))
+            assert ingress.dropped == 4
+            async with asyncio.timeout(1):
+                await ingress.queue.join()
+        finally:
+            await runner.cleanup()
+            store.close()
+
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("adapter", ["udp", "websocket"])
 def test_event_to_store_to_client(tmp_path, capsys, adapter):
     async def run():

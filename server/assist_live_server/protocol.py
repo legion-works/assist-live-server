@@ -1,6 +1,6 @@
 import asyncio
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -13,8 +13,10 @@ from .auth import Registry, verify_event
 MAX_DEVICE = 4096
 DUMMY_DEVICE_SECRET = bytes(32)
 DEVICE_AUTH_TIMEOUT = 2.0
+DEVICE_RESULT_TIMEOUT = 2.0
 DEVICE_CLOSE_TIMEOUT = 0.1
 MAX_DEVICE_CONNECTIONS = 64
+MAX_DEVICE_PER_DEVICE = 4
 
 
 class TurnStore(Protocol):
@@ -57,12 +59,18 @@ class TimingIngress:
         self.accepted = 0
         self.refused = 0
         self.dropped = 0
+        self.worker_errors = 0
+        self.closed = False
 
     def accept(
-        self, packet: bytes, *, result: asyncio.Future[bool] | None = None
+        self,
+        packet: bytes,
+        *,
+        result: asyncio.Future[bool] | None = None,
+        admit: Callable[[str], bool] | None = None,
     ) -> bool:
         arrival_ns = time.time_ns()
-        if len(packet) > MAX_DEVICE or self.queue.full():
+        if self.closed or len(packet) > MAX_DEVICE or self.queue.full():
             self.dropped += 1
             return False
         try:
@@ -72,16 +80,31 @@ class TimingIngress:
             secret = credentials[1] if credentials is not None else DUMMY_DEVICE_SECRET
             verified = verify_event(event, tag, secret)
             if not verified or credentials is None:
+                self.refused += 1
                 return False
             satellite = credentials[0]
             if event["data"].get("satellite", satellite) != satellite:
+                self.refused += 1
+                return False
+            if admit is not None and not admit(event["device"]):
+                self.refused += 1
                 return False
             self.queue.put_nowait(
                 DeviceEvent(satellite, event, False, arrival_ns, result, credentials[2])
             )
             return True
         except ValueError, TypeError, KeyError, RecursionError:
+            self.refused += 1
             return False
+
+    def close(self) -> None:
+        self.closed = True
+        while not self.queue.empty():
+            event = self.queue.get_nowait()
+            self.dropped += 1
+            if event.result is not None and not event.result.done():
+                event.result.set_result(False)
+            self.queue.task_done()
 
     def missing(self, device: str) -> int:
         return self.registry.missing(device)
@@ -106,6 +129,7 @@ class WebSocketTransport:
     def __init__(self, ingress: TimingIngress) -> None:
         self.ingress = ingress
         self.active = 0
+        self.devices: dict[str, int] = {}
 
     def accept(self, packet: bytes) -> bool:
         return self.ingress.accept(packet)
@@ -116,6 +140,18 @@ class WebSocketTransport:
             refused.force_close()
             raise refused
         self.active += 1
+        identity: str | None = None
+
+        def admit(device: str) -> bool:
+            nonlocal identity
+            if identity is not None:
+                return identity == device
+            if self.devices.get(device, 0) >= MAX_DEVICE_PER_DEVICE:
+                return False
+            self.devices[device] = self.devices.get(device, 0) + 1
+            identity = device
+            return True
+
         ws = web.WebSocketResponse(
             max_msg_size=MAX_DEVICE, compress=False, timeout=DEVICE_CLOSE_TIMEOUT
         )
@@ -135,19 +171,25 @@ class WebSocketTransport:
                     else message.data
                 )
                 result = asyncio.get_running_loop().create_future()
-                if not self.ingress.accept(packet, result=result):
+                if not self.ingress.accept(packet, result=result, admit=admit):
                     await ws.close(code=1008, message=b"event refused")
                     break
                 authenticated = True
-                if not await result:
+                async with asyncio.timeout(DEVICE_RESULT_TIMEOUT):
+                    accepted = await result
+                if not accepted:
                     await ws.close(code=1008, message=b"event refused")
                     break
         except TimeoutError:
-            await ws.close(code=1008, message=b"authentication timeout")
+            await ws.close(code=1008, message=b"event timeout")
         finally:
             try:
                 if ws.prepared:
                     await ws.close()
             finally:
                 self.active -= 1
+                if identity is not None:
+                    self.devices[identity] -= 1
+                    if not self.devices[identity]:
+                        del self.devices[identity]
         return ws

@@ -487,6 +487,49 @@ def test_manifest_records_upstream_660ms_streaming_tail():
         assert manifest["stt_benchmark"][name]["configuration"]["tail_samples"] == 10560
 
 
+@pytest.mark.parametrize("mutation", range(11))
+def test_historical_evidence_mutations_fail_before_public_output(
+    benchmark_copy, mutation
+):
+    tree, command, _, _ = benchmark_copy
+    path = tree / "assets/manifest.json"
+    manifest = json.loads(path.read_text())
+    evidence = manifest["stt_benchmark_evidence"]
+    if mutation == 0:
+        evidence["initial_results"][1]["errors"] = 135
+    elif mutation == 1:
+        evidence["flush_audit"]["zipformer_1000_changes"] = 9
+    elif mutation == 2:
+        evidence["initial_results"][3]["errors"] = 80
+    elif mutation == 3:
+        evidence["initial_results"][2]["errors"] = 78
+    elif mutation == 4:
+        evidence["flush_audit"]["fastconformer_changes"] = 5
+    elif mutation == 5:
+        evidence["flush_audit"]["whole_buffer_changes"] = 9
+    elif mutation == 6:
+        evidence["flush_audit"]["residual_after"] = (
+            "STOPPED I WENT FOR TWO HOURS SEVEN MIN"
+        )
+    elif mutation == 7:
+        evidence["upstream_wavs"][0]["errors"] = 3
+    elif mutation == 8:
+        evidence["reference_first_words"]["parakeet"] = 1
+    elif mutation == 9:
+        evidence["source_cache_sha256"]["models/measurements-both.json"] = "0" * 64
+    else:
+        del evidence["source_cache_sha256"]["models/measurements-both.json"]
+    path.write_text(json.dumps(manifest))
+    report = tree / "docs/research/q6-streaming-stt.md"
+    before = report.read_bytes()
+    result = subprocess.run(
+        command, cwd=tree, capture_output=True, text=True, timeout=30
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "FAIL Q6 comparison: historical evidence digest mismatch" in result.stdout
+    assert report.read_bytes() == before
+
+
 def test_removed_inert_check_flag_is_not_silently_accepted(benchmark_copy):
     tree, command, _, _ = benchmark_copy
     process = subprocess.run(

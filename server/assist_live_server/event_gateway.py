@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from dataclasses import replace
 from typing import Literal
 
@@ -8,6 +9,8 @@ from .clock import ClockWindow
 from .metrics import Metrics
 from .protocol import DeviceEvent, TimingIngress, TurnStore
 from .store import SQLiteStore, safe_data
+
+LOGGER = logging.getLogger(__name__)
 
 
 class EventGateway:
@@ -62,8 +65,11 @@ class EventGateway:
         return event
 
     async def run(self, ingress: TimingIngress) -> None:
+        backoff = 0.1
         while True:
             event = await ingress.queue.get()
+            accepted = False
+            failed = False
             try:
                 if isinstance(self.store, SQLiteStore):
                     accepted = await self.store.accept_device(
@@ -83,7 +89,20 @@ class EventGateway:
                     ingress.accepted += 1
                 else:
                     ingress.refused += 1
+                backoff = 0.1
+            except asyncio.CancelledError:
+                ingress.dropped += 1
+                raise
+            except Exception:
+                # Exception text can contain credentials or event data.
+                LOGGER.error("timing acceptance failed")
+                ingress.worker_errors += 1
+                ingress.refused += 1
+                failed = True
+            finally:
                 if event.result is not None and not event.result.done():
                     event.result.set_result(accepted)
-            finally:
                 ingress.queue.task_done()
+            if failed:
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 5.0)

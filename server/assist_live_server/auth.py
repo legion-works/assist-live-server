@@ -162,6 +162,9 @@ class Registry:
         return self.credentials.get(device)
 
     def rotate(self, device: str, secret: bytes) -> None:
+        raise ValueError("use SQLiteStore.rotate for credential rotation")
+
+    def _rotate(self, device: str, secret: bytes) -> None:
         row = self.devices[device]
         if hmac.compare_digest(bytes.fromhex(row["secret"]), secret):
             raise ValueError("new device credential required")

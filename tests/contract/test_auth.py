@@ -283,8 +283,9 @@ def test_device_secret_cannot_open_audio(service):
     asyncio.run(run())
 
 
-def test_credentials_remain_disjoint_in_each_provisioning_order():
+def test_credentials_remain_disjoint_in_each_provisioning_order(tmp_path):
     from assist_live_server.auth import Registry
+    from assist_live_server.store import SQLiteStore
 
     registry = Registry()
     registry.bind("satellite-a", "satellite-a", b"device-test-key")
@@ -293,8 +294,17 @@ def test_credentials_remain_disjoint_in_each_provisioning_order():
         registry.bind("satellite-b", "satellite-b", b"integration-test-token")
     with pytest.raises(ValueError):
         registry.add_token("device-test-key", ["satellite-a"])
-    with pytest.raises(ValueError):
-        registry.rotate("satellite-a", b"device-test-key")
+
+    async def run():
+        store = SQLiteStore(tmp_path / "timing.db")
+        try:
+            await store.configure_registry(registry)
+            with pytest.raises(ValueError, match="new device credential required"):
+                await store.rotate(registry, "satellite-a", b"device-test-key")
+        finally:
+            store.close()
+
+    asyncio.run(run())
 
 
 def test_replay_persistence_failure_does_not_advance_window(replay_store, monkeypatch):
@@ -503,37 +513,53 @@ def test_device_identity_and_credentials_plan_binding(tmp_path, store, replay_st
 
 def test_rotation_failure_does_not_publish_new_credential(tmp_path, monkeypatch):
     from assist_live_server.auth import Registry
-    from assist_live_server.replay_store import SQLiteReplayStore
+    from assist_live_server.store import SQLiteStore
 
     path = tmp_path / "credentials"
-    replay = SQLiteReplayStore(tmp_path / "replay.db")
-    registry = Registry(path, replay_store=replay)
+    store = SQLiteStore(tmp_path / "replay.db")
+    registry = Registry(path)
     registry.bind("satellite-a", "satellite-a", b"old-key")
-    assert registry.accept_sequence("satellite-a", 1, 0)
     original = path.read_bytes()
 
     def fail(_):
         raise OSError("synthetic replay-clear failure")
 
-    monkeypatch.setattr(replay, "clear_replay", fail)
-    try:
-        with pytest.raises(OSError, match="replay-clear"):
-            registry.rotate("satellite-a", b"new-key")
-        assert path.read_bytes() == original
-        assert registry.device("satellite-a") == ("satellite-a", b"old-key")
-        assert replay.load_replay("satellite-a").high == 0
-    finally:
-        replay.close()
+    async def run():
+        try:
+            await store.configure_registry(registry)
+            assert await store._call(registry.accept_sequence, "satellite-a", 1, 0)
+            monkeypatch.setattr(store.replay, "clear_replay", fail)
+            with pytest.raises(OSError, match="replay-clear"):
+                await store.rotate(registry, "satellite-a", b"new-key")
+            assert path.read_bytes() == original
+            assert registry.device("satellite-a") == ("satellite-a", b"old-key")
+            assert (
+                await store._call(store.replay.load_replay, "satellite-a")
+            ).high == 0
+        finally:
+            store.close()
+
+    asyncio.run(run())
 
 
-def test_rotation_refuses_another_devices_secret():
+def test_rotation_refuses_another_devices_secret(tmp_path):
     from assist_live_server.auth import Registry
+    from assist_live_server.store import SQLiteStore
 
     registry = Registry()
     registry.bind("satellite-a", "satellite-a", b"key-a")
     registry.bind("satellite-b", "satellite-b", b"key-b")
-    with pytest.raises(ValueError):
-        registry.rotate("satellite-a", b"key-b")
+
+    async def run():
+        store = SQLiteStore(tmp_path / "timing.db")
+        try:
+            await store.configure_registry(registry)
+            with pytest.raises(ValueError, match="invalid device credential"):
+                await store.rotate(registry, "satellite-a", b"key-b")
+        finally:
+            store.close()
+
+    asyncio.run(run())
     assert registry.device("satellite-a") == ("satellite-a", b"key-a")
 
 

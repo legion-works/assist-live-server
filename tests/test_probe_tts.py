@@ -125,3 +125,34 @@ def test_record_mode_never_enters_live_synthesis(tmp_path, monkeypatch):
         probe_tts.main(["--record-decision", "--report", str(tmp_path / "record.md")])
         == 0
     )
+
+
+def test_documented_command_keeps_whole_tts_record_on_copied_tree(tmp_path):
+    import os
+    import shutil
+    import subprocess
+    import sys
+
+    tree = tmp_path / "tree"
+    for directory in ("tools", "assets", "docs"):
+        shutil.copytree(ROOT / directory, tree / directory)
+    shutil.copy2(ROOT / "THIRD_PARTY_NOTICES.md", tree / "THIRD_PARTY_NOTICES.md")
+    report = tree / "docs/research/q7t-local-tts.md"
+    before = report.read_bytes()
+    result = subprocess.run(
+        [
+            sys.executable,
+            "tools/probe_tts.py",
+            "--record-decision",
+            "--report",
+            "docs/research/q7t-local-tts.md",
+        ],
+        cwd=tree,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "ASSIST_LIVE_PROBE_DIRECTORY": str(tmp_path / "scratch")},
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "PASS TTS selection recorded" in result.stdout
+    assert report.read_bytes() == before

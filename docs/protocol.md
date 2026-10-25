@@ -53,6 +53,11 @@ That refusal also closes the HTTP transport. The HTTP connection does not stay o
 
 Each connection must send its first authenticated device event in less than two seconds. If it does not, the server closes it with code `1008`.
 An authenticated connection does not use that first-event deadline for subsequent events.
+
+Each authenticated device can hold a maximum of four slots. A connection cannot change its device identity.
+A device connection above that limit closes with code `1008` after its first authenticated event.
+Each event has a two-second acceptance-result deadline. A timeout closes the connection with code `1008`.
+
 Ping and pong frames do not restart the authentication deadline.
 The server gives a peer 100 ms to reply to a close frame, then closes the transport and releases its connection slot.
 
@@ -142,6 +147,11 @@ It records missing sequences independently from duplicates.
 A new boot retires the previous boot.
 The gateway also refuses unseen sequences from a retired boot.
 
+An unexpected acceptance error refuses the current event, increases an error counter, and makes a credential-free log entry.
+The acceptance task continues after an interval, from 100 ms to a maximum of five seconds if errors continue.
+The maintenance task also counts and logs errors and continues with a bounded interval.
+Shutdown refuses new queue entries, counts discarded events, and resolves pending acceptance results as `false`.
+
 The queue record includes `new_boot` so the clock consumer can start a new window.
 It also includes `arrival_ns`, the UTC nanoseconds when the adapter receives the event, before the queue wait.
 
@@ -188,6 +198,21 @@ It clears replay state before it writes the new credential. A replay-clear error
 
 Credential-write errors put the previous in-memory credential and replay state back. The `rotate` method refuses a secret that a different device uses.
 
+`Registry.rotate` refuses all calls. Only `SQLiteStore.rotate` can change a device secret.
+The registry must use that store's replay connection.
+
+A process crash can occur after the credential file changes but before the SQLite transaction commits.
+After restart, the file has the new secret, but the previous replay window and device-event rows can stay.
+This state refuses previous-key events and can refuse correct new-key events. It does not accept duplicates.
+
+For recovery, stop device traffic and load the credential file and store.
+Do not delete the database or clear replay state with the active secret.
+Use `await store.rotate(registry, device, fresh_secret)` with a different, new secret.
+Wait for the method to complete, then provision that secret to the device and resume traffic.
+
+If the process stops again, do these steps again with a different new secret.
+Keep credentials out of logs and command arguments.
+
 Queue entries keep an immutable credential-generation snapshot. The writer refuses an entry from a revoked generation.
 The [SQLite WAL documentation](https://sqlite.org/wal.html) gives the checkpoint and `synchronous` rules.
 
@@ -206,6 +231,9 @@ The keys in this file are public test values, not usable credentials.
 ## Control and audio
 
 The `/v1/audio` WebSocket checks the integration token.
+The `/v1/audio` and `/v1/events` routes share 64 connection slots, with a maximum of 16 for each integration token.
+The server refuses upgrades above these limits with HTTP `503`. A closed connection releases its slot.
+
 Open a turn first with `POST /v1/turns` and a complete `TurnOpen` record.
 The initial control message selects version `1`, mode `stt` or `tts`, and functions.
 The `capabilities` functions are `stt`, `tts`, `events`, and `speaker_result`.
@@ -335,6 +363,8 @@ Subscriptions, queries, exports, audio, and event writes apply the same satellit
 
 `TurnStore` specifies the store interface. `SQLiteStore` supplies the SQLite implementation with 30-day retention by default.
 Retention uses server storage time, not a device-supplied timestamp. Replay state stays for the secret lifetime.
+The maintenance task checks retention each minute, not in event-acceptance transactions.
+
 `GET /metrics` supplies Prometheus text with the integration token's satellite access checks.
 Ordinary diagnostics contain counts only, without audio or transcripts.
 Without a store, record routes give a service-unavailable response.

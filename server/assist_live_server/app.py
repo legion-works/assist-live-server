@@ -1,6 +1,8 @@
 import asyncio
 import contextlib
+import hashlib
 import json
+import logging
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import replace
@@ -33,6 +35,9 @@ from .store import SQLiteStore, safe_data
 
 UDP_ADDRESS = web.AppKey("udp_address", tuple[str, int])
 TEXT_IDLE_TIMEOUT = 30.0
+MAX_AUTH_CONNECTIONS = 64
+MAX_AUTH_PER_TOKEN = 16
+LOGGER = logging.getLogger(__name__)
 
 
 def create_app(
@@ -44,6 +49,36 @@ def create_app(
     ingress: TimingIngress | None = None,
     udp_address: tuple[str, int] | None = None,
 ) -> web.Application:
+    active_auth = 0
+    auth_connections: dict[bytes, int] = {}
+
+    @web.middleware
+    async def connections(
+        request: web.Request,
+        handler: Callable[[web.Request], Awaitable[web.StreamResponse]],
+    ) -> web.StreamResponse:
+        nonlocal active_auth
+        if request.path not in {"/v1/audio", "/v1/events"}:
+            return await handler(request)
+        allowed(request)
+        key = hashlib.sha256(request.headers["Authorization"].encode()).digest()
+        if (
+            active_auth >= MAX_AUTH_CONNECTIONS
+            or auth_connections.get(key, 0) >= MAX_AUTH_PER_TOKEN
+        ):
+            refused = web.HTTPServiceUnavailable(text="connection limit")
+            refused.force_close()
+            raise refused
+        active_auth += 1
+        auth_connections[key] = auth_connections.get(key, 0) + 1
+        try:
+            return await handler(request)
+        finally:
+            active_auth -= 1
+            auth_connections[key] -= 1
+            if not auth_connections[key]:
+                del auth_connections[key]
+
     @web.middleware
     async def errors(
         request: web.Request,
@@ -54,7 +89,9 @@ def create_app(
         except ValueError, TypeError, KeyError, TimeoutError:
             raise web.HTTPBadRequest(text="invalid request") from None
 
-    app = web.Application(client_max_size=MAX_CONTROL, middlewares=[errors])
+    app = web.Application(
+        client_max_size=MAX_CONTROL, middlewares=[errors, connections]
+    )
     timing = ingress or TimingIngress(registry)
     if timing.registry is not registry:
         raise ValueError("ingress registry mismatch")
@@ -74,10 +111,18 @@ def create_app(
             await store.configure_registry(registry)
 
         async def maintain() -> None:
+            backoff = 0.1
             while True:
-                if isinstance(store, SQLiteStore):
-                    await store.maintain()
-                await asyncio.sleep(0.1)
+                try:
+                    if isinstance(store, SQLiteStore):
+                        await store.maintain()
+                    backoff = 0.1
+                except Exception:
+                    LOGGER.error("timing maintenance failed")
+                    if gateway is not None:
+                        gateway.metrics.maintenance_errors_total += 1
+                    backoff = min(backoff * 2, 5.0)
+                await asyncio.sleep(backoff)
 
         try:
             if gateway is not None:
@@ -98,6 +143,7 @@ def create_app(
                 application[UDP_ADDRESS] = (address[0], address[1])
             yield
         finally:
+            timing.close()
             if transport is not None:
                 transport.close()
             tasks = [task for task in (consumer, maintenance) if task is not None]
@@ -157,7 +203,7 @@ def create_app(
         if not isinstance(store, SQLiteStore) or gateway is None:
             raise web.HTTPServiceUnavailable(text="metrics unavailable")
         await store.maintain()
-        gateway.metrics.sequence_gaps = sum(
+        sequence_gaps = sum(
             registry.missing(device)
             for device in registry.devices
             if registry.devices[device]["satellite"] in satellites
@@ -166,10 +212,13 @@ def create_app(
             text=gateway.metrics.render(
                 {
                     **await store.diagnostics(satellites),
+                    "sequence_gaps": sequence_gaps,
                     "device_accepted_total": timing.accepted,
                     "device_refused_total": timing.refused,
                     "device_dropped_total": timing.dropped,
                     "device_connections": device_transport.active,
+                    "device_worker_errors_total": timing.worker_errors,
+                    "authenticated_connections": active_auth,
                 }
             ),
             headers={"Content-Type": "text/plain; version=0.0.4; charset=utf-8"},
@@ -188,7 +237,12 @@ def create_app(
         existing = await storage().get_turn(turn.turn_id)
         if existing is not None:
             raise web.HTTPConflict(text="turn already exists")
-        await storage().open_turn(turn)
+        try:
+            await storage().open_turn(turn)
+        except ValueError as error:
+            if str(error) == "turn already exists":
+                raise web.HTTPConflict(text="turn already exists") from None
+            raise
         return web.json_response({"version": 1})
 
     async def turn(request: web.Request) -> web.Response:
