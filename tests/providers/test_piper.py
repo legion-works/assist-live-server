@@ -1,7 +1,11 @@
 import asyncio
 import hashlib
 import json
+import statistics
+import subprocess
+import sys
 import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -263,3 +267,140 @@ def test_executor_bounds_cancelled_work_and_releases_all_slots():
             assert await run_synthesis(lambda: "recovered") == "recovered"
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("opening", ['"', "'", "“", "‘", "(", "["])
+def test_opening_quotes_and_brackets_do_not_break_abbreviations(opening):
+    from assist_live_server.providers.tts import sentences
+
+    closing = {'"': '"', "'": "'", "“": "”", "‘": "’", "(": ")", "[": "]"}[opening]
+    text = f"{opening}Dr. Smith arrived late.{closing}, she noted."
+
+    async def run():
+        assert [s async for s in sentences(parts(*text))] == [text]
+
+    asyncio.run(run())
+
+
+def test_curly_quoted_abbreviation_from_reply():
+    from assist_live_server.providers.tts import sentences
+
+    text = "“Dr. Watson came home.”"
+
+    async def run():
+        assert [s async for s in sentences(parts(*text))] == [text]
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("prefix", ["", "word"])
+def test_long_dotted_initial_token_keeps_its_full_prefix_meaning(prefix):
+    from assist_live_server.providers.tts import sentences
+
+    token = prefix + "a." * 100
+
+    async def run():
+        result = [s async for s in sentences(parts(*f"{token} next. "))]
+        assert result == ([token, "next."] if prefix else [f"{token} next."])
+
+    asyncio.run(run())
+
+
+def test_unfinished_fragment_cap_survives_small_parts():
+    from assist_live_server.providers.tts import sentences
+
+    async def run():
+        text = "a. " * 5461 + "a"
+        assert len(text) == 16384
+        assert [s async for s in sentences(parts(text))] == [text]
+        with pytest.raises(ValueError, match="16384"):
+            [s async for s in sentences(parts(text, "a"))]
+
+    asyncio.run(run())
+
+
+def _assembly_metrics(mode):
+    from assist_live_server.providers.tts import sentences
+
+    async def collect(size):
+        text = ("a. " * ((size + 2) // 3))[:size]
+        start = time.perf_counter()
+        result = [s async for s in sentences(parts(*text))]
+        elapsed = (time.perf_counter() - start) * 1000
+        assert result == [text.strip()]
+        return elapsed
+
+    async def measure():
+        if mode == "cap":
+            return {"characters": 16383, "ms": await collect(16383)}
+        if mode == "scaling":
+            samples = {4000: [], 8000: []}
+            for _ in range(3):
+                for size in samples:
+                    samples[size].append(await collect(size))
+            small, large = (statistics.median(values) for values in samples.values())
+            return {"n_ms": small, "2n_ms": large, "ratio": large / small}
+        lags = []
+        started, stopped = asyncio.Event(), asyncio.Event()
+
+        async def heartbeat():
+            target = time.perf_counter() + 0.1
+            started.set()
+            while not stopped.is_set():
+                await asyncio.sleep(max(0, target - time.perf_counter()))
+                lags.append(max(0, time.perf_counter() - target) * 1000)
+                target += 0.1
+
+        pulse = asyncio.create_task(heartbeat())
+        await started.wait()
+        batches = []
+        until = time.perf_counter() + 1.2
+        try:
+            while time.perf_counter() < until:
+                batches.append(await collect(16383))
+                await asyncio.sleep(0.001)
+        finally:
+            stopped.set()
+            await pulse
+        return {
+            "batches": len(batches),
+            "max_ms": max(batches),
+            "heartbeat_samples": len(lags),
+            "lag_p99_ms": statistics.quantiles(lags, n=100, method="inclusive")[98],
+        }
+
+    return asyncio.run(measure())
+
+
+def _isolated_assembly_metrics(mode):
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import json, runpy, sys; "
+            "print(json.dumps(runpy.run_path(sys.argv[1])['_assembly_metrics'](sys.argv[2])))",
+            str(Path(__file__).resolve()),
+            mode,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    return json.loads(result.stdout)
+
+
+def test_abbreviation_dense_character_stream_stays_below_200_ms():
+    measured = _isolated_assembly_metrics("cap")
+    assert measured["ms"] < 200, measured
+
+
+def test_character_stream_scaling_stays_below_three():
+    measured = _isolated_assembly_metrics("scaling")
+    assert measured["ratio"] < 3, measured
+
+
+def test_abbreviation_dense_stream_keeps_heartbeat_lag_below_20_ms():
+    measured = _isolated_assembly_metrics("heartbeat")
+    assert measured["heartbeat_samples"] >= 10, measured
+    assert measured["lag_p99_ms"] < 20, measured

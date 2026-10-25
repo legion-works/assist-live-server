@@ -1,7 +1,6 @@
 """Sentence-level TTS with a separate, bounded CPU executor."""
 
 import asyncio
-import re
 import threading
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -43,44 +42,82 @@ async def run_synthesis[T](operation: Callable[[], T]) -> T:
     return await asyncio.wrap_future(future)
 
 
-_BOUNDARY = re.compile(r"""[.!?]+["'”’)\]]*(?=\s|$)""")
 _ABBREVIATIONS = frozenset(
     "mr. mrs. ms. dr. prof. sr. jr. st. vs. etc. e.g. i.e. a.m. p.m.".split()
 )
+_MAX_ABBREVIATION = max(map(len, _ABBREVIATIONS))
+_OPENING = frozenset("\"'“‘([")
+_CLOSING = frozenset("\"'”’)]")
 
 
-def _split(buffer: str) -> tuple[list[str], str]:
-    sentences = []
-    start = 0
-    for match in _BOUNDARY.finditer(buffer):
-        # A period at a part boundary can still be the decimal point in 3.5.
-        # Require right context, including space, before declaring a sentence.
-        if match.end() == len(buffer):
-            break
-        prefix = buffer[start : match.end()]
-        token = prefix.split()[-1].lower()
-        if match.group() == "." and (
-            token in _ABBREVIATIONS or re.fullmatch(r"(?:[a-z]\.)+", token)
-        ):
-            continue
-        sentence = prefix.strip()
-        if sentence:
-            sentences.append(sentence)
-        start = match.end()
-    return sentences, buffer[start:]
+class _SentenceAssembler:
+    def __init__(self) -> None:
+        self.buffer: list[str] = []
+        self._boundary = 0
+        self._period = False
+        self._token: str | None = ""
+        self._opening = True
+        self._initials = 0
+
+    def _read_token(self, character: str) -> None:
+        if character.isspace():
+            self._token = ""
+            self._opening = True
+            self._initials = 0
+            return
+        if self._opening and character in _OPENING:
+            return
+        self._opening = False
+        # Keep only a bounded spelling for named abbreviations. The two-state
+        # initials check retains the meaning of arbitrarily long dotted tokens.
+        for lower in character.lower():
+            if self._token is not None:
+                self._token += lower
+                if len(self._token) > _MAX_ABBREVIATION:
+                    self._token = None
+            if self._initials == 0 and "a" <= lower <= "z":
+                self._initials = 1
+            elif self._initials == 1 and lower == ".":
+                self._initials = 0
+            else:
+                self._initials = -1
+
+    def feed(self, part: str) -> list[str]:
+        ready = []
+        for character in part:
+            if self._boundary and character.isspace():
+                if not self._period or not (
+                    self._token in _ABBREVIATIONS or self._initials == 0
+                ):
+                    sentence = "".join(self.buffer).strip()
+                    if sentence:
+                        ready.append(sentence)
+                    self.buffer.clear()
+                self._boundary = 0
+            elif character in ".!?":
+                self._period = self._boundary != 1 and character == "."
+                self._boundary = 1
+            elif self._boundary and character in _CLOSING:
+                self._boundary = 2
+                self._period = False
+            else:
+                self._boundary = 0
+            # Each character advances the scan once, even when parts contain
+            # only one character. No old prefix is scanned or copied again.
+            self.buffer.append(character)
+            self._read_token(character)
+        if len(self.buffer) > 16384:
+            raise ValueError("TTS sentence exceeds 16384 characters")
+        return ready
 
 
 async def sentences(text: AsyncIterator[str]) -> AsyncGenerator[str]:
-    buffer = ""
+    assembler = _SentenceAssembler()
     async for part in text:
-        buffer += part
-        ready, buffer = _split(buffer)
-        if len(buffer) > 16384:
-            raise ValueError("TTS sentence exceeds 16384 characters")
-        for sentence in ready:
+        for sentence in assembler.feed(part):
             yield sentence
-    if buffer.strip():
-        yield buffer.strip()
+    if fragment := "".join(assembler.buffer).strip():
+        yield fragment
 
 
 type ProviderFactory = Callable[..., Awaitable[TTSProvider]]

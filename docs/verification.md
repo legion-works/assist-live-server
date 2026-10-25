@@ -2038,3 +2038,105 @@ The Piper wheel has no program copyright line. Its GPL text has a Free Software 
 The client dependency ranges did not change. The typed API accepts 22050 Hz and keeps sentence boundaries.
 The bytes-only API refuses that rate before audio because a legacy consumer can use a constant 16 kHz WAV header.
 Target-device measurements and a listening check stay open. No cloud call, device trial, publication, or commit is part of these checks.
+
+## Incremental sentence assembly (2026-10-25)
+
+Abbreviation-dense input made the assembler examine the complete prefix for each text part on the event loop.
+The assembler keeps character, boundary, and token state across parts. It does not examine previous text again.
+The abbreviation spelling has a five-character limit. A constant-state check identifies dotted initials without a token-length limit.
+
+Opening straight or curly quotation marks and brackets do not change abbreviation lookup.
+Decimal numbers, ellipsis, the last fragment, and the 16384-character limit keep their contracts.
+
+Initial command:
+
+```sh
+uv run --locked pytest tests/providers/test_piper.py -k 'below_200 or scaling_stays or opening_quotes or curly_quoted' -q --tb=short
+```
+
+Initial results:
+
+```text
+9 failed, 19 deselected in 21.54s
+Abbreviation-dense cap test: subprocess.TimeoutExpired after 10 seconds
+4000/8000-character scaling test: subprocess.TimeoutExpired after 10 seconds
+Seven quotation-mark and bracket cases: sentence assertions did not agree
+```
+
+Each performance test runs in a subprocess with a 10-second limit, so a slow assembler cannot stop the complete test suite indefinitely.
+The maximum-input test asserts a time below 200 ms. The scaling test uses three samples at each length and asserts a median ratio below 3.
+The heartbeat test asserts p99 loop lag below 20 ms, with a 100 ms heartbeat and 1 ms between streams.
+
+Measured results on the development host, with a one-minute load of 24.70:
+
+| Measurement | Result |
+|---|---:|
+| 16383 characters, one-character parts | 7.411 ms |
+| 4000 characters, median | 1.806 ms |
+| 8000 characters, median | 3.648 ms |
+| Scaling ratio | 2.020 |
+| Heartbeat p99 lag | 6.416 ms |
+| Maximum stream time during heartbeat test | 9.990 ms |
+| Complete streams during heartbeat test | 161 |
+| Heartbeat samples in 1.2 seconds | 13 |
+
+The equivalent boundary probe used 30 replies with three deterministic input sequences each.
+All 90 sentence lists agreed with the lists captured before the change.
+The two quoted-abbreviation examples and one bracket example each give one sentence.
+A set of 10000 deterministic one-character input sequences agreed with the previous assembler on punctuation, whitespace, decimals, and initials.
+
+Commands for the external probes:
+
+```sh
+uv run --locked python "$ASSEMBLY_BOUNDARY_PROBE" before
+uv run --locked python "$ASSEMBLY_BOUNDARY_PROBE" after
+```
+
+Results:
+
+```text
+PASS captured 90 baseline feeds and 3 quoted cases
+PASS 90/90 feed segmentations unchanged; 3/3 quoted cases corrected
+PASS 10000 deterministic character-feed differential cases
+Provider tests: 28 passed in 4.62s
+Mypy: Success: no issues found in 37 source files
+Ruff: All checks passed!
+```
+
+Gate commands:
+
+```sh
+uv run --locked pytest tests/providers/test_piper.py -q
+ASSIST_LIVE_MODEL_CACHE="$TURN_MODEL_CACHE" task check
+UV_PROJECT_ENVIRONMENT="$FLOOR_ENVIRONMENT" uv run --locked --python 3.14.2 pytest tests/ -q
+unshare -rn sh -c 'ip link set lo up && UV_OFFLINE=1 uv run --locked pytest -q'
+uv run --project "$WORKSPACE/assist-live" python "$WORKSPACE/assist-live/tools/check_public_tree.py" --history --root . --private-denylist "$PRIVATE_DENYLIST"
+```
+
+Set `ASSIST_LIVE_MODEL_CACHE` to the external turn-model cache for each suite.
+Results:
+
+```text
+task check: 581 passed in 70.31s
+Python 3.14.2: 581 passed in 46.45s
+No external network, loopback up: 581 passed in 43.77s
+PASS CI boundaries
+PASS server bootstrap
+PASS isolated client and server packages
+PASS asset licenses
+PASS own Git root
+History secret check: PASS
+PASS public data matches=0
+```
+
+The relative public-tree task reports `NOT CHECKED public tree` because the worktree has no sibling integration checkout.
+The explicit canonical checker supplied the history and private-data check. Gitleaks found no leaks in files or history.
+No runtime dependencies or public signatures changed. The project is experimental and has no release.
+
+Two mutation checks tested the new guards:
+
+1. Remove opening-delimiter normalization: all seven quotation-mark and bracket tests gave unsatisfactory sentence lists.
+2. Examine the complete prefix again: the 16383-character test took 2324.13 ms, and the scaling ratio increased to 3.654.
+
+The second mutation made the maximum-input and scaling assertions give unsatisfactory results, not only subprocess timeouts.
+The parser agreed with its saved snapshot after restoration.
