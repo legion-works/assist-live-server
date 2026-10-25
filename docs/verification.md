@@ -1246,3 +1246,141 @@ PASS own Git root
 PASS history secrets commits=11
 PASS public data matches=0
 ```
+
+## STT report generation and runtime parameters
+
+Date: 2026-10-25.
+
+The tool is the only source of `docs/research/q6-streaming-stt.md`.
+The manifest stores historical measurement summaries, audit counts, and source-cache hashes.
+The renderer includes the initial 500 ms test and the corrected 660 ms test.
+The complete command keeps the disclosure headings, initial counts, and audit results.
+It does not read a prior Markdown report to make those sections.
+
+The new CLI tests first give these results:
+
+```text
+7 failed, 18 passed
+AssertionError: '## Initial test and corrected tail' missing from generated report
+AssertionError: split command changed complete export bytes
+IndexError: list index out of range
+ImportError: cannot import name 'recognition_metrics'
+AssertionError: model-file change did not change provider_config_sha256
+AssertionError: inert --check option was accepted
+```
+
+The hash uses the runtime parameters that the decoder uses:
+the audio step, tail, sample rate, sample scale, `threads`, and model-file pins.
+The hash does not include `decode_mode` description text.
+No input audio, model file, selection rule, or WER margin changes.
+The replay keeps Parakeet as the selected provider.
+
+The second latency column counts the first transcript with the corpus first word.
+It uses normalized word tokens and source-audio time.
+It does not change the frozen selection rule.
+The report states that full-buffer output before voice onset usually contains filler text.
+The provider must gate full-buffer decoding on `VAD speech onset` in a future change.
+
+Commands with `--split` write external measurement caches only.
+They do not write the public report or the complete 250-row export.
+The CLI does not accept `--check`. That option had no behavior.
+The historical command records above keep that spelling.
+The current command below does not use it.
+
+Use an external directory for this STT experiment.
+`PROBE` names that directory. `CORPUS_AUDIO` names its fetched-WAV directory.
+The model-root directory must have no prior `selection.json`.
+Set these paths before the command:
+
+```sh
+PROBE="$HOME/.cache/assist-live/stt-benchmark"
+CORPUS_AUDIO="$PROBE/audio"
+STT_MODEL_ROOT="$PROBE/repair-models"
+```
+
+Command, from the server root:
+
+```sh
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
+STT_MODEL_ROOT="$STT_MODEL_ROOT" uv run python tools/benchmark_stt.py \
+  --labels "$WORKSPACE/assist-live/tests/data/labels.jsonl" \
+  --audio-root "$CORPUS_AUDIO" --selection-split tuning --gate-split held_out \
+  --partials-output docs/reports/q6-partials.jsonl \
+  --candidates parakeet,sherpa-zipformer,fastconformer \
+  --report docs/research/q6-streaming-stt.md
+```
+
+```text
+PASS asset licenses
+PASS Q6 comparison: parakeet; no streaming default
+PASS all 750 final counts and partial sequences reproduce corrected run
+PASS full report equals renderer output; disclosures and historical counts retained
+```
+
+The WER and first-word counts agree with the earlier corrected test.
+The new provider configuration digest is
+`b4ede9e1a2e15e6dafd8e40680691d40760ad11904a9496edc2afe653a331eab`.
+All 250 selected-provider rows have that digest.
+
+Command, with the transcript consumer checkout as a read-only input:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$TURN_CHECKOUT/server" \
+uv run --locked python "$TURN_CHECKOUT/tools/tune_profiles.py" \
+  --validate-partials --labels "$WORKSPACE/assist-live/tests/data/labels.jsonl" \
+  --partials docs/reports/q6-partials.jsonl \
+  --stt-model-id nvidia/parakeet-tdt-0.6b-v2 \
+  --stt-revision 0bbb45a3365852604aef28b538a8f066f4ccaa85 \
+  --provider-config-sha256 b4ede9e1a2e15e6dafd8e40680691d40760ad11904a9496edc2afe653a331eab
+```
+
+```text
+PASS partial trajectories rows=250 tuning=50 held_out=200
+```
+
+The isolated semantic mutations each give a test failure:
+
+1. Change the manifest tail from 660 ms to 500 ms.
+2. Replace the configured decode step with hardcoded intervals.
+3. Replace the runtime tail with 500 ms.
+
+Command: `uv run --locked pytest tests/test_benchmark_stt.py -q`.
+Result: `27 passed`.
+
+The copy-of-tree CLI test runs the documented complete command with synthetic model fixtures.
+It checks all disclosure headings, the initial counts, the added latency column, and the provider follow-up.
+The split-mode tests check that the public export bytes do not change.
+The empty-reference test checks a named `FAIL Q6 comparison` line without a traceback.
+The manifest-tail and runtime-step mutations each cause their named tests to give a failure.
+
+The runtime consumes keys from its preprocessor dictionary.
+A dictionary copy keeps the canonical configuration unchanged.
+A regression test first gives a failure with `{}` for those parameters.
+The initialized decoder's configuration hash agrees with the recorded digest after this repair.
+
+Command: `UV_LINK_MODE=copy task check`.
+
+```text
+35 files already formatted
+All checks passed!
+PASS CI boundaries
+Success: no issues found in 11 source files
+232 passed
+PASS server bootstrap
+PASS isolated client and server packages
+NOT CHECKED image inventory: no image inventory exists
+PASS asset licenses
+no leaks found
+```
+
+Command: `UV_LINK_MODE=copy UV_PROJECT_ENVIRONMENT=$PROBE/venv3142 uv run --locked --python 3.14.2 pytest tests/ -q`.
+Result: `232 passed`.
+
+The ASD-STE100 checker reports 0 findings in each changed Markdown file.
+The public-tree checker with history gives these results:
+
+```text
+PASS own Git root
+PASS history secrets commits=17
+PASS public data matches=0
+```

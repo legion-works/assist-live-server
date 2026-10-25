@@ -1,4 +1,38 @@
 {
+  "stt_benchmark_evidence": {
+    "initial_results": [
+      {"split": "tuning", "candidate": "parakeet", "recordings": 50, "errors": 30, "words": 394, "first_word": 48},
+      {"split": "tuning", "candidate": "sherpa-zipformer", "recordings": 50, "errors": 136, "words": 394, "first_word": 15},
+      {"split": "tuning", "candidate": "fastconformer", "recordings": 50, "errors": 79, "words": 394, "first_word": 26},
+      {"split": "held_out", "candidate": "parakeet", "recordings": 200, "errors": 81, "words": 1551, "first_word": 191},
+      {"split": "held_out", "candidate": "sherpa-zipformer", "recordings": 200, "errors": 507, "words": 1551, "first_word": 66},
+      {"split": "held_out", "candidate": "fastconformer", "recordings": 200, "errors": 256, "words": 1551, "first_word": 124}
+    ],
+    "flush_audit": {
+      "tuning_recordings": 50, "zipformer_660_changes": 7, "zipformer_1000_changes": 8,
+      "fastconformer_changes": 0, "whole_buffer_changes": 0,
+      "residual_before": "STOPPED I WENT FOR TWO HOURS SEVEN MIN",
+      "residual_after": "STOPPED I WENT FOR TWO HOURS SEVEN MINUTES",
+      "metadata": {
+        "sherpa-zipformer": {"model_type": "zipformer2", "decode_chunk_len": "32", "left_context_len": "128,64,32,16,32,64", "onnx.infer": "onnxruntime.quant"},
+        "fastconformer": {"model_type": "EncDecHybridRNNTCTCBPEModel", "chunk_shift": "16", "subsampling_factor": "8", "onnx.infer": "onnxruntime.quant", "url": "https://catalog.ngc.nvidia.com/orgs/nvidia/teams/nemo/models/stt_en_fastconformer_hybrid_large_streaming_80ms"}
+      }
+    },
+    "upstream_wavs": [
+      {"candidate": "sherpa-zipformer", "sample": 0, "errors": 0, "words": 18},
+      {"candidate": "sherpa-zipformer", "sample": 1, "errors": 1, "words": 48},
+      {"candidate": "fastconformer", "sample": 0, "errors": 0, "words": 18},
+      {"candidate": "fastconformer", "sample": 1, "errors": 1, "words": 48}
+    ],
+    "reference_first_words": {"parakeet": 3, "sherpa-zipformer": 3, "fastconformer": 3},
+    "source_cache_sha256": {
+      "models/measurements-both.json": "7da4a301db5d0bf3df030e59b45527972dfcbd0acb41caf1e79acd0ea857a368",
+      "flush-audit.json": "fea3ce1d8e04c7ad213044eb4dd8e17a5651c6b9422669664aaf659ed722f9ea",
+      "upstream-run2.json": "67752d893c333daf0621b8dd6a9c2cc2309ec832cc1276c509f01ef04f01321d",
+      "reference-results.json": "4d03828d4af394af72284618254490f93f2c28014c61b917ce30137578fa4c5b"
+    },
+    "upstream_example": "https://github.com/k2-fsa/sherpa-onnx/blob/532f1b5a8a207bf53b116b747207c1506696c843/python-api-examples/online-decode-files.py"
+  },
   "stt_benchmark": {
     "parakeet": {
       "model_id": "nvidia/parakeet-tdt-0.6b-v2",

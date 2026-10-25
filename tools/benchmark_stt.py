@@ -21,6 +21,8 @@ import numpy as np
 from numpy.typing import NDArray
 
 ROOT = Path(__file__).resolve().parents[1]
+SAMPLE_RATE = 16000
+PCM_SCALE = 32768
 if __package__ in (None, ""):
     sys.path.insert(0, str(ROOT))
 
@@ -104,12 +106,78 @@ def verified_audio(label: Row, audio_root: Path) -> NDArray[np.float32]:
             wav.getsampwidth(),
             wav.getframerate(),
             wav.getcomptype(),
-        ) != (1, 2, 16000, "NONE"):
+        ) != (1, 2, SAMPLE_RATE, "NONE"):
             raise ValueError("audio must be mono 16 kHz int16 PCM WAV")
         pcm = wav.readframes(wav.getnframes())
         if len(pcm) != wav.getnframes() * 2 or not pcm:
             raise ValueError("truncated or empty audio")
-    return np.frombuffer(pcm, dtype="<i2").astype(np.float32) / np.float32(32768)
+    return np.frombuffer(pcm, dtype="<i2").astype(np.float32) / np.float32(PCM_SCALE)
+
+
+def recognition_metrics(reference: str, partials: list[Row]) -> Row:
+    expected = words(reference)
+    if not expected:
+        raise ValueError("empty reference transcript")
+    actual = words(partials[-1]["text"])
+    errors, count = word_errors(reference, partials[-1]["text"])
+    bearing = [p["audio_ms"] for p in partials if expected[0] in words(p["text"])]
+    initial = next((words(p["text"]) for p in partials if words(p["text"])), [])
+    return {
+        "errors": errors,
+        "words": count,
+        "first_word": bool(actual and actual[0] == expected[0]),
+        "exact": actual == expected,
+        "first_reference_word_audio_ms": bearing[0] if bearing else None,
+        "initial_nonreference": bool(initial and initial[0] != expected[0]),
+    }
+
+
+def runtime_configuration(candidate: Row, threads: int) -> Row:
+    declared = candidate["configuration"]
+    compatible = candidate["model_id"] == "nvidia/parakeet-tdt-0.6b-v2"
+    milliseconds = declared["interval_ms" if compatible else "feed_ms"]
+    step = milliseconds * SAMPLE_RATE / 1000
+    if threads < 1 or step < 1 or not float(step).is_integer():
+        raise ValueError("positive integer thread count and audio step required")
+    config: Row = {
+        "sample_rate": SAMPLE_RATE,
+        "pcm_scale": PCM_SCALE,
+        "sample_dtype": "float32",
+        "threads": threads,
+        "step_samples": int(step),
+        "model_files": sorted(
+            (
+                {key: record[key] for key in ("file", "url", "sha256")}
+                for record in candidate["files"]
+            ),
+            key=lambda r: r["file"],
+        ),
+    }
+    if compatible:
+        config.update(
+            runtime="onnx-asr==0.12.0",
+            onnxruntime="1.31.0",
+            model="nemo-parakeet-tdt-0.6b-v2",
+            quantization="int8",
+            inter_op_threads=1,
+            provider="CPUExecutionProvider",
+            preprocessor={"use_numpy_preprocessors": True, "max_concurrent_workers": 1},
+            tail_samples=0,
+        )
+    else:
+        tail = declared["tail_samples"]
+        if type(tail) is not int or tail < 0:
+            raise ValueError("nonnegative integer tail required")
+        config.update(
+            runtime="sherpa-onnx==2.0.0",
+            core="sherpa-onnx-core==2.0.0",
+            tail_samples=tail,
+            feature_dim=declared["feature_dim"],
+            decoding_method=declared["decoding_method"],
+            endpoint_detection=declared["endpoint_detection"],
+            provider=declared["provider"],
+        )
+    return config
 
 
 def export_trajectories(rows: list[Row], target: Path) -> None:
@@ -265,25 +333,23 @@ def fetch_files(candidate: Row, root: Path) -> None:
 class Decoder:
     def __init__(self, name: str, candidate: Row, root: Path, threads: int) -> None:
         self.name, self.candidate = name, candidate
+        self.config = runtime_configuration(candidate, threads)
         fetch_files(candidate, root)
         if name == "parakeet":
             ort = importlib.import_module("onnxruntime")
             options = ort.SessionOptions()
-            options.intra_op_num_threads = threads
-            options.inter_op_num_threads = 1
+            options.intra_op_num_threads = self.config["threads"]
+            options.inter_op_num_threads = self.config["inter_op_threads"]
             self.model = importlib.import_module("onnx_asr").load_model(
-                "nemo-parakeet-tdt-0.6b-v2",
+                self.config["model"],
                 root,
-                quantization="int8",
+                quantization=self.config["quantization"],
                 sess_options=options,
-                providers=["CPUExecutionProvider"],
-                preprocessor_config={
-                    "use_numpy_preprocessors": True,
-                    "max_concurrent_workers": 1,
-                },
+                providers=[self.config["provider"]],
+                preprocessor_config=dict(self.config["preprocessor"]),
             )
         else:
-            files = candidate["files"]
+            files = self.config["model_files"]
 
             def path(prefix: str) -> str:
                 return str(
@@ -298,30 +364,31 @@ class Decoder:
                 decoder=path("decoder"),
                 joiner=path("joiner"),
                 tokens=path("tokens"),
-                num_threads=threads,
-                sample_rate=16000,
-                feature_dim=80,
-                decoding_method="greedy_search",
-                enable_endpoint_detection=False,
-                provider="cpu",
+                num_threads=self.config["threads"],
+                sample_rate=self.config["sample_rate"],
+                feature_dim=self.config["feature_dim"],
+                decoding_method=self.config["decoding_method"],
+                enable_endpoint_detection=self.config["endpoint_detection"],
+                provider=self.config["provider"],
             )
 
     def decode(self, samples: NDArray[np.float32]) -> Row:
         partials = []
         first = None
         virtual_ms = 0.0
-        duration_ms = len(samples) / 16
-        step = 6400 if self.name == "parakeet" else 1280
+        rate = self.config["sample_rate"]
+        duration_ms = len(samples) / (rate / 1000)
+        step = self.config["step_samples"]
         stream = None if self.name == "parakeet" else self.model.create_stream()
         total_compute = 0.0
         for offset in range(0, len(samples), step):
             end = min(offset + step, len(samples))
-            audio_ms = end / 16
+            audio_ms = end / (rate / 1000)
             start = time.perf_counter()
             if stream is None:
-                text = self.model.recognize(samples[:end], sample_rate=16000)
+                text = self.model.recognize(samples[:end], sample_rate=rate)
             else:
-                stream.accept_waveform(16000, samples[offset:end])
+                stream.accept_waveform(rate, samples[offset:end])
                 while self.model.is_ready(stream):
                     self.model.decode_stream(stream)
                 text = self.model.get_result(stream)
@@ -335,10 +402,8 @@ class Decoder:
             start = time.perf_counter()
             # Tail padding flushes cached frames. It is not source audio.
             stream.accept_waveform(
-                16000,
-                np.zeros(
-                    self.candidate["configuration"]["tail_samples"], dtype=np.float32
-                ),
+                rate,
+                np.zeros(self.config["tail_samples"], dtype=np.float32),
             )
             stream.input_finished()
             while self.model.is_ready(stream):
@@ -359,7 +424,7 @@ class Decoder:
 
 
 def provider_identity(candidate: Row, threads: int) -> Row:
-    config = {**candidate["configuration"], "threads": threads}
+    config = runtime_configuration(candidate, threads)
     return {
         "stt_model_id": candidate["model_id"],
         "stt_revision": candidate["revision"],
@@ -370,8 +435,11 @@ def provider_identity(candidate: Row, threads: int) -> Row:
 
 
 def render_report(
-    frozen: Row, results: list[Row], candidates: Row, environment: Row
+    frozen: Row, results: list[Row], candidates: Row, environment: Row, manifest: Row
 ) -> str:
+    from tools.asset_rights import render_sources
+
+    evidence = manifest["stt_benchmark_evidence"]
     table = []
     intervals = []
     for split in ("tuning", "held_out"):
@@ -382,6 +450,12 @@ def render_report(
             if not rows:
                 continue
             s = summarize(rows)
+            bearing = [
+                r["first_reference_word_audio_ms"]
+                for r in rows
+                if r["first_reference_word_audio_ms"] is not None
+            ]
+            bearing_text = f"{statistics.median(bearing):.2f}" if bearing else "N/A"
             table.append(
                 f"| {split} | {name} | {s['recordings']} | "
                 f"{s['errors']}/{s['words']} ({s['errors'] / s['words']:.4%}) | "
@@ -389,6 +463,7 @@ def render_report(
                 f"{s['first_word']}/{s['recordings']} | "
                 f"{s['first_partial_ms']:.2f} "
                 f"({s['partial_count']}/{s['recordings']}) | "
+                f"{bearing_text} ({len(bearing)}/{s['recordings']}) | "
                 f"{s['final_latency_ms']:.2f} |"
             )
             if split == "held_out" and name != "parakeet":
@@ -414,6 +489,7 @@ def render_report(
     header = (
         "| Split | Candidate | Recordings | Word errors/reference words | "
         "Exact transcripts | First word | First partial median ms (coverage) | "
+        "First reference-word audio ms (coverage) | "
         "Final median ms |"
     )
     onset_table = []
@@ -447,6 +523,48 @@ def render_report(
         f"Revision: `{c['revision']}`."
         for name, c in candidates.items()
     )
+    initial_table = []
+    for split in ("tuning", "held_out"):
+        counts = []
+        for name in candidates:
+            initial = next(
+                r
+                for r in evidence["initial_results"]
+                if r["split"] == split and r["candidate"] == name
+            )
+            counts.append(f"{initial['errors']}/{initial['words']}")
+        initial_table.append(f"| {split} | " + " | ".join(counts) + " |")
+    audit = evidence["flush_audit"]
+    upstream_table = "\n".join(
+        f"| {r['candidate']} | `{r['sample']}.wav` | {r['errors']}/{r['words']} |"
+        for r in evidence["upstream_wavs"]
+    )
+    indexed = {(r["recording_id"], r["candidate"]): r for r in results}
+    examples = []
+    for row in [
+        r for r in results if r["split"] == "tuning" and r["candidate"] == "parakeet"
+    ][:5]:
+        hypotheses = [
+            indexed[row["recording_id"], name]["trajectory"]["partials"][-1]["text"]
+            for name in candidates
+        ]
+        examples.append(
+            "| `" + row["reference"] + "` | `" + "` | `".join(hypotheses) + "` |"
+        )
+    license_records = [
+        r
+        for r in manifest["assets"]
+        if r["id"] in ("stt-parakeet", "stt-sherpa-zipformer", "stt-fastconformer")
+    ]
+    licenses = "\n\n".join(
+        f"### `{r['id']}`\n\nLicense: `{r['license']}`.\n\n"
+        + (f"```text\n{r['license_detail']}\n```" if r.get("license_detail") else "")
+        + "\n\n"
+        + render_sources(r)
+        for r in license_records
+    )
+    parakeet = [r for r in results if r["candidate"] == "parakeet"]
+    fillers = sum(r["initial_nonreference"] for r in parakeet)
     return f"""# Local STT measurements
 
 Date: 2026-10-25. The project is experimental and has no release.
@@ -494,6 +612,16 @@ The flush cost counts in `final latency`.
 Its trajectory timestamp stays at source-audio end.
 These CPU measurements are not target-device or live microphone acceptance.
 
+The full-buffer decoder usually gives filler text before voice onset.
+For {fillers}/{len(parakeet)} recordings, its first nonempty transcript does not start
+with the corpus first word. Examples include `Okay.` and `Mm.`.
+This is not the time to the first correct command word.
+
+The second latency column uses the first transcript with the corpus first word.
+It uses normalized word tokens and source-audio time, without decode CPU cost.
+Its denominator counts recordings with that word.
+This information and the filler count do not change the frozen selection rule.
+
 {modes}
 
 ## Environment
@@ -504,11 +632,13 @@ These CPU measurements are not target-device or live microphone acceptance.
 
 The two benchmark runtimes are development dependencies with CPython 3.14 wheels.
 No scratch interpreter or server runtime dependency is necessary.
+The clock uses UTC.
+`OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, and `MKL_NUM_THREADS` each have value `1`.
 
 ## Results
 
 {header}
-|---|---|---:|---|---|---|---|---:|
+|---|---|---:|---|---|---|---|---|---:|
 {chr(10).join(table)}
 
 ## Held-out paired WER differences
@@ -543,20 +673,132 @@ No left padding or other audio change occurs for this test.
 `docs/reports/q6-partials.jsonl` has one selected-provider row for each recording.
 Each row has these fields and no other fields:
 
-- `recording_id`: the corpus `id`.
-- `split`: `tuning` or `held_out`.
-- `audio_sha256`: the source WAV SHA-256.
-- `stt_model_id`: the selected model identifier.
-- `stt_revision`: the frozen model revision.
-- `provider_config_sha256`: the SHA-256 of sorted JSON configuration.
-- `partials`: a nonempty array of objects with `audio_ms` and `text` only.
+| Field | Contract |
+|---|---|
+| `recording_id` | The corpus `id` |
+| `split` | `tuning` or `held_out` |
+| `audio_sha256` | The source WAV SHA-256 |
+| `stt_model_id` | The selected model identifier |
+| `stt_revision` | The frozen model revision |
+| `provider_config_sha256` | SHA-256 of sorted JSON runtime parameters |
+| `partials` | A nonempty array of objects with `audio_ms` and `text` only |
 
 `audio_ms` is finite, nonnegative, monotonic, and at most the source-audio length.
 `text` is a string. Empty strings record observations before the first word.
 The consumer must align each corpus record with the frozen identity before replay.
 All-candidate measurements stay in the external benchmark cache.
+Only a complete two-split command writes the public report and export.
+Commands with `--split` write their external measurement cache only.
 
-## Sources
+## Initial test and corrected tail
+
+The initial test used a 500 ms streaming tail from the runtime class example.
+The upstream file-decoding example uses 660 ms.
+An audit found missing Zipformer word endings at 500 ms.
+The corrected test uses 660 ms and a different external freeze record.
+The input audio, model files, selection rule, and 1.0 percentage-point WER margin
+stay the same. Each complete test selects on tuning before held-out scores.
+
+Initial word-error counts:
+
+| Split | Parakeet | Zipformer | FastConformer |
+|---|---|---|---|
+{chr(10).join(initial_table)}
+
+The 660 ms audit changes {audit["zipformer_660_changes"]}/{audit["tuning_recordings"]}
+Zipformer tuning transcripts against the 500 ms test.
+A 1000 ms diagnostic changes
+{audit["zipformer_1000_changes"]}/{audit["tuning_recordings"]}.
+One more recording changes `MIN` to `MINUTES` at 1000 ms, but not at 660 ms.
+The configuration keeps the approved upstream-example 660 ms value.
+This remaining tail sensitivity does not change the configuration
+after the held-out test.
+
+FastConformer has {audit["fastconformer_changes"]} transcript changes
+in 150 audit tests.
+Whole-buffer input and 80 ms input have {audit["whole_buffer_changes"]} transcript
+differences at the same 500 ms tail.
+These are diagnostic tests, not a new selection rule.
+
+The source-cache hashes below identify the stored historical summaries and audit data.
+The tool reads these records from `assets/manifest.json`.
+It does not read a prior Markdown report to collect disclosures.
+
+```json
+{json.dumps(evidence["source_cache_sha256"], indent=2, sort_keys=True)}
+```
+
+## Harness checks
+
+The two models' supplied WAVs have the same hashes across their repositories.
+Each uses its supplied transcript file. The corrected harness gives these counts:
+
+| Model | Sample | Word errors/words |
+|---|---|---|
+{upstream_table}
+
+The single error is `DISHONOURED` versus `DISHONORED` for each model.
+No model-specific spelling correction occurs.
+The Parakeet tutorial sample has first-word preservation for each model.
+The stored first-word counts are:
+
+```json
+{json.dumps(evidence["reference_first_words"], indent=2, sort_keys=True)}
+```
+
+These files stay external to the repository.
+LibriSpeech supplies them with the CC-BY-4.0 license.
+Credit: the LibriSpeech and OpenSLR projects.
+
+Five tuning rows show raw model output, without model-specific text normalization:
+
+| Corpus transcript | Parakeet | Zipformer | FastConformer |
+|---|---|---|---|
+{chr(10).join(examples)}
+
+The shared normalization uses lowercase words, removes punctuation, and expands digits.
+For example, `949` and `nine hundred forty nine` become the same four words.
+It does not remove a spoken `and` or correct `SAID` to `set`.
+
+The input checker accepts mono 16 kHz int16 PCM WAV only.
+Samples use float32 values divided by 32768.
+There is no added left padding, as in the upstream file example.
+The tail is 10560 samples at 16 kHz, or 660 ms.
+Each stream receives `input_finished()` and decodes while `is_ready()` gives `True`.
+
+Endpoint detection stays off. No `reset` or endpoint cuts source audio.
+
+The larger Zipformer encoder and joiner use int8, with the fp32 decoder from
+the same `epoch-99-avg-1-chunk-16-left-128` set. This is not the rejected 20M model.
+FastConformer uses the int8 encoder, decoder, and joiner from the same 80 ms model.
+The encoder metadata is:
+
+```json
+{json.dumps(audit["metadata"], indent=2, sort_keys=True)}
+```
+
+The difference applies to these configurations and this timer corpus.
+It is not a claim about all read English or other model variants.
+First-word errors also occur with more than 300 ms of source lead-in.
+The small earlier-onset groups do not show an onset effect.
+
+## Provider follow-up
+
+Full-buffer decoding before voice onset gives filler text.
+The provider must gate full-buffer decoding on `VAD speech onset`.
+This is a provider follow-up, not a change to this frozen benchmark rule or decision.
+
+## License scope
+
+License terms do not control technical selection.
+The two streaming models have status `not_selected` for their measured results.
+FastConformer upstream weights use NVIDIA NGC Terms of Use.
+Its ONNX repository has no README or other license statement.
+`NOASSERTION` records no SPDX assertion for those bytes, not a claim of no license.
+
+{licenses}
+
+## Source records
 
 Access date: 2026-10-25. File pins and license quotations are in `assets/manifest.json`.
 
@@ -565,6 +807,11 @@ Access date: 2026-10-25. File pins and license quotations are in `assets/manifes
 - FastConformer: https://huggingface.co/csukuangfj/sherpa-onnx-nemo-streaming-fast-conformer-transducer-en-80ms-int8
 - Runtime examples: https://github.com/k2-fsa/sherpa-onnx/blob/master/python-api-examples/online-decode-files.py
 - Runtime API: https://istupakov.github.io/onnx-asr/usage/
+- Pinned file-decoding example: {evidence["upstream_example"]}
+- Zipformer sample transcripts: https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/blob/672fbf1b30579d6585301139bb363f42a0ad4a24/test_wavs/trans.txt
+- FastConformer sample transcripts: https://huggingface.co/csukuangfj/sherpa-onnx-nemo-streaming-fast-conformer-transducer-en-80ms-int8/blob/3fafd319033af1c552e7bc8394f7258afdce91b0/test_wavs/trans.txt
+- Sample audio license: https://www.openslr.org/12/ (statement: `License: CC BY 4.0`).
+- Parakeet tutorial sample: https://dldata-public.s3.us-east-2.amazonaws.com/2086-149220-0033.wav
 """
 
 
@@ -590,7 +837,6 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument("--threads", type=int, default=4)
-    parser.add_argument("--check", action="store_true")
     args = parser.parse_args(argv)
     try:
         from tools.check_assets import check_assets
@@ -618,6 +864,9 @@ def main(argv: list[str] | None = None) -> int:
             for split in ("tuning", "held_out")
         } != {"tuning": 50, "held_out": 200}:
             raise ValueError("comparison needs 50 tuning and 200 held-out rows")
+        for label in labels:
+            if not words(label["transcript"]):
+                raise ValueError(f"empty reference transcript: {label['id']}")
         identity: Row = {
             "label_sha256": hashlib.sha256(args.labels.read_bytes()).hexdigest(),
             "selection_rule": {
@@ -651,6 +900,10 @@ def main(argv: list[str] | None = None) -> int:
                 "sherpa-onnx": "2.0.0",
                 "onnxruntime": "1.31.0",
             },
+            "effective_provider_configurations": {
+                name: runtime_configuration(candidate, args.threads)
+                for name, candidate in candidates.items()
+            },
         }
         decoders: dict[str, Decoder] = {}
 
@@ -661,9 +914,7 @@ def main(argv: list[str] | None = None) -> int:
                     name, candidates[name], args.model_root / name, args.threads
                 )
             result = decoders[name].decode(samples)
-            text = result["partials"][-1]["text"]
-            errors, count = word_errors(label["transcript"], text)
-            expected, actual = words(label["transcript"]), words(text)
+            metrics = recognition_metrics(label["transcript"], result["partials"])
             trajectory = {
                 "recording_id": label["id"],
                 "split": label["split"],
@@ -676,10 +927,8 @@ def main(argv: list[str] | None = None) -> int:
                 "recording_id": label["id"],
                 "split": label["split"],
                 "candidate": name,
-                "errors": errors,
-                "words": count,
-                "first_word": bool(actual and actual[0] == expected[0]),
-                "exact": actual == expected,
+                **metrics,
+                "reference": label["transcript"],
                 "trajectory": trajectory,
                 "leading_silence_ms": label["alignment_words"][0]["start_sample"] / 16,
             }
@@ -709,16 +958,39 @@ def main(argv: list[str] | None = None) -> int:
             frozen, results = run_comparison(
                 chosen_labels, list(candidates), decode, freeze, identity
             )
-        export_trajectories(
-            [r["trajectory"] for r in results if r["candidate"] == frozen["candidate"]],
-            args.partials_output,
-        )
         args.model_root.mkdir(parents=True, exist_ok=True)
         (
             args.model_root / ("measurements-" + (args.split or "both") + ".json")
         ).write_text(json.dumps(results, sort_keys=True))
-        args.report.parent.mkdir(parents=True, exist_ok=True)
-        args.report.write_text(render_report(frozen, results, candidates, environment))
+        if args.split is None:
+            if any(
+                sum(r["candidate"] == name and r["split"] == split for r in results)
+                != count
+                for name in candidates
+                for split, count in (("tuning", 50), ("held_out", 200))
+            ):
+                raise ValueError(
+                    "complete export needs both splits for every candidate"
+                )
+            report = render_report(
+                frozen,
+                results,
+                candidates,
+                environment,
+                manifest,
+            )
+            export_trajectories(
+                [
+                    r["trajectory"]
+                    for r in results
+                    if r["candidate"] == frozen["candidate"]
+                ],
+                args.partials_output,
+            )
+            args.report.parent.mkdir(parents=True, exist_ok=True)
+            args.report.write_text(report)
+        else:
+            print(f"PASS Q6 split: {args.split}; public report and export unchanged")
         for split in ("tuning", "held_out"):
             for name in candidates:
                 rows = [
