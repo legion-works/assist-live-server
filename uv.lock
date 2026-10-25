@@ -174,12 +174,16 @@ source = { editable = "server" }
 dependencies = [
     { name = "aiohttp" },
     { name = "assist-live-client" },
+    { name = "numpy" },
+    { name = "onnxruntime" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "aiohttp", specifier = "==3.14.5" },
     { name = "assist-live-client", editable = "client" },
+    { name = "numpy", specifier = "==2.5.4" },
+    { name = "onnxruntime", specifier = "==1.31.0" },
 ]
 
 [[package]]
@@ -195,9 +199,7 @@ dependencies = [
 dev = [
     { name = "jsonschema" },
     { name = "mypy" },
-    { name = "numpy" },
     { name = "onnx-asr" },
-    { name = "onnxruntime" },
     { name = "pytest" },
     { name = "pyyaml" },
     { name = "ruff" },
@@ -216,9 +218,7 @@ requires-dist = [
 dev = [
     { name = "jsonschema", specifier = "==4.26.0" },
     { name = "mypy", specifier = ">=1.18" },
-    { name = "numpy", specifier = "==2.5.4" },
     { name = "onnx-asr", specifier = "==0.12.0" },
-    { name = "onnxruntime", specifier = "==1.31.0" },
     { name = "pytest", specifier = ">=8" },
     { name = "pyyaml", specifier = ">=6" },
     { name = "ruff", specifier = ">=0.14" },

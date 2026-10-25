@@ -1489,3 +1489,100 @@ PASS public data matches=0
 The ASD-STE100 checker reports 0 findings in the protocol and verification records.
 The privacy self-scan checks 82 publishable files and gives `private_terms=0 home_paths=0 private_addresses=0`.
 All 24 numbered behavioral mutations cause test failures. The 11 historical-evidence changes also give the necessary command failure.
+
+## Guarded turn detection
+
+Date: 2026-10-25 (UTC).
+
+Initial command: `uv run --locked pytest tests/turn -q`.
+Initial result: `ModuleNotFoundError: No module named 'assist_live_server.turn'`.
+
+Command: `uv run --locked pytest tests/turn -q` with a prefilled external model cache.
+Result: `80 passed`.
+The tests use synthetic PCM and `vad_probability` and `turn_probability` inputs for policy checks.
+The inference test uses the two pinned models. A missing cache is a named failure, not a skipped test.
+Four NumPy `feature` tests agree with the locked Transformers probe to a tolerance of `2e-5`.
+
+The two `Profile` objects have unmeasured defaults: `min_silence_ms=400`, `smart_turn_limit=0.8`, and `max_silence_ms=1500`.
+The two settings keep the transcript guard and the 15 s hard endpoint.
+Each detector instance processes one turn. Its events use the consumed audio clock.
+
+The model loader checks SHA-256 before inference. It does not download files during inference.
+The runtime reads the packaged asset manifest. Only the tuning tool accepts an external manifest override.
+
+The server packages contain one copy of the asset manifest.
+Tests compare its bytes with the source manifest in `direct wheels` and wheels from source archives.
+The client wheel contains no server module or manifest.
+NumPy `2.5.4` and ONNX Runtime `1.31.0` are server runtime dependencies.
+The client does not have these dependencies. The server does not install PyTorch or the Silero Python package.
+
+The `TRAJECTORY_SCHEMA` constant in `tools/tune_profiles.py` gives the partial-trajectory format.
+Each row has a recording ID, `split`, audio hash, frozen STT identity, provider-configuration digest, and timestamped `partials`.
+The `labels` have the same identity fields and an `audio_path` relative to the external audio root.
+They also have a `human` Boolean and two interval lists: `pause_intervals_ms` and `executable_prefix_intervals_ms`.
+Each interval has a start and an end in milliseconds.
+
+The tool rejects unknown `split` values, mismatched hashes or revisions, missing recordings, duplicate recordings, and timestamps that decrease.
+It checks actual WAV bytes and reads only `partials` with timestamps at or before the current audio time.
+
+Tuning uses tuning rows only. For freeze, a minimum of 300 different held-out human pause recordings is necessary.
+The frozen record checks the held-out recording identities and trajectories with SHA-256.
+The held-out command does not tune or rewrite `Profile` values.
+
+Seven numbered behavioral mutations cause test failures:
+
+1. Disable the transcript guard in `fast`: the candidate test accepts `turn on the`.
+2. Let `turn on the` cause an endpoint: the push test gets an endpoint at 416 ms.
+3. Accept held-out rows for tuning: the partition test does not get the necessary error.
+4. Accept freeze below 300 pause recordings: the denominator test does not get the necessary error.
+5. Accept a model hash mismatch: the CI fetch test gets exit code 0, not 1.
+6. Remove the maximum-silence endpoint: the fallback test gets no event.
+7. Remove the endpoint at 15 s: the continuous-speech test gets no event.
+
+The code contains no mutations after the tests. The repository has no frozen `Profile` file.
+
+Command: `task check` with an external scratch manifest for model fetch.
+Result: `FAIL silero-vad: blocked asset reference in release source`.
+Four asset and probe tests reject the base manifest's absent-component status.
+The same four tests give failures on Python `3.14.2` and with the network namespace disabled.
+
+The result in each complete test run is `4 failed, 253 passed`.
+The asset-status change must land before the complete checks can have satisfactory results.
+Production-manifest fetch is pending until that change lands.
+
+Command: `uv run --locked mypy`.
+Result: `Success: no issues found in 23 source files`.
+Python workspace diagnostics are unavailable for the isolated worktree.
+The public-tree check with `--history` reports `PASS history secrets commits=8` and `PASS public data matches=0`.
+The file self-check reports 0 private terms, 0 home paths, and 0 private addresses.
+
+The ASD-STE100 checker reports 0 findings in `STRUCTURE.md` and this record.
+
+Human pause recordings, executable-prefix recordings, and frozen STT `partials` are not available.
+The tuning and human safety acceptance steps are pending. The project is experimental and has no release.
+Run these commands only when those inputs are available:
+
+```sh
+uv run --locked python tools/tune_profiles.py --fetch-models
+uv run --locked python tools/tune_profiles.py \
+  --labels "$LABELS" --audio-root "$CORPUS_AUDIO" --partials "$PARTIALS" \
+  --stt-model-id "$STT_MODEL_ID" --stt-revision "$STT_REVISION" \
+  --provider-config-sha256 "$PROVIDER_CONFIG_SHA256" \
+  --split tuning --profile safe --profile fast \
+  --output docs/reports/p1-profiles.json --freeze
+uv run --locked python tools/tune_profiles.py \
+  --labels "$LABELS" --audio-root "$CORPUS_AUDIO" --partials "$PARTIALS" \
+  --stt-model-id "$STT_MODEL_ID" --stt-revision "$STT_REVISION" \
+  --provider-config-sha256 "$PROVIDER_CONFIG_SHA256" \
+  --split held_out --profiles-file docs/reports/p1-profiles.json --check-held-out
+```
+
+If the safe prefix gate gives a failure, use the constant safety fallback without a new threshold search:
+
+```sh
+uv run --locked python tools/tune_profiles.py --disable-safe-early \
+  --profiles-file docs/reports/p1-profiles.json --output "$SAFE_FALLBACK_PROFILES"
+```
+
+Then run the held-out command with that output as `--profiles-file`.
+The acceptance check must also make sure that status is `included` for the two turn models in the landed manifest.

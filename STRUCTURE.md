@@ -45,3 +45,16 @@ The root Python project is a uv workspace. It installs the two Python packages f
 - `tests/test_store.py`: persistence, transcript policy, and the single writer.
 - `tests/test_pending_events.py`: satellite access, reorder, and expiry.
 - `tests/contract/test_event_store.py`: device-to-client records through the service.
+
+## Turn detection
+
+- `server/assist_live_server/assets.py`: shared asset-manifest loader.
+- `server/hatch_build.py`: one manifest source for server wheels and source archives.
+- `server/assist_live_server/turn/detector.py`: local ONNX models and guarded endpoints.
+- `server/assist_live_server/turn/transcript_guard.py`: English transcript-ending checks.
+- `server/assist_live_server/turn/profiles.py`: unmeasured defaults and `Profile` limits.
+- `tools/tune_profiles.py`: partial-trajectory schema, replay, tuning, and held-out checks.
+- `tests/turn/`: synthetic policy tests and pinned-model inference tests.
+
+Model files stay in an external cache. They are not in the Python packages.
+The client package has no model runtime or asset manifest.

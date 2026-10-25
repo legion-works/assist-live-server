@@ -38,6 +38,9 @@ jobs:
       - run: uv sync --locked
         env:
           UV_LINK_MODE: copy
+      - name: Fetch pinned turn models
+        if: matrix.check == 'unit'
+        run: uv run --locked python tools/tune_profiles.py --fetch-models
       - run: task "$CHECK"
         env:
           CHECK: ${{ matrix.check }}
