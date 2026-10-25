@@ -1,8 +1,47 @@
 {
+  "stt_benchmark": {
+    "parakeet": {
+      "model_id": "nvidia/parakeet-tdt-0.6b-v2",
+      "revision": "0bbb45a3365852604aef28b538a8f066f4ccaa85",
+      "configuration": {"decode_mode": "repeated full-buffer decode at 400 ms intervals (not streaming)", "runtime": "onnx-asr==0.12.0", "onnxruntime": "1.31.0", "quantization": "int8", "preprocessor": "numpy", "sample_rate": 16000, "interval_ms": 400, "inter_op_threads": 1, "provider": "CPUExecutionProvider"},
+      "files": [
+        {"file": "config.json", "url": "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx/resolve/0bbb45a3365852604aef28b538a8f066f4ccaa85/config.json", "sha256": "666903c76b9798caf2c210afd4f6cd60b08a8dbf9800ec8d7a3bc0d2148ac466"},
+        {"file": "vocab.txt", "url": "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx/resolve/0bbb45a3365852604aef28b538a8f066f4ccaa85/vocab.txt", "sha256": "ec182b70dd42113aff6c5372c75cac58c952443eb22322f57bbd7f53977d497d"},
+        {"file": "encoder-model.int8.onnx", "url": "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx/resolve/0bbb45a3365852604aef28b538a8f066f4ccaa85/encoder-model.int8.onnx", "sha256": "3e0581fda6ab843888b51e56d7ee78b6d5bc3237ec113af1f732d1d5286aa155"},
+        {"file": "decoder_joint-model.int8.onnx", "url": "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx/resolve/0bbb45a3365852604aef28b538a8f066f4ccaa85/decoder_joint-model.int8.onnx", "sha256": "a449f49acd68979d418651dd2dcb737cc0f1bf0225e009e29ee326354edbf7d3"}
+      ]
+    },
+    "sherpa-zipformer": {
+      "model_id": "csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26",
+      "revision": "672fbf1b30579d6585301139bb363f42a0ad4a24",
+      "configuration": {"decode_mode": "cache-aware streaming transducer, chunk16 left128", "runtime": "sherpa-onnx==2.0.0", "feed_ms": 80, "tail_samples": 10560, "endpoint_detection": false, "decoding_method": "greedy_search", "provider": "cpu", "sample_rate": 16000, "feature_dim": 80},
+      "files": [
+        {"file": "tokens.txt", "url": "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/672fbf1b30579d6585301139bb363f42a0ad4a24/tokens.txt", "sha256": "49e3c2646595fd907228b3c6787069658f67b17377c60aeb8619c4551b2316fb"},
+        {"file": "encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx", "url": "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/672fbf1b30579d6585301139bb363f42a0ad4a24/encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx", "sha256": "563fde436d16cf7607cf408cd6b30909819d03162652ef389c2450ced3f45ac1"},
+        {"file": "decoder-epoch-99-avg-1-chunk-16-left-128.onnx", "url": "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/672fbf1b30579d6585301139bb363f42a0ad4a24/decoder-epoch-99-avg-1-chunk-16-left-128.onnx", "sha256": "7bf787f90b194b307e5a4ad6a34fadb4e748304c35f78a8d66358a05b13ee6ef"},
+        {"file": "joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx", "url": "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/672fbf1b30579d6585301139bb363f42a0ad4a24/joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx", "sha256": "d944208d660d67c8d72cd2acaeac971fa5ceb8c80e76c1968148846fedd6e297"}
+      ]
+    },
+    "fastconformer": {
+      "model_id": "csukuangfj/sherpa-onnx-nemo-streaming-fast-conformer-transducer-en-80ms-int8",
+      "revision": "3fafd319033af1c552e7bc8394f7258afdce91b0",
+      "configuration": {"decode_mode": "cache-aware NVIDIA FastConformer streaming transducer, 80 ms look-ahead", "runtime": "sherpa-onnx==2.0.0", "feed_ms": 80, "tail_samples": 10560, "endpoint_detection": false, "decoding_method": "greedy_search", "provider": "cpu", "sample_rate": 16000, "feature_dim": 80},
+      "files": [
+        {"file": "tokens.txt", "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-streaming-fast-conformer-transducer-en-80ms-int8/resolve/3fafd319033af1c552e7bc8394f7258afdce91b0/tokens.txt", "sha256": "618dc110fc2213886b52e063ff42329bbdf37a266ca7705184090fa5f39f3131"},
+        {"file": "encoder.int8.onnx", "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-streaming-fast-conformer-transducer-en-80ms-int8/resolve/3fafd319033af1c552e7bc8394f7258afdce91b0/encoder.int8.onnx", "sha256": "8b982c67b45e3b735d3fee49a4fea525b3149b450ba437f4c8a933f4aa6744c0"},
+        {"file": "decoder.int8.onnx", "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-streaming-fast-conformer-transducer-en-80ms-int8/resolve/3fafd319033af1c552e7bc8394f7258afdce91b0/decoder.int8.onnx", "sha256": "76eec598da07c204747a859a723b99077ef0bbdc19ef4b3f51eb43275662475d"},
+        {"file": "joiner.int8.onnx", "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-streaming-fast-conformer-transducer-en-80ms-int8/resolve/3fafd319033af1c552e7bc8394f7258afdce91b0/joiner.int8.onnx", "sha256": "67f4291dc170fd06b3695a8511f5199fd5965ee3c77cfbd59afc10e145f173f2"}
+      ]
+    }
+  },
   "schema": 1,
   "release_root": "..",
   "image_inventory": null,
   "download_plan": [
+    {"id": "stt-parakeet", "url": "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx/resolve/0bbb45a3365852604aef28b538a8f066f4ccaa85/encoder-model.int8.onnx", "sha256": "3e0581fda6ab843888b51e56d7ee78b6d5bc3237ec113af1f732d1d5286aa155", "path": "models/stt/parakeet/encoder-model.int8.onnx"},
+    {"id": "stt-parakeet-decoder", "url": "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx/resolve/0bbb45a3365852604aef28b538a8f066f4ccaa85/decoder_joint-model.int8.onnx", "sha256": "a449f49acd68979d418651dd2dcb737cc0f1bf0225e009e29ee326354edbf7d3", "path": "models/stt/parakeet/decoder_joint-model.int8.onnx"},
+    {"id": "stt-parakeet-config", "url": "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx/resolve/0bbb45a3365852604aef28b538a8f066f4ccaa85/config.json", "sha256": "666903c76b9798caf2c210afd4f6cd60b08a8dbf9800ec8d7a3bc0d2148ac466", "path": "models/stt/parakeet/config.json"},
+    {"id": "stt-parakeet-vocab", "url": "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx/resolve/0bbb45a3365852604aef28b538a8f066f4ccaa85/vocab.txt", "sha256": "ec182b70dd42113aff6c5372c75cac58c952443eb22322f57bbd7f53977d497d", "path": "models/stt/parakeet/vocab.txt"},
     {"id": "smart-turn-v3.2-cpu", "url": "https://huggingface.co/pipecat-ai/smart-turn-v3/resolve/f766f81d3cfdf7737ac64aad813d91bbfd56bf93/smart-turn-v3.2-cpu.onnx", "sha256": "2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f", "path": "models/smart-turn-v3.2-cpu.onnx"},
     {"id": "silero-vad", "url": "https://raw.githubusercontent.com/snakers4/silero-vad/5cd7945676eb32225748052e2e6a0580e4686a08/src/silero_vad/data/silero_vad.onnx", "sha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3", "path": "models/silero_vad.onnx"},
     {"id": "piper-lessac-medium", "url": "https://huggingface.co/rhasspy/piper-voices/resolve/5041a7a49ae5b3a0f30e6837769eb03fdbb231bd/en/en_US/lessac/medium/en_US-lessac-medium.onnx", "sha256": "5efe09e69902187827af646e1a6e9d269dee769f9877d17b16b1b46eeaaf019f", "path": "models/piper/en_US-lessac-medium.onnx"},
@@ -28,6 +67,76 @@
     ]
   },
   "assets": [
+    {
+      "id": "stt-parakeet", "kind": "model", "status": "included",
+      "url": "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx/resolve/0bbb45a3365852604aef28b538a8f066f4ccaa85/encoder-model.int8.onnx",
+      "revision": "0bbb45a3365852604aef28b538a8f066f4ccaa85",
+      "sha256": "3e0581fda6ab843888b51e56d7ee78b6d5bc3237ec113af1f732d1d5286aa155",
+      "license": "CC-BY-4.0",
+      "license_sources": [{"kind": "model_card", "url": "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx/blob/0bbb45a3365852604aef28b538a8f066f4ccaa85/README.md", "quote": "license: cc-by-4.0", "revision_or_version": "0bbb45a3365852604aef28b538a8f066f4ccaa85", "file_binding": {"path": "encoder-model.int8.onnx", "sha256": "3e0581fda6ab843888b51e56d7ee78b6d5bc3237ec113af1f732d1d5286aa155"}}],
+      "upstream_project": {"repository": "nvidia/parakeet-tdt-0.6b-v2", "revision": "ae9ad07059c7c739ffaf932226a8fe64ae2620b0"},
+      "redistribution": true, "download": "startup",
+      "attribution": "NVIDIA Parakeet TDT 0.6B v2. CC-BY-4.0. ONNX export and int8 quantization by onnx-asr contributors. Source and license links are in the asset manifest.",
+      "paths": ["models/stt/parakeet/encoder-model.int8.onnx"],
+      "selection_detail": "Tuning WER 30/394 (7.6142%); first word 48/50; first partial median 431.40 ms. No streaming candidate passed the declared tuning-only rule. Keep compatible mode, not a streaming default. The corrected-tail comparison uses the same rule and 1.0 percentage-point WER margin as the initial run.",
+      "components": [
+        {
+          "id": "stt-parakeet-decoder", "kind": "model", "status": "included",
+          "url": "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx/resolve/0bbb45a3365852604aef28b538a8f066f4ccaa85/decoder_joint-model.int8.onnx",
+          "revision": "0bbb45a3365852604aef28b538a8f066f4ccaa85", "sha256": "a449f49acd68979d418651dd2dcb737cc0f1bf0225e009e29ee326354edbf7d3",
+          "license": "CC-BY-4.0",
+          "license_sources": [{"kind": "model_card", "url": "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx/blob/0bbb45a3365852604aef28b538a8f066f4ccaa85/README.md", "quote": "license: cc-by-4.0", "revision_or_version": "0bbb45a3365852604aef28b538a8f066f4ccaa85", "file_binding": {"path": "decoder_joint-model.int8.onnx", "sha256": "a449f49acd68979d418651dd2dcb737cc0f1bf0225e009e29ee326354edbf7d3"}}],
+          "redistribution": true, "download": "startup",
+          "attribution": "NVIDIA Parakeet TDT 0.6B v2. CC-BY-4.0. ONNX export and int8 quantization by onnx-asr contributors. Source and license links are in the asset manifest.",
+          "paths": ["models/stt/parakeet/decoder_joint-model.int8.onnx"], "components": []
+        },
+        {
+          "id": "stt-parakeet-config", "kind": "model", "status": "included",
+          "url": "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx/resolve/0bbb45a3365852604aef28b538a8f066f4ccaa85/config.json",
+          "revision": "0bbb45a3365852604aef28b538a8f066f4ccaa85", "sha256": "666903c76b9798caf2c210afd4f6cd60b08a8dbf9800ec8d7a3bc0d2148ac466",
+          "license": "CC-BY-4.0",
+          "license_sources": [{"kind": "model_card", "url": "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx/blob/0bbb45a3365852604aef28b538a8f066f4ccaa85/README.md", "quote": "license: cc-by-4.0", "revision_or_version": "0bbb45a3365852604aef28b538a8f066f4ccaa85", "file_binding": {"path": "config.json", "sha256": "666903c76b9798caf2c210afd4f6cd60b08a8dbf9800ec8d7a3bc0d2148ac466"}}],
+          "redistribution": true, "download": "startup",
+          "attribution": "NVIDIA Parakeet TDT 0.6B v2. CC-BY-4.0. ONNX export and int8 quantization by onnx-asr contributors. Source and license links are in the asset manifest.",
+          "paths": ["models/stt/parakeet/config.json"], "components": []
+        },
+        {
+          "id": "stt-parakeet-vocab", "kind": "tokenizer", "status": "included",
+          "url": "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx/resolve/0bbb45a3365852604aef28b538a8f066f4ccaa85/vocab.txt",
+          "revision": "0bbb45a3365852604aef28b538a8f066f4ccaa85", "sha256": "ec182b70dd42113aff6c5372c75cac58c952443eb22322f57bbd7f53977d497d",
+          "license": "CC-BY-4.0",
+          "license_sources": [{"kind": "model_card", "url": "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx/blob/0bbb45a3365852604aef28b538a8f066f4ccaa85/README.md", "quote": "license: cc-by-4.0", "revision_or_version": "0bbb45a3365852604aef28b538a8f066f4ccaa85", "file_binding": {"path": "vocab.txt", "sha256": "ec182b70dd42113aff6c5372c75cac58c952443eb22322f57bbd7f53977d497d"}}],
+          "redistribution": true, "download": "startup",
+          "attribution": "NVIDIA Parakeet TDT 0.6B v2. CC-BY-4.0. ONNX export and int8 quantization by onnx-asr contributors. Source and license links are in the asset manifest.",
+          "paths": ["models/stt/parakeet/vocab.txt"], "components": []
+        }
+      ]
+    },
+    {
+      "id": "stt-sherpa-zipformer", "kind": "model", "status": "not_selected", "reason": "technical",
+      "url": "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/672fbf1b30579d6585301139bb363f42a0ad4a24/encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx",
+      "revision": "672fbf1b30579d6585301139bb363f42a0ad4a24", "sha256": "563fde436d16cf7607cf408cd6b30909819d03162652ef389c2450ced3f45ac1",
+      "license": "Apache-2.0",
+      "license_sources": [{"kind": "model_card", "url": "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/blob/672fbf1b30579d6585301139bb363f42a0ad4a24/README.md", "quote": "license: apache-2.0", "revision_or_version": "672fbf1b30579d6585301139bb363f42a0ad4a24", "file_binding": {"path": "encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx", "sha256": "563fde436d16cf7607cf408cd6b30909819d03162652ef389c2450ced3f45ac1"}}],
+      "redistribution": false, "download": "none",
+      "attribution": "Not selected for technical reasons. The model card declares Apache-2.0.",
+      "paths": ["models/stt/sherpa-zipformer/encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx", "models/stt/sherpa-zipformer/decoder-epoch-99-avg-1-chunk-16-left-128.onnx", "models/stt/sherpa-zipformer/joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx", "models/stt/sherpa-zipformer/tokens.txt"],
+      "selection_detail": "Corrected-tail tuning WER 129/394 (32.7411%) exceeds the 8.6142% non-inferiority limit. First word 15/50 is lower than Parakeet 48/50. First-partial median 1770.84 ms exceeds Parakeet 431.40 ms. Final median 26.49 ms is lower, but does not remove the other failures.",
+      "components": []
+    },
+    {
+      "id": "stt-fastconformer", "kind": "model", "status": "not_selected", "reason": "technical",
+      "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-streaming-fast-conformer-transducer-en-80ms-int8/resolve/3fafd319033af1c552e7bc8394f7258afdce91b0/encoder.int8.onnx",
+      "revision": "3fafd319033af1c552e7bc8394f7258afdce91b0", "sha256": "8b982c67b45e3b735d3fee49a4fea525b3149b450ba437f4c8a933f4aa6744c0",
+      "license": "NOASSERTION",
+      "license_detail": "The upstream NVIDIA model uses NGC Terms of Use. The converted ONNX repository supplies no model card. NOASSERTION means no SPDX assertion for the converted bytes, not a claim of no license.",
+      "license_sources": [{"kind": "model_card", "url": "https://api.ngc.nvidia.com/v2/models/nvidia/nemo/stt_en_fastconformer_hybrid_large_streaming_80ms/versions/1.20.0", "quote": "License to use this model is covered by the NGC [TERMS OF USE](https://ngc.nvidia.com/legal/terms) unless another License/Terms Of Use/EULA is clearly specified. By downloading the public and release version of the model, you accept the terms and conditions of the NGC [TERMS OF USE](https://ngc.nvidia.com/legal/terms).", "revision_or_version": "1.20.0", "scope": "Upstream NVIDIA FastConformer Hybrid Large Streaming 80ms, version 1.20.0. The ONNX conversion repository has no separate model card or license text."}],
+      "redistribution": false, "download": "none",
+      "attribution": "Not selected for technical reasons. Upstream weights use NVIDIA NGC Terms of Use; the conversion repository has no separate license statement.",
+      "paths": ["models/stt/fastconformer/encoder.int8.onnx", "models/stt/fastconformer/decoder.int8.onnx", "models/stt/fastconformer/joiner.int8.onnx", "models/stt/fastconformer/tokens.txt"],
+      "selection_detail": "Corrected-tail tuning WER 79/394 (20.0508%) exceeds the 8.6142% non-inferiority limit. First word 26/50 is lower than Parakeet 48/50. First-partial median 1772.48 ms exceeds Parakeet 431.40 ms. Final median 60.53 ms is lower, but does not remove the other failures.",
+      "components": []
+    },
     {
       "id": "piper-runtime",
       "kind": "runtime",

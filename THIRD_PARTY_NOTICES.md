@@ -1,5 +1,35 @@
 # Third-party notices
 
+## Parakeet local compatible STT
+
+The local compatible default is `nvidia/parakeet-tdt-0.6b-v2`.
+It uses the ONNX conversion at revision `0bbb45a3365852604aef28b538a8f066f4ccaa85`.
+The weights use CC-BY-4.0, not the project Apache-2.0 license.
+
+```text
+NVIDIA Parakeet TDT 0.6B v2. CC-BY-4.0. ONNX export and int8 quantization by onnx-asr contributors. Source and license links are in the asset manifest.
+```
+
+The changes from the source weights are ONNX export and int8 quantization.
+The project does not change those bytes.
+The repository has no model bytes. The download plan records each selected file.
+
+- Initial model: https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2
+- ONNX model: https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx/tree/0bbb45a3365852604aef28b538a8f066f4ccaa85
+- License statement: https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx/blob/0bbb45a3365852604aef28b538a8f066f4ccaa85/README.md
+- License text: https://creativecommons.org/licenses/by/4.0/legalcode.en
+
+The pinned README states:
+
+```text
+license: cc-by-4.0
+```
+
+Keep this attribution, the source URLs, and the license URL when you supply these files.
+The `onnx-asr==0.12.0` and `sherpa-onnx==2.0.0` packages are benchmark development dependencies only.
+They are not server runtime or client dependencies.
+No streaming model has a selection for release use.
+
 ## Bootstrap
 
 This repository does not include a third-party model, voice, or copied runtime source at this time.

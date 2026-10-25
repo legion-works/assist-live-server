@@ -1135,3 +1135,114 @@ Device routes without replay hooks refuse the WebSocket upgrade and a configured
 Mutation results: `35/35 behavioral mutants killed` for the gateway checks, and `15/15 behavioral mutants killed` for the timing store.
 All source copies parse before the test runs. The tests import the changed copy, not the installed source tree.
 The ASD-STE100, secret, and public-tree checks examine the changed files. No hardware or cloud test ran.
+
+## Local STT replay measurements
+
+Date: 2026-10-25.
+
+Command, with no benchmark module: `uv run --locked pytest tests/test_benchmark_stt.py -q`.
+
+```text
+E   ModuleNotFoundError: No module named 'tools.benchmark_stt'
+1 error during collection
+```
+
+The development group adds `onnx-asr==0.12.0` and `sherpa-onnx==2.0.0`.
+The lock includes `sherpa-onnx-core==2.0.0`.
+The server and client runtime dependencies stay unchanged.
+
+PyPI metadata declares `Requires-Python: >=3.10` for onnx-asr and `>=3.7` for sherpa-onnx.
+The first package has a universal Python wheel. The second has CPython 3.14 Linux wheels.
+No different interpreter is necessary for these models.
+
+- Metadata: https://pypi.org/pypi/onnx-asr/0.12.0/json
+- Metadata: https://pypi.org/pypi/sherpa-onnx/2.0.0/json
+- Access date: 2026-10-25.
+
+The model files and corpus audio stay in external directories.
+The test uses the 250 human replay records, with 50 tuning and 200 held-out records.
+The initial 500 ms streaming tail removes some Zipformer word endings.
+The corrected test uses the upstream-example 660 ms tail.
+The selection rule and its 1.0 percentage-point WER margin stay unchanged.
+The report records the two tests and the remaining tail sensitivity.
+
+Command, from the server root:
+
+```sh
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
+STT_MODEL_ROOT="$PROBE/run2-models" uv run python tools/benchmark_stt.py \
+  --labels "$WORKSPACE/assist-live/tests/data/labels.jsonl" \
+  --audio-root "$CORPUS_AUDIO" --selection-split tuning --gate-split held_out \
+  --partials-output docs/reports/q6-partials.jsonl \
+  --candidates parakeet,sherpa-zipformer,fastconformer \
+  --report docs/research/q6-streaming-stt.md --check
+```
+
+```text
+PASS asset licenses
+PASS Q6 comparison: parakeet; no streaming default
+```
+
+The corrected tuning word-error counts are Parakeet 30/394, Zipformer 129/394, and FastConformer 79/394.
+The held-out counts are 81/1551, 490/1551, and 254/1551.
+The selection freeze occurs before all held-out scores.
+The paired bootstrap uses 5000 resamples and seed `20261025` for information only.
+The report gives first-word counts by source onset time.
+
+Intent results must come from the HA harness. They do not come from transcript scores.
+
+The two streaming models decode their upstream WAVs with 0/18 and 1/48 word errors each.
+Their first words have 2/2 preservation. The one error is British versus American spelling.
+Five tuning rows show the same normalization rules for all candidates.
+The model-file hashes, input sample rate, padding, flush, and endpoint settings have explicit checks.
+
+Command: `uv run --locked pytest tests/test_benchmark_stt.py -q`.
+Result: `17 passed`.
+
+The numbered semantic mutations each cause the applicable test to give a failure:
+
+1. Accept a held-out selection row.
+2. Accept an audio SHA-256 mismatch.
+3. Export decreasing `audio_ms` timestamps.
+4. Remove the first word from the WER corpus transcript.
+5. Replace the frozen 660 ms tail with 500 ms.
+
+The transcript consumer checker accepts 250 rows, with 50 tuning and 200 held-out records.
+It checks the frozen identity, field contract, monotonic timestamps, and source-audio length limits.
+
+Command: `uv run --locked python tools/check_assets.py --manifest assets/manifest.json --release`.
+
+```text
+NOT CHECKED image inventory: no image inventory exists
+PASS asset licenses
+```
+
+Command: `UV_LINK_MODE=copy task check`.
+
+```text
+35 files already formatted
+All checks passed!
+PASS CI boundaries
+Success: no issues found in 11 source files
+222 passed
+PASS server bootstrap
+PASS isolated client and server packages
+NOT CHECKED image inventory: no image inventory exists
+PASS asset licenses
+no leaks found
+```
+
+Command: `UV_LINK_MODE=copy UV_PROJECT_ENVIRONMENT=$PROBE/venv3142 uv run --locked --python 3.14.2 pytest tests/ -q`.
+Result: `222 passed`. The CI interpreter, Python 3.14.3, also reports `222 passed` through `task check`.
+
+The current record does not claim device acceptance, pause-set acceptance, or an image inventory result.
+
+The ASD-STE100 checker reports 0 findings in each of the three changed Markdown files.
+The publishable-file privacy self-check and the public-tree checker examine the worktree.
+The public-tree check with history gives:
+
+```text
+PASS own Git root
+PASS history secrets commits=11
+PASS public data matches=0
+```
