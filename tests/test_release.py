@@ -17,13 +17,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_service_and_app_users_match_their_data_mounts():
     service = (ROOT / "Dockerfile").read_text()
-    app = (ROOT / "ha-app/Dockerfile").read_text()
     assert service.rsplit("FROM runtime AS service", 1)[1].strip() == "USER 10001:10001"
     assert (
         "USER root"
         in service.split("FROM runtime AS app")[1].split("FROM runtime AS service")[0]
     )
-    assert "USER root" in app
 
 
 def test_runtime_stage_keeps_base_intact_and_copies_no_build_tools():
@@ -42,13 +40,34 @@ def test_runtime_stage_keeps_base_intact_and_copies_no_build_tools():
 
 
 def test_app_has_no_ha_api_access():
-    config = yaml.safe_load((ROOT / "ha-app/config.yaml").read_text())
+    config = yaml.safe_load((ROOT / "assist_live_server/config.yaml").read_text())
     assert "homeassistant_api" not in config
     assert "hassio_api" not in config
     assert not config.get("host_network", False)
     assert not config.get("privileged")
     assert set(config["ports"]) == {"8099/tcp"}
     assert set(config["arch"]) == {"amd64", "aarch64"}
+    assert "init" not in config
+    assert config["stage"] == "experimental"
+
+
+def test_app_repository_layout_has_one_config_and_no_duplicate_dockerfile():
+    from tools.check_assets import release_files
+
+    config = yaml.safe_load((ROOT / "assist_live_server/config.yaml").read_text())
+    assert (ROOT / "repository.yaml").is_file()
+    configs = sorted(
+        path.relative_to(ROOT).as_posix()
+        for path in release_files(ROOT)
+        if path.name in {"config.json", "config.yaml", "config.yml"}
+    )
+    assert configs == [f"{config['slug']}/config.yaml"]
+    assert not (ROOT / config["slug"] / "Dockerfile").exists()
+
+
+def test_runtime_image_disables_telemetry():
+    runtime = (ROOT / "Dockerfile").read_text().split(" AS runtime\n", 1)[1]
+    assert "ENV ORT_DISABLE_TELEMETRY=1" in runtime
 
 
 def checker():

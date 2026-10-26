@@ -146,7 +146,7 @@ def check_bootstrap(root: Path = ROOT) -> list[str]:
         if "personal data" not in agents or "secrets" not in agents:
             failures.append("privacy rule")
 
-    descriptor = read_text(root, "ha-app/repository.yaml", "app descriptor", failures)
+    descriptor = read_text(root, "repository.yaml", "app descriptor", failures)
     if descriptor is not None:
         descriptor = descriptor.lower()
         if "homeassistant_api" in descriptor:

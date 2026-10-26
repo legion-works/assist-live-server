@@ -27,8 +27,16 @@ The pinned base image keeps its own installer and headers. The server does not u
 The build does not delete base-image paths or change installed runtime wheel files.
 
 Compose uses a named data volume, a read-only root filesystem, and no more `Linux capabilities`.
+Its health check uses a registry token when one is available. With an empty registry, `401 unauthorized` means that the server accepts requests.
+Other health failures print `FAIL health: server unavailable or health response invalid` and give a nonzero status.
+
+The `/health` route calls `allowed()`, which gives `401 unauthorized` without a credential.
+Source: [`app.py`](../server/assist_live_server/app.py), functions `health` and `allowed`.
+
 Do not put credentials in a Dockerfile, build argument, image layer, or Compose file.
 Supply cloud keys at runtime through the documented `environment variables` or HA password options.
+
+The image and server command set `ORT_DISABLE_TELEMETRY=1` before ONNX Runtime loads, to disable its default 1DS `telemetry channel`.
 
 The client wheel uses only `aiohttp>=3.14.4,<4` as a dependency.
 The package check installs it in a new environment without server model dependencies.

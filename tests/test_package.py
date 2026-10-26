@@ -8,7 +8,7 @@ def test_client_is_separate():
     assert assist_live_client is not None
     assert (root / "server/pyproject.toml").exists()
     assert (root / "client/pyproject.toml").exists()
-    assert "homeassistant_api" not in (root / "ha-app/repository.yaml").read_text()
+    assert "homeassistant_api" not in (root / "repository.yaml").read_text()
 
 
 def test_client_dependencies_are_compatible_ranges():

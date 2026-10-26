@@ -8,16 +8,20 @@ import signal
 import tempfile
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from aiohttp import web
+# ONNX Runtime reads this opt-out before its first import, not at session setup.
+os.environ["ORT_DISABLE_TELEMETRY"] = "1"
 
-from .app import create_app
-from .assets import load_asset_manifest
-from .auth import Registry
-from .config import ProviderFactory, ServerConfig
-from .store import SQLiteStore
-from .turn.detector import model_path, verified_model
+from aiohttp import web  # noqa: E402
+
+from .app import create_app  # noqa: E402
+from .assets import load_asset_manifest  # noqa: E402
+from .auth import Registry  # noqa: E402
+from .config import ProviderFactory, ServerConfig  # noqa: E402
+from .store import SQLiteStore  # noqa: E402
+from .turn.detector import model_path, verified_model  # noqa: E402
 
 
 def boolean(name: str, default: str) -> bool:
@@ -121,6 +125,7 @@ async def serve() -> None:
     data = Path(os.environ.get("ASSIST_LIVE_DATA", "/data"))
     data.mkdir(parents=True, exist_ok=True, mode=0o700)
     cache = Path(os.environ.get("ASSIST_LIVE_MODEL_CACHE", str(data / "cache")))
+    os.environ["ASSIST_LIVE_MODEL_CACHE"] = str(cache)
     if config.stt_provider == "parakeet" or config.tts_provider == "piper":
         await asyncio.to_thread(
             fetch_plan,
@@ -168,15 +173,24 @@ def main(argv: list[str] | None = None) -> int:
         if args.healthcheck:
             data = Path(os.environ.get("ASSIST_LIVE_DATA", "/data"))
             registry = Registry.load(data / "registry.json")
-            token = next(iter(registry.tokens))
+            token = next(iter(registry.tokens), None)
             port = int(os.environ.get("ASSIST_LIVE_PORT", "8099"))
             request = Request(
                 f"http://127.0.0.1:{port}/health",
-                headers={"Authorization": "Bearer " + token},
+                headers={"Authorization": "Bearer " + token} if token else {},
             )
-            with urlopen(request, timeout=2) as response:
-                if response.status != 200 or not json.load(response)["healthy"]:
-                    raise ValueError("unhealthy server")
+            try:
+                with urlopen(request, timeout=2) as response:
+                    if response.status != 200 or not json.load(response)["healthy"]:
+                        raise ValueError("unhealthy server")
+            except HTTPError as error:
+                with error:
+                    if (
+                        token is not None
+                        or error.code != 401
+                        or error.read(64) != b"unauthorized"
+                    ):
+                        raise ValueError("health response invalid") from None
             print("PASS server: health checked")
         elif args.fetch_models:
             cache = Path(os.environ.get("ASSIST_LIVE_MODEL_CACHE", "/data/cache"))
@@ -189,7 +203,12 @@ def main(argv: list[str] | None = None) -> int:
         else:
             asyncio.run(serve())
     except Exception:
-        print("FAIL server: startup configuration or model check failed", flush=True)
+        failure = (
+            "FAIL health: server unavailable or health response invalid"
+            if args.healthcheck
+            else "FAIL server: startup configuration or model check failed"
+        )
+        print(failure, flush=True)
         return 1
     return 0
 

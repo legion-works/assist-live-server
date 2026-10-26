@@ -2625,7 +2625,7 @@ The full checks run again after each result entry.
 Date: 2026-10-26 (UTC).
 
 The initial `uv run pytest tests/test_release.py -q` gave `1 failed`.
-The error was `FileNotFoundError` for the missing `ha-app/config.yaml`.
+The error was `FileNotFoundError` for the missing initial app configuration file.
 The test checks that the app has no HA API access.
 
 The package check command is:
@@ -2690,3 +2690,29 @@ CI has amd64 and aarch64 OCI builds that compare license inventories without a p
 No local aarch64 build or hosted run completed in this check.
 The artifact workflow stays manual and fail-closed behind the publication approval `variable`.
 No publication, registry login, tag, or release ran.
+
+## Release packaging review checks
+
+The review repair tests check telemetry before ONNX Runtime import, with an explicit `0` in the caller's environment.
+They also check an empty registry, a provisioned registry, named health failures, and incorrect health refusals.
+The repository-layout test accepts only `assist_live_server/config.yaml` in the release tree.
+It checks the root repository descriptor and makes sure that no second app Dockerfile is available.
+
+The app directory agrees with its `slug`. Its configuration uses `stage: experimental` and the default container init process.
+The root Dockerfile supplies the service and app targets.
+
+The local-only trial starts the service image with an empty model directory and network access for the approved startup downloads.
+It records the eight pinned files, their sizes and SHA-256 values, and the download interval.
+The next service run uses the same files with `--network none`.
+Synthetic Piper audio supplies the Parakeet STT request through the client and server routes.
+
+The network `syscall trace` includes provider initialization and the requests. A loopback connection supplies its positive control.
+The trial also checks the image telemetry setting, the `installed distribution list`, and that no `telemetry_1ds` log line occurs.
+The configuration document lists the examined package download paths and their local-only status.
+
+The release-record mutations add an unlisted model file, change the `fbanks.npz` bytes, remove its record, remove a source quotation, and change the `license label`.
+Each mutation must give a named release failure without a traceback.
+The unchanged image is the positive control.
+
+The full gates run after all source and documentation changes.
+No history length is part of the privacy result record.

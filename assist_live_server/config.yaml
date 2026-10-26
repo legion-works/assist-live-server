@@ -9,7 +9,7 @@ arch:
 image: ghcr.io/legion-works/assist-live-server-app
 startup: services
 boot: manual
-init: false
+stage: experimental
 ports:
   8099/tcp: 8099
 ports_description:

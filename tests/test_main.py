@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import importlib.util
 import io
@@ -29,10 +30,12 @@ def environment(tmp_path):
     }
 
 
-def test_valid_startup_serves_health(tmp_path):
-    registry = Registry(tmp_path / "registry.json")
-    registry.bind("test-satellite", "test-satellite", b"x" * 32)
-    registry.add_token("synthetic-health-token", ["test-satellite"])
+@pytest.mark.parametrize("provisioned", [False, True])
+def test_valid_startup_serves_health(tmp_path, provisioned):
+    if provisioned:
+        registry = Registry(tmp_path / "registry.json")
+        registry.bind("test-satellite", "test-satellite", b"x" * 32)
+        registry.add_token("synthetic-health-token", ["test-satellite"])
     process = subprocess.Popen(
         [sys.executable, "-m", "assist_live_server"],
         env=environment(tmp_path),
@@ -45,12 +48,23 @@ def test_valid_startup_serves_health(tmp_path):
         line = process.stdout.readline()
         assert line.startswith("PASS server: listening "), line
         port = int(line.split()[-1])
-        request = Request(
-            f"http://127.0.0.1:{port}/health",
-            headers={"Authorization": "Bearer synthetic-health-token"},
+        health = subprocess.run(
+            [sys.executable, "-m", "assist_live_server", "--healthcheck"],
+            env={**environment(tmp_path), "ASSIST_LIVE_PORT": str(port)},
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
-        with urlopen(request, timeout=5) as response:
-            assert response.status == 200
+        assert health.returncode == 0, health.stdout + health.stderr
+        assert health.stdout == "PASS server: health checked\n"
+        assert health.stderr == ""
+        if provisioned:
+            request = Request(
+                f"http://127.0.0.1:{port}/health",
+                headers={"Authorization": "Bearer synthetic-health-token"},
+            )
+            with urlopen(request, timeout=5) as response:
+                assert response.status == 200
         assert "synthetic-password-value" not in line
     finally:
         process.terminate()
@@ -59,6 +73,113 @@ def test_valid_startup_serves_health(tmp_path):
     assert "synthetic-password-value" not in stdout + stderr
     assert (tmp_path / "turns.sqlite3").exists()
     assert (tmp_path / "registry.json").stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.parametrize("initial", [None, "0"])
+def test_entrypoint_disables_telemetry_before_onnxruntime_import(initial):
+    code = """
+import importlib.abc
+import os
+import sys
+seen = []
+class Check(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "onnxruntime":
+            assert "onnxruntime" not in sys.modules
+            assert os.environ.get("ORT_DISABLE_TELEMETRY") == "1"
+            seen.append(fullname)
+        return None
+sys.meta_path.insert(0, Check())
+import assist_live_server.__main__
+assert seen == ["onnxruntime"]
+assert os.environ["ORT_DISABLE_TELEMETRY"] == "1"
+print("PASS telemetry disabled before ONNX Runtime import")
+"""
+    env = dict(os.environ)
+    env.pop("ORT_DISABLE_TELEMETRY", None)
+    if initial is not None:
+        env["ORT_DISABLE_TELEMETRY"] = initial
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == "PASS telemetry disabled before ONNX Runtime import\n"
+    assert "telemetry_1ds" not in result.stderr
+
+
+def test_health_failure_has_its_own_sanitized_line(tmp_path):
+    Registry(tmp_path / "registry.json").save()
+    result = subprocess.run(
+        [sys.executable, "-m", "assist_live_server", "--healthcheck"],
+        env=environment(tmp_path),
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 1
+    assert (
+        result.stdout == "FAIL health: server unavailable or health response invalid\n"
+    )
+    assert result.stderr == ""
+
+
+def test_default_cache_reaches_turn_detector_environment(tmp_path, monkeypatch):
+    import assist_live_server.__main__ as startup
+
+    monkeypatch.setenv("ASSIST_LIVE_DATA", str(tmp_path))
+    monkeypatch.setenv("ASSIST_LIVE_STT_PROVIDER", "none")
+    monkeypatch.setenv("ASSIST_LIVE_TTS_PROVIDER", "none")
+    monkeypatch.setenv("ASSIST_LIVE_MODEL_CACHE", "")
+    monkeypatch.delenv("ASSIST_LIVE_MODEL_CACHE")
+
+    async def load(config, *, cache):
+        resolved_cache = os.environ.get("ASSIST_LIVE_MODEL_CACHE")
+        assert resolved_cache == str(cache) == str(tmp_path / "cache")
+        raise RuntimeError("stop before app setup")
+
+    monkeypatch.setattr(startup.ProviderFactory, "load", load)
+    with pytest.raises(RuntimeError, match="stop before app setup"):
+        asyncio.run(startup.serve())
+
+
+@pytest.mark.parametrize(
+    "provisioned,status,body",
+    [
+        (False, 401, b"different server"),
+        (False, 403, b"unauthorized"),
+        (True, 401, b"unauthorized"),
+    ],
+)
+def test_health_does_not_accept_other_refusals(
+    tmp_path, monkeypatch, capsys, provisioned, status, body
+):
+    from urllib.error import HTTPError
+
+    import assist_live_server.__main__ as startup
+
+    registry = Registry(tmp_path / "registry.json")
+    if provisioned:
+        registry.bind("test-satellite", "test-satellite", b"x" * 32)
+        registry.add_token("synthetic-health-token", ["test-satellite"])
+    else:
+        registry.save()
+    monkeypatch.setenv("ASSIST_LIVE_DATA", str(tmp_path))
+
+    def refuse(*args, **kwargs):
+        raise HTTPError(
+            "http://127.0.0.1/health", status, "refused", None, io.BytesIO(body)
+        )
+
+    monkeypatch.setattr(startup, "urlopen", refuse)
+    assert startup.main(["--healthcheck"]) == 1
+    assert (
+        capsys.readouterr().out
+        == "FAIL health: server unavailable or health response invalid\n"
+    )
 
 
 def test_bad_configuration_exits_without_secret(tmp_path):
@@ -125,7 +246,9 @@ def test_bad_cached_hash_exits_without_traceback(tmp_path):
 
 
 def test_app_option_mapping_keeps_password_out_of_output(tmp_path, monkeypatch, capsys):
-    spec = importlib.util.spec_from_file_location("app_run", ROOT / "ha-app/run.py")
+    spec = importlib.util.spec_from_file_location(
+        "app_run", ROOT / "assist_live_server/run.py"
+    )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     options = tmp_path / "options.json"

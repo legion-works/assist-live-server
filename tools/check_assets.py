@@ -246,7 +246,8 @@ def check_absent(
         for path in tree
         if path.is_file()
         and (
-            path.relative_to(root).parts[0] in {"server", "client", "ha-app"}
+            path.relative_to(root).parts[0]
+            in {"server", "client", "assist_live_server"}
             or (
                 len(path.relative_to(root).parts) == 1
                 and (

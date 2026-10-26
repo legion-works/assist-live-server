@@ -6,17 +6,15 @@ The image name in `config.yaml` is a future publication destination, not an avai
 
 ## Build
 
-From the repository root, build the service first:
+From the repository root, use the root Dockerfile's `app` target:
 
 ```sh
-docker build --platform linux/amd64 --tag assist-live-server:check .
-docker build --platform linux/amd64 --tag assist-live-server-app:check ha-app
+docker build --platform linux/amd64 --target app --tag assist-live-server-app:check .
 ```
 
-`ha-app/Dockerfile` derives from the checked service image through `BUILD_FROM`.
-For a release build, set `BUILD_FROM` to the approved service digest.
-CI uses the root Dockerfile's `app` target for the two platforms without a registry push.
-The two paths use the same option mapper and server command.
+CI uses this same target for the two platforms without a registry push.
+The root `repository.yaml` identifies the repository. This directory name agrees with `slug` in `config.yaml`.
+Source: [HA app repository layout](https://developers.home-assistant.io/docs/apps/repository/).
 
 Current HA builds do not use `build.yaml`.
 Source: [HA BuildKit migration](https://developers.home-assistant.io/blog/2026/04/02/builder-migration/).
@@ -33,9 +31,9 @@ The app gives options through the environment, not through command arguments or 
 The app requests no HA API, Supervisor API, host network, or `privileged` option.
 Only TCP port `8099` accepts connections. The HA integration owns its own HA access.
 
-The server health endpoint must have a provisioned integration credential.
-The image health check reads that credential from the private registry file. It does not print it.
-An unprovisioned image is not healthy.
+The image health check uses a credential from the private registry when one is available. It does not print it.
+With an empty registry, it checks the documented `401 unauthorized` response from `/health`.
+This response shows that the server accepts requests, not that a client has permission to use it.
 
 The app uses `root` to read the Supervisor options file and write its private `/data` directory.
 The standalone service uses UID `10001`. It does not read Supervisor options.

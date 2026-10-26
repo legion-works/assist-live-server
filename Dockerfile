@@ -14,6 +14,7 @@ LABEL org.opencontainers.image.title="assist-live-server" \
       org.opencontainers.image.source="https://github.com/legion-works/assist-live-server" \
       org.opencontainers.image.licenses="Project code: Apache-2.0; third-party components: see /app/THIRD_PARTY_NOTICES.md"
 ENV PATH="/build/.venv/bin:$PATH" PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 ASSIST_LIVE_DATA=/data
+ENV ORT_DISABLE_TELEMETRY=1
 RUN groupadd --gid 10001 assist-live && useradd --uid 10001 --gid 10001 --no-create-home assist-live \
     && mkdir /data && chown 10001:10001 /data
 COPY --from=build /build/.venv /build/.venv
@@ -28,7 +29,7 @@ CMD ["assist-live-server"]
 
 FROM runtime AS app
 USER root
-COPY ha-app/run.py /app/run.py
+COPY assist_live_server/run.py /app/run.py
 LABEL io.hass.type="addon" io.hass.name="assist-live-server" \
       io.hass.description="Experimental realtime voice server" \
       io.hass.url="https://github.com/legion-works/assist-live-server"

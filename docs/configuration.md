@@ -37,6 +37,28 @@ A provider supplied with `tts_provider` can declare `provider_id`. Without this 
 
 The configured factory is the server path that applies `local_only`.
 
+### Local-only runtime paths
+
+Startup downloads are explicit model setup, not audio requests. `download_models` controls them.
+The startup command checks the pinned SHA-256 values before it loads providers.
+Provider requests use the checked local cache.
+The command gives the same cache path to the provider factory and the turn detector through `ASSIST_LIVE_MODEL_CACHE`.
+
+| Path | Status with the selected local providers | Source |
+|---|---|---|
+| ONNX Runtime 1DS telemetry | Disabled before imports. The server command sets `ORT_DISABLE_TELEMETRY=1`. | Installed `onnxruntime/Privacy.md:38-44` and server `__main__.py`. |
+| Piper voice-list and voice-download utilities | Not called. The provider makes `PiperVoice` with a checked model path and parsed local configuration. | `providers/piper.py:21-34,37-66` and installed `piper/download_voices.py:66-114`. |
+| Piper HTTP voice catalog | Not called. The server uses its own aiohttp app, not Piper's HTTP server. | `__main__.py`, function `serve`, and installed `piper/http_server.py:180-190`. |
+| Piper Chinese model download | Not selected. The pinned Lessac configuration uses `espeak`, not `PINYIN`. | Installed `piper/voice.py:211-221,259-260` and `piper/phonemize_chinese.py:369-383`. |
+| onnx-asr model-name fallback download | Refused by its offline resolver. The provider supplies a checked local cache, not a remote-only selection. | `providers/parakeet.py:44-71` and installed `onnx_asr/resolver.py:69-74,147-171`. |
+| NumPy URL data access | Not called. STT receives an array from PCM bytes. The preprocessor reads the bundled `fbanks.npz` file. | `providers/parakeet.py:85-87` and installed `onnx_asr/preprocessors/numpy_preprocessor.py:21-25` and `numpy/lib/_datasource.py:314-337`. |
+| HTTP stack | Used for explicit requests, not a background `telemetry channel` or `update channel`. Local-only selection refuses cloud providers. | `config.py:114-147` and installed `aiohttp/client.py:558-576` and `aiohappyeyeballs/impl.py:15-29`. |
+
+The image does not install the optional `huggingface_hub`, `transformers`, `requests`, or `httpx` packages.
+No offline setting for a missing package is necessary.
+The wheel-source check found no other `telemetry channel` or `update channel` in Piper, onnx-asr, NumPy, or the HTTP stack.
+This static check does not replace the real-provider test with external networking disabled.
+
 ## Speaker destination checks
 
 With `local_only`, the speaker destination must resolve only to these address classes:
@@ -121,8 +143,13 @@ STT and TTS timing records include the selected provider and the actual destinat
 
 Run `assist-live-server` or `python -m assist_live_server` to start the service.
 The service keeps `registry.json` and `turns.sqlite3` in its data directory.
-The registry uses mode `0600`. Provision integration credentials before the authenticated health check can succeed.
+
+The registry uses mode `0600`. The health check uses a credential when one is available.
+With an empty registry, it accepts only the documented `401 unauthorized` response from the health route.
 The service does not use an HA administrator credential.
+
+The server command sets `ORT_DISABLE_TELEMETRY=1` before ONNX Runtime loads. It does not use a different value from the caller.
+This disables the default 1DS `telemetry channel`. It also applies to a server installed from a wheel.
 
 | Environment variable | Default | App option | Purpose |
 |---|---|---|---|
@@ -151,7 +178,10 @@ Each download goes to its canonical cache path. A checked `hard link` also suppl
 The same SHA-256 check applies to files in the cache.
 
 Use `assist-live-server --fetch-models` to prepare the selected downloads without starting the service.
-Use `assist-live-server --healthcheck` for the authenticated `/health` check on loopback.
-That check reads a token from the private registry. It prints no token or key.
+
+Use `assist-live-server --healthcheck` for the `/health` check on loopback.
+That check reads a token from the private registry, or uses the unauthenticated response when the registry is empty.
+It prints no token or key. Health failures start with `FAIL health:`.
+
 The command gives a nonzero status and one named failure line for a startup or model-check error.
 No cloud credential test is part of the local package checks.

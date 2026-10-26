@@ -383,6 +383,8 @@ The Piper wheel also has a different Apache license for parts of the `g2pW` brid
 That notice does not change the license of Piper or the Lessac voice.
 The complete upstream notices stay in the installed packages.
 
+The image and server command set `ORT_DISABLE_TELEMETRY=1` before ONNX Runtime loads, as specified in `onnxruntime/Privacy.md`, to disable default 1DS telemetry.
+
 ## Network and runtime libraries
 
 The image also contains these Python dependencies.
