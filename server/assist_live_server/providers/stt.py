@@ -8,6 +8,8 @@ from collections.abc import Awaitable, Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Protocol
 
+from ..destinations import Destination
+
 
 class STTClosedError(RuntimeError):
     """The session is finished or cancelled."""
@@ -90,20 +92,42 @@ async def run_decode[T](operation: Callable[[], T], *, final: bool = False) -> T
 
 type ProviderFactory = Callable[..., Awaitable[STTProvider]]
 
+PROVIDER_DESTINATIONS: dict[str, Destination] = {
+    "parakeet": "local",
+    "deepgram": "cloud",
+}
 
-def provider_names(*, mode: str = "local_compatible") -> tuple[str, ...]:
+
+def provider_names(*, mode: str = "all") -> tuple[str, ...]:
     if mode == "local_streaming":
         from .streaming_local import STREAMING_PROVIDERS
 
         return STREAMING_PROVIDERS
-    if mode != "local_compatible":
+    if mode == "local_compatible":
+        return tuple(
+            name
+            for name, destination in PROVIDER_DESTINATIONS.items()
+            if destination == "local"
+        )
+    if mode != "all":
         raise ValueError(f"unknown STT mode: {mode}")
-    return ("parakeet",)
+    return tuple(PROVIDER_DESTINATIONS)
 
 
-def provider_factory(
-    name: str | None = None, *, mode: str = "local_compatible"
-) -> ProviderFactory:
+def provider_destination(name: str) -> Destination:
+    try:
+        return PROVIDER_DESTINATIONS[name]
+    except KeyError:
+        raise ValueError(f"unknown STT provider: {name}") from None
+
+
+async def _load_deepgram(api_key: str) -> STTProvider:
+    from .deepgram import DeepgramProvider
+
+    return DeepgramProvider(api_key)
+
+
+def provider_factory(name: str | None = None, *, mode: str = "all") -> ProviderFactory:
     if mode == "local_streaming":
         from .streaming_local import no_streaming_default
 
@@ -111,6 +135,8 @@ def provider_factory(
     names = provider_names(mode=mode)
     if (name or "parakeet") not in names:
         raise ValueError(f"unknown STT provider: {name}")
+    if name == "deepgram":
+        return _load_deepgram
     from .parakeet import ParakeetProvider
 
     return ParakeetProvider.load

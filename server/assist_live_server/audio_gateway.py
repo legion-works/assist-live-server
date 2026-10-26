@@ -188,7 +188,7 @@ class AudioGateway:
                                 turn_id,
                                 name=result.name,
                                 distance=result.distance,
-                                destination=self.speaker.destination,
+                                destination=result.destination,
                             )
                         )
                     except Exception:

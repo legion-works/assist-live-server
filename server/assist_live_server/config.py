@@ -1,6 +1,7 @@
 """Load explicit provider selections before any content can leave the server."""
 
 import os
+from collections import ChainMap
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -14,16 +15,15 @@ from .destinations import (
 from .destinations import (
     speaker_url as parse_speaker_url,
 )
+from .providers import stt as stt_registry
+from .providers import tts as tts_registry
 from .providers.stt import STTProvider, STTSession
 from .providers.tts import TTSProvider
 from .speaker import MurdockSpeaker
 
-PROVIDER_DESTINATIONS: dict[str, Destination] = {
-    "parakeet": "local",
-    "deepgram": "cloud",
-    "piper": "local",
-    "elevenlabs": "cloud",
-}
+PROVIDER_DESTINATIONS = ChainMap(
+    stt_registry.PROVIDER_DESTINATIONS, tts_registry.PROVIDER_DESTINATIONS
+)
 
 
 def provider_destination(provider: str) -> Destination:
@@ -48,8 +48,8 @@ class ServerConfig:
         ):
             raise ValueError("invalid server option")
         for provider, names in (
-            (self.stt_provider, {"parakeet", "deepgram"}),
-            (self.tts_provider, {"piper", "elevenlabs"}),
+            (self.stt_provider, stt_registry.provider_names()),
+            (self.tts_provider, tts_registry.provider_names()),
         ):
             if provider is not None:
                 if provider not in names:
@@ -113,22 +113,18 @@ class ProviderFactory:
         )
         stt: STTProvider | None = None
         tts: TTSProvider | None = None
-        if config.stt_provider == "parakeet":
-            from .providers.parakeet import ParakeetProvider
-
-            stt = await ParakeetProvider.load(cache)
-        elif config.stt_provider == "deepgram":
-            from .providers.deepgram import DeepgramProvider
-
-            stt = DeepgramProvider(os.environ.get("DEEPGRAM_API_KEY", ""))
-        if config.tts_provider == "piper":
-            from .providers.piper import PiperProvider
-
-            tts = await PiperProvider.load(cache)
-        elif config.tts_provider == "elevenlabs":
-            from .providers.elevenlabs import ElevenLabsProvider
-
-            tts = ElevenLabsProvider(os.environ.get("ELEVENLABS_API_KEY", ""))
+        if config.stt_provider is not None:
+            stt = await stt_registry.provider_factory(config.stt_provider)(
+                os.environ.get(f"{config.stt_provider.upper()}_API_KEY", "")
+                if provider_destination(config.stt_provider) == "cloud"
+                else cache
+            )
+        if config.tts_provider is not None:
+            tts = await tts_registry.provider_factory(config.tts_provider)(
+                os.environ.get(f"{config.tts_provider.upper()}_API_KEY", "")
+                if provider_destination(config.tts_provider) == "cloud"
+                else cache
+            )
         speaker = None
         if config.speaker_url is not None:
             _, mode = await checked_addresses(

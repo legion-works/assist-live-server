@@ -2301,7 +2301,7 @@ uv run pytest tests/test_destinations.py tests/test_speaker.py tests/contract/te
 Initial result: `22 failed, 8 passed`.
 The failures included `ModuleNotFoundError: No module named 'assist_live_server.destinations'`.
 
-The same command after implementation gave `39 passed`.
+Plan command: `69 passed in 1.28s`.
 
 Expanded command:
 
@@ -2309,7 +2309,7 @@ Expanded command:
 uv run pytest tests/test_destinations.py tests/test_speaker.py tests/test_audio_gateway.py tests/contract/test_streaming_tts.py -q
 ```
 
-Result: `48 passed`.
+Expanded command: `78 passed in 1.68s`.
 The tests use synthetic PCM and local fake HTTP and WebSocket services.
 No paid cloud request or live Murdock request ran.
 The Murdock request shape comes from release `v0.13.0`, as recorded in `configuration.md`.
@@ -2368,17 +2368,17 @@ The ASD-STE100 check found no findings in `configuration.md`, `protocol.md`, or 
 The canonical public-tree check gave `PASS public data matches=0`.
 No commit occurred.
 
-Subsequent complete runs on 2026-10-26 gave these results:
+Complete runs on 2026-10-26 use the current tree:
 
-```text
-task check: 697 passed in 23.85s
-Python 3.14.2: 697 passed in 24.21s
-Network-blocked suite: 697 passed in 22.25s
-```
+Repository gate: `733 passed in 24.46s`.
 
-The full repository command ran from `07:21:05Z` to `07:21:35Z`.
-The floor command ran from `07:21:05Z` to `07:21:30Z`.
-The network-blocked command ran from `07:21:56Z` to `07:22:19Z`.
+Floor Python: `733 passed in 24.43s`.
+
+Network-blocked suite: `733 passed in 22.88s`.
+
+The plan commands and repository gate ran from `2026-10-26T09:01:04Z` to `2026-10-26T09:01:42Z`.
+The floor command ran from `2026-10-26T09:01:04Z` to `2026-10-26T09:01:29Z`.
+The network-blocked command ran from `2026-10-26T09:02:22Z` to `2026-10-26T09:02:46Z`.
 The documentation history-count check gave a satisfactory result in each run.
 The repository check also gave `PASS server bootstrap`, `PASS isolated client and server packages`, and `PASS asset licenses`.
 Gitleaks found no leaks in the working tree or history.
@@ -2412,7 +2412,7 @@ Complete command:
 uv run pytest tests/test_destinations.py tests/test_speaker.py tests/test_audio_gateway.py tests/contract/test_streaming_tts.py tests/contract/test_health.py -q
 ```
 
-Result: `62 passed`.
+Health-inclusive command: `88 passed in 1.72s`.
 The health body has `version`, `healthy`, and `capabilities` only.
 `healthy` shows store and replay readiness without a provider condition.
 The client keeps `health()` and adds `health_capabilities()`. An older body gives two `false` function flags without an error.
@@ -2431,3 +2431,27 @@ Five more isolated checks gave unsatisfactory behavioral test results:
 28. Advertise audio functions for an older server without `capabilities`.
 
 All 28 changed copies gave the necessary test failure. The working source did not change during these checks.
+
+## Speaker response and provider registry checks
+
+Date: 2026-10-26 (UTC).
+
+Local fake-server checks use unmatched cosine distances of `1.4` and `2.0`.
+The two distances must give an empty-name `speaker_result` message and a recorded event with the distance.
+Distances above `2` or below `0` get `ValueError("invalid speaker result")`.
+The store refuses those invalid distances too.
+
+The server transcript option controls the route and the SQLite writer before requests start.
+Tests use all four server-option and turn-option combinations, with an opposite initial store option.
+Only two `true` values let the server store transcript text. Default-value tests also change each default to `true` in an isolated source copy.
+
+Configuration uses the STT and TTS registry helpers for names, destinations, and construction.
+A helper call can select a cloud provider, but a credential alone cannot select one.
+A provider supplied with `tts_provider` declares its identifier without a destination-based name guess.
+
+Concurrent speaker results have their own destination. Missing response fields get a constant `ValueError`.
+Speaker URLs with a user or a password are invalid. An empty user does not change this rule.
+
+The repair tests ran before the source repairs and gave unsatisfactory results.
+The baseline checks and each repair mutation ran against isolated copies. No mutation changed the working source.
+Mutation results: `PASS numbered mutations=28` and `PASS repair mutations=16`.

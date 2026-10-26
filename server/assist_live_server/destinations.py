@@ -42,6 +42,7 @@ def speaker_url(value: str) -> URL:
         url.scheme not in {"http", "https"}
         or not url.host
         or url.user is not None
+        or url.password is not None
         or url.query_string
         or url.fragment
         or "%" in url.host

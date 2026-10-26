@@ -67,6 +67,8 @@ def _load_model(cache: Path, manifest: Path | str | None) -> Any:
 
 
 class PiperProvider:
+    provider_id = "piper"
+
     def __init__(self, model: Any) -> None:
         if model.config.sample_rate != 22050:
             raise ValueError("Piper selected voice must use 22050 Hz")

@@ -104,8 +104,8 @@ def test_unknown_voice_fails_by_name_without_synthesis(voice):
     asyncio.run(run())
 
 
-def test_only_piper_is_registered():
-    assert provider_names() == ("piper",)
+def test_local_and_cloud_tts_are_registered():
+    assert provider_names() == ("piper", "elevenlabs")
     assert provider_factory("piper") == PiperProvider.load
     with pytest.raises(ValueError, match="unknown TTS provider"):
         provider_factory("kokoro")

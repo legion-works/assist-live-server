@@ -227,3 +227,72 @@ def test_config_checks_all_dns_answers():
             )
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://:test-pass@speaker.invalid/",
+        "http://user@speaker.invalid/",
+        "http://user:test-pass@speaker.invalid/",
+    ],
+)
+def test_speaker_url_refuses_user_or_password(url):
+    from assist_live_server.destinations import speaker_url
+
+    with pytest.raises(ValueError, match="speaker URL"):
+        speaker_url(url)
+
+
+def test_provider_registries_are_the_configuration_source(monkeypatch):
+    from assist_live_server import config
+    from assist_live_server.providers import stt, tts
+    from assist_live_server.providers.deepgram import DeepgramProvider
+    from assist_live_server.providers.elevenlabs import ElevenLabsProvider
+
+    assert stt.provider_names() == ("parakeet", "deepgram")
+    assert tts.provider_names() == ("piper", "elevenlabs")
+    assert config.PROVIDER_DESTINATIONS.maps[0] is stt.PROVIDER_DESTINATIONS
+    assert config.PROVIDER_DESTINATIONS.maps[1] is tts.PROVIDER_DESTINATIONS
+    for kind, names in (("stt", stt.provider_names()), ("tts", tts.provider_names())):
+        for name in names:
+            values = {
+                "stt_provider": None,
+                "tts_provider": None,
+                kind + "_provider": name,
+                "local_only": False,
+            }
+            assert getattr(config.ServerConfig(**values), kind + "_provider") == name
+
+    async def run():
+        assert isinstance(
+            await stt.provider_factory("deepgram")("test-key"), DeepgramProvider
+        )
+        assert isinstance(
+            await tts.provider_factory("elevenlabs")("test-key"), ElevenLabsProvider
+        )
+        assert stt.provider_destination("deepgram") == "cloud"
+        assert tts.provider_destination("elevenlabs") == "cloud"
+        calls = []
+        stt_factory, tts_factory = stt.provider_factory, tts.provider_factory
+
+        def stt_selected(name):
+            calls.append(("stt", name))
+            return stt_factory(name)
+
+        def tts_selected(name):
+            calls.append(("tts", name))
+            return tts_factory(name)
+
+        monkeypatch.setattr(stt, "provider_factory", stt_selected)
+        monkeypatch.setattr(tts, "provider_factory", tts_selected)
+        monkeypatch.setenv("DEEPGRAM_API_KEY", "test-key")
+        monkeypatch.setenv("ELEVENLABS_API_KEY", "test-key")
+        await config.ProviderFactory.load(
+            config.ServerConfig(
+                stt_provider="deepgram", tts_provider="elevenlabs", local_only=False
+            )
+        )
+        assert calls == [("stt", "deepgram"), ("tts", "elevenlabs")]
+
+    asyncio.run(run())

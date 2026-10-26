@@ -83,7 +83,7 @@ def safe_data(event: TimingEvent, transcript: bool = False) -> dict[str, object]
     if (
         isinstance(distance, (float, int))
         and not isinstance(distance, bool)
-        and 0 <= distance <= 1
+        and 0 <= distance <= 2
     ):
         data["distance"] = distance
     text = event.data.get("transcript")

@@ -26,6 +26,7 @@ class ElevenLabsError(RuntimeError):
 
 
 class ElevenLabsProvider:
+    provider_id = "elevenlabs"
     destination = "cloud"
 
     def __init__(

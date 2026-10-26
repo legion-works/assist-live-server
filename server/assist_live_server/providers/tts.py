@@ -8,6 +8,8 @@ from typing import Protocol
 
 from assist_live_client.models import TTSItem
 
+from ..destinations import Destination
+
 
 class TTSBusyError(RuntimeError):
     """The TTS executor has four admitted sentences."""
@@ -122,14 +124,34 @@ async def sentences(text: AsyncIterator[str]) -> AsyncGenerator[str]:
 
 type ProviderFactory = Callable[..., Awaitable[TTSProvider]]
 
+PROVIDER_DESTINATIONS: dict[str, Destination] = {
+    "piper": "local",
+    "elevenlabs": "cloud",
+}
+
 
 def provider_names() -> tuple[str, ...]:
-    return ("piper",)
+    return tuple(PROVIDER_DESTINATIONS)
+
+
+def provider_destination(name: str) -> Destination:
+    try:
+        return PROVIDER_DESTINATIONS[name]
+    except KeyError:
+        raise ValueError(f"unknown TTS provider: {name}") from None
+
+
+async def _load_elevenlabs(api_key: str) -> TTSProvider:
+    from .elevenlabs import ElevenLabsProvider
+
+    return ElevenLabsProvider(api_key)
 
 
 def provider_factory(name: str = "piper") -> ProviderFactory:
     if name not in provider_names():
         raise ValueError(f"unknown TTS provider: {name}")
+    if name == "elevenlabs":
+        return _load_elevenlabs
     from .piper import PiperProvider
 
     return PiperProvider.load

@@ -9,9 +9,10 @@ Then call `await ProviderFactory.load(config, cache=MODEL_CACHE)`.
 Give this factory to `create_app(registry, store, providers=factory)`.
 The cache must contain the pinned local models. This path does not download models.
 
-For turn storage, use `SQLiteStore(path, record_transcripts=config.record_transcripts)`.
-The route and store then use the same server option.
-Provider setup does not override a store that disables transcript storage.
+For turn storage, use `SQLiteStore(path)`.
+`create_app` applies the server's `record_transcripts` option to the store before it accepts requests.
+The configured factory supplies this option. Without that factory, use the option on `create_app`.
+The store's initial value does not add a different switch when it runs in the server.
 
 | Option | Default | Purpose |
 |---|---|---|
@@ -23,11 +24,16 @@ Provider setup does not override a store that disables transcript storage.
 
 Parakeet and Piper have destination `local`. Deepgram and ElevenLabs have destination `cloud`.
 The factory loads only the selected providers.
+
+The STT and TTS `provider_names()`, `provider_destination()`, and `provider_factory()` helpers are the registry source for configuration.
+The STT helper's explicit `mode="local_compatible"` filter lists local providers only. Its default lists all available providers.
+
 `DEEPGRAM_API_KEY` and `ELEVENLABS_API_KEY` supply credentials for a selected cloud provider.
 A credential does not select a provider. `local_only=True` refuses cloud selection before construction and at each request selection.
 
 The `backend`, `audio_gateway`, and `tts_provider` arguments stay available for embedding code.
 They cannot accompany `providers`. That embedding code owns its provider policy.
+A provider supplied with `tts_provider` can declare `provider_id`. Without this field, records use `injected`, not an inferred provider name.
 
 The configured factory is the server path that applies `local_only`.
 
@@ -80,7 +86,12 @@ The response is a JSON object with these source fields:
 
 The plug-in interface is `identify(audio: bytes) -> SpeakerResult(name: str, distance: float)`.
 It uses `matched_speaker` as the name only when `is_match` is `true`.
-An unmatched result has an empty name in the message.
+Cosine distance is finite and in the inclusive range from `0` to `2`. Murdock uses `2.0` when no speaker is available.
+An unmatched result keeps an empty name in the message and a `speaker_result` event with the distance in the turn record.
+The empty name does not become a stored display name.
+
+Each immutable `SpeakerResult` also has its connection's `destination`, with `local` as the default.
+Concurrent turns do not share a mutable result destination.
 
 Invalid or unavailable speaker results do not change the STT `final` result.
 No live Murdock test ran. Local fake HTTP tests check the mapping from the release source.

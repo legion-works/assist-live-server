@@ -346,8 +346,11 @@ def test_typed_stream_rejects_incomplete_sentence_contract(monkeypatch, failure)
     asyncio.run(run())
 
 
+@pytest.mark.parametrize(
+    "provider_id,destination", [("piper", "local"), ("custom-cloud", "cloud")]
+)
 def test_local_provider_route_streams_before_text_end_and_marks_each_sentence(
-    tmp_path, turn_id, store
+    tmp_path, turn_id, store, provider_id, destination
 ):
     from types import SimpleNamespace
 
@@ -373,9 +376,10 @@ def test_local_provider_route_streams_before_text_end_and_marks_each_sentence(
         registry = Registry()
         registry.bind("satellite-a", "satellite-a", b"test-device-secret")
         registry.add_token("test-token", ["satellite-a"])
-        runner = web.AppRunner(
-            create_app(registry, store, tts_provider=PiperProvider(Voice()))
-        )
+        provider = PiperProvider(Voice())
+        provider.provider_id = provider_id
+        provider.destination = destination
+        runner = web.AppRunner(create_app(registry, store, tts_provider=provider))
         await runner.setup()
         path = tmp_path / "tts.sock"
         await web.UnixSite(runner, path).start()
@@ -404,6 +408,11 @@ def test_local_provider_route_streams_before_text_end_and_marks_each_sentence(
                         TTSAudio("Tail".encode("utf-16le")),
                         TTSSentenceEnd(1),
                     ]
+                    assert store.rows
+                    assert all(
+                        row["event"]["data"]["provider"] == provider_id
+                        for row in store.rows
+                    )
         finally:
             await runner.cleanup()
 

@@ -94,14 +94,17 @@ def create_app(
         if mode not in {"local", "cloud"}:
             raise ValueError("unknown TTS destination")
         destination: Destination = "cloud" if mode == "cloud" else "local"
+        provider_id = identifier(getattr(selected_tts, "provider_id", "injected"))
         tts_gateway = TTSGateway(
             lambda _: selected_tts,
-            provider="elevenlabs" if destination == "cloud" else "piper",
+            provider=provider_id,
             destination=destination,
             local_only=False,
         )
     elif backend is not None:
         tts_gateway = TTSGateway(backend=backend, provider="legacy", local_only=False)
+    if isinstance(store, SQLiteStore):
+        store.record_transcripts = record_transcripts
     active_auth = 0
     auth_connections: dict[bytes, int] = {}
     active_audio_turns: set[str] = set()

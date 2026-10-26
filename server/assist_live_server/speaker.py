@@ -25,6 +25,7 @@ from .providers.parakeet import MAX_AUDIO_BYTES
 class SpeakerResult:
     name: str
     distance: float
+    destination: Destination = "local"
 
     def __post_init__(self) -> None:
         if (
@@ -34,7 +35,8 @@ class SpeakerResult:
             or isinstance(self.distance, bool)
             or not isinstance(self.distance, (float, int))
             or not math.isfinite(self.distance)
-            or not 0 <= self.distance <= 1
+            or not 0 <= self.distance <= 2
+            or self.destination not in {"local", "cloud"}
         ):
             raise ValueError("invalid speaker result")
 
@@ -105,9 +107,8 @@ class MurdockSpeaker:
         value = parse_json(bytes(raw), MAX_CONTROL)
         if type(value.get("is_match")) is not bool:
             raise ValueError("invalid speaker match")
-        result = SpeakerResult(
-            value["matched_speaker"] if value["is_match"] else "",
-            value["distance"],
-        )
-        self.destination = destination
-        return result
+        name = value.get("matched_speaker") if value["is_match"] else ""
+        distance = value.get("distance")
+        if not isinstance(name, str) or not isinstance(distance, (float, int)):
+            raise ValueError("invalid speaker result")
+        return SpeakerResult(name, distance, destination)
