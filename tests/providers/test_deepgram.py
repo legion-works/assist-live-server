@@ -13,6 +13,24 @@ from assist_live_server.providers.stt import STTClosedError
 KEY = "cloud-test-credential"
 
 
+@pytest.mark.parametrize("kind", ["final", "partial"])
+@pytest.mark.parametrize("character", ["x", '"', "\x01", "\U0001f642"])
+def test_transcript_cap_fits_control_envelope(kind, character):
+    import json
+
+    from assist_live_client.protocol import MAX_CONTROL, decode_control, encode_control
+    from assist_live_server.providers.deepgram import MAX_TRANSCRIPT_BYTES
+
+    unit = len(json.dumps(character).encode()) - 2
+    text = character * (MAX_TRANSCRIPT_BYTES // unit) + "x" * (
+        MAX_TRANSCRIPT_BYTES % unit
+    )
+    turn = "01900000-0000-7000-8000-000000000001"
+    raw = json.dumps(encode_control(kind, turn, text=text))
+    assert len(raw.encode()) <= MAX_CONTROL
+    assert decode_control(raw, turn)["text"] == text
+
+
 def result(text, final=False):
     return {
         "type": "Results",
@@ -20,6 +38,45 @@ def result(text, final=False):
         "speech_final": final,
         "channel": {"alternatives": [{"transcript": text}]},
     }
+
+
+@pytest.mark.parametrize("extra", [0, 1])
+@pytest.mark.parametrize("character", ["x", '"', "\x01", "\U0001f642"])
+def test_cloud_transcript_encoded_budget(cloud_ws_server, extra, character):
+    import json
+
+    unit = len(json.dumps(character).encode()) - 2
+
+    def segment(size):
+        return character * (size // unit) + "x" * (size % unit)
+
+    segments = [segment(3999)] * 3 + [segment(4000 + extra)]
+
+    async def run():
+        async def handler(request):
+            ws = web.WebSocketResponse()
+            await ws.prepare(request)
+            await ws.receive_bytes()
+            await ws.receive_json()
+            for text in segments:
+                await ws.send_json(result(text, True))
+            await ws.send_json({"type": "Metadata"})
+            await ws.close()
+            return ws
+
+        async with cloud_ws_server(handler) as fake:
+            session = DeepgramProvider(KEY, endpoint=fake.url).session()
+            try:
+                await session.push(b"\x01\x00")
+                if extra:
+                    with pytest.raises(DeepgramError):
+                        await session.finish()
+                else:
+                    assert await session.finish() == " ".join(segments)
+            finally:
+                await session.aclose()
+
+    asyncio.run(asyncio.wait_for(run(), 3))
 
 
 def test_options_on_each_connection_and_header_only_auth(cloud_ws_server):
@@ -445,7 +502,9 @@ def test_remote_transcript_flood_is_bounded(text, count, final, cloud_ws_server)
     asyncio.run(run())
 
 
-@pytest.mark.parametrize("text,count", [("a", 128), ("x" * 4096, 1), ("é" * 2047, 4)])
+@pytest.mark.parametrize(
+    "text,count", [("a", 128), ("x" * 4096, 1), ("é" * 2047, 1), ("é" * 666, 4)]
+)
 def test_transcript_limit_accepts_valid_boundary(text, count, cloud_ws_server):
     async def run():
         async def handler(request):

@@ -5,13 +5,13 @@ import json
 from contextlib import suppress
 
 import aiohttp
+from assist_live_client.protocol import MAX_TRANSCRIPT_BYTES
 from yarl import URL
 
 from .stt import AudioLimitError, STTClosedError
 
 MAX_FINAL_SEGMENTS = 128
 MAX_SEGMENT_BYTES = 4096
-MAX_TRANSCRIPT_BYTES = 16384
 
 
 class DeepgramError(RuntimeError):
@@ -149,10 +149,11 @@ class DeepgramSession:
                     if not isinstance(text, str) or not isinstance(is_final, bool):
                         raise ValueError("invalid transcript result")
                     size = len(text.encode("utf-8"))
+                    wire_size = len(json.dumps(text).encode("utf-8")) - 2
                     separator = int(bool(text and self._finals))
                     if (
                         size > MAX_SEGMENT_BYTES
-                        or self._transcript_bytes + separator + size
+                        or self._transcript_bytes + separator + wire_size
                         > MAX_TRANSCRIPT_BYTES
                     ):
                         raise ValueError("transcript limit exceeded")
@@ -162,7 +163,7 @@ class DeepgramSession:
                             raise ValueError("transcript segment limit exceeded")
                         if text:
                             self._finals.append(text)
-                            self._transcript_bytes += separator + size
+                            self._transcript_bytes += separator + wire_size
                         self._interim = ""
                     else:
                         self._interim = text

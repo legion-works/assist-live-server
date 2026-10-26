@@ -156,9 +156,10 @@ Remote transcript retention has three limits:
 
 - A maximum of 128 `is_final=true` messages, with empty messages in this count.
 - A maximum of 4096 UTF-8 bytes in one committed or interim segment.
-- A maximum of 16384 UTF-8 bytes in the complete transcript, with separator spaces and the current interim segment in this count.
+- A maximum of 16000 JSON-escaped bytes in the complete transcript, with separator spaces and the current interim segment in this count.
 
-These limits give more than eight committed segments and 1 kB of text for each second of the 15-second audio limit.
+The transcript budget uses the server's JSON-escaped text, but not the two outer quotation marks.
+The `final` and `partial` control envelopes fit with this text in the 16384-byte message limit.
 The segment limit also prevents a single large response from using the complete transcript budget.
 Text above a limit causes a static session error. The receiver stops and closes the WebSocket before it accepts more segments.
 
@@ -187,6 +188,10 @@ The local sentence assembler reads those characters after their audio chunk.
 A marker identifies a complete sentence in that chunk, not a sample offset.
 At `isFinal=true`, a remaining aligned fragment also gets a marker.
 Without character times, the adapter supplies audio without invented sentence markers.
+
+At stream end, the gateway adds one marker for audio after the last marker, for each provider.
+It adds no marker if the provider's last marker is after all audio.
+Nonempty text without audio gets `tts_failed`. Empty or whitespace-only text can end cleanly without audio or markers.
 Cancellation stops the text iterator, cancels the sender, and closes the WebSocket and HTTP session.
 
 The TTS stream uses a 10-second margin plus one second for each eight input characters sent.
@@ -219,7 +224,7 @@ Errors contain no provider response text. An error has no transport `__context__
 Logs, metrics, and close messages contain no credentials.
 
 The adapters use the same aiohttp dependency. No vendor SDK is necessary.
-The server declares its `yarl` import with `yarl>=1.25.1,<2`. The lockfile keeps version 1.25.1.
+The server declares its `yarl` import with the pin `yarl==1.25.1`.
 The third-party notices include the wheel's license and copyright.
 
 The asset manifest lists downloaded models, voices, and runtimes. Its accepted asset types do not include a cloud service.

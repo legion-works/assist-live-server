@@ -52,7 +52,7 @@ _OPENING = frozenset("\"'“‘([")
 _CLOSING = frozenset("\"'”’)]")
 
 
-class _SentenceAssembler:
+class SentenceAssembler:
     def __init__(self) -> None:
         self.buffer: list[str] = []
         self._boundary = 0
@@ -114,7 +114,7 @@ class _SentenceAssembler:
 
 
 async def sentences(text: AsyncIterator[str]) -> AsyncGenerator[str]:
-    assembler = _SentenceAssembler()
+    assembler = SentenceAssembler()
     async for part in text:
         for sentence in assembler.feed(part):
             yield sentence

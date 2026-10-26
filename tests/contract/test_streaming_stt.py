@@ -71,6 +71,49 @@ async def connect(session, turn):
     return ws
 
 
+@pytest.mark.parametrize("character", ["x", '"', "\x01", "\U0001f642"])
+@pytest.mark.parametrize("extra", [0, 1])
+def test_local_final_deliverable_bound(tmp_path, character, extra):
+    import json
+
+    from assist_live_server.providers.deepgram import MAX_TRANSCRIPT_BYTES
+
+    unit = len(json.dumps(character).encode()) - 2
+    text = character * (MAX_TRANSCRIPT_BYTES // unit) + "x" * (
+        MAX_TRANSCRIPT_BYTES % unit + extra
+    )
+
+    async def run():
+        async with service(
+            tmp_path, factory=lambda _: ParakeetSession(lambda _: text)
+        ) as (_, session, turn, store):
+            ws = await connect(session, turn)
+            await ws.send_bytes(encode_audio(turn.turn_id, 0, b"\x01\x00"))
+            await ws.send_json(encode_control("end", turn.turn_id))
+            replies = [message.json() async for message in ws]
+            meaningful = [r for r in replies if r["type"] != "heartbeat"]
+            if extra:
+                assert [r["type"] for r in meaningful] == [
+                    "end_decision",
+                    "error",
+                    "end",
+                ]
+                assert meaningful[1]["code"] == "stt_failed"
+            else:
+                assert [r["type"] for r in meaningful] == [
+                    "end_decision",
+                    "final",
+                    "speaker_result",
+                    "end",
+                ]
+                assert meaningful[1]["text"] == text
+            assert [
+                e["stage"] for e in (await store.get_turn(turn.turn_id))["events"]
+            ].count("stt_final") == (0 if extra else 1)
+
+    asyncio.run(asyncio.wait_for(run(), 3))
+
+
 def test_silence_without_frames_keeps_five_heartbeats(tmp_path):
     async def run():
         async with service(tmp_path) as (_, session, turn, _):

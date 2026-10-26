@@ -12,7 +12,7 @@ from assist_live_client.models import TTSAudio, TTSFormat, TTSItem, TTSSentenceE
 from assist_live_client.protocol import MAX_PCM
 from yarl import URL
 
-from .tts import _SentenceAssembler
+from .tts import SentenceAssembler
 
 MAX_TEXT_CHARACTERS = 16384
 STREAM_MARGIN_SECONDS = 10.0
@@ -103,7 +103,7 @@ class ElevenLabsProvider:
         complete = False
         input_ended = False
         aligned = False
-        assembler = _SentenceAssembler()
+        assembler = SentenceAssembler()
         sentence = 0
         audio_bytes = 0
         alignment_bytes = 0

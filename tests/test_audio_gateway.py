@@ -63,6 +63,28 @@ def detector():
     )
 
 
+def test_oversized_local_partial_is_one_terminal_error():
+    async def run():
+        class Session(ParakeetSession):
+            async def partial(self):
+                return "\U0001f642" * 2000
+
+        session = Session(lambda _: "final must not follow an error")
+        gateway = AudioGateway(lambda _: session, detector_factory=detector)
+
+        async def audio():
+            yield np.ones(6400, dtype="<i2").tobytes()
+            await asyncio.Event().wait()
+
+        replies = [r async for r in gateway.stt(TURN, audio())]
+        assert replies == [
+            {"type": "error", "version": 1, "turn_id": TURN, "code": "stt_failed"}
+        ]
+        assert session._cancelled
+
+    asyncio.run(asyncio.wait_for(run(), 2))
+
+
 def test_selected_provider_onset_partial_endpoint_and_unchanged_final():
     async def run():
         partial_seen = asyncio.Event()

@@ -81,11 +81,15 @@ class TTSGateway:
         }
         stream: AsyncIterator[TTSItem] | None = None
         first_text = False
+        has_text = False
         first_audio = False
+        pending_audio = False
+        sentence = 0
 
         async def input_text() -> AsyncIterator[str]:
-            nonlocal first_text
+            nonlocal first_text, has_text
             async for chunk in text:
+                has_text = has_text or bool(chunk.strip())
                 if chunk and not first_text:
                     first_text = True
                     if record is not None:
@@ -111,6 +115,7 @@ class TTSGateway:
                         width=item.width,
                     )
                 elif isinstance(item, TTSAudio):
+                    pending_audio = True
                     if not first_audio:
                         first_audio = True
                         if record is not None:
@@ -120,6 +125,13 @@ class TTSGateway:
                     yield encode_control(
                         "sentence_end", turn_id, sentence=item.sentence
                     )
+                    pending_audio = False
+                    sentence = item.sentence + 1
+            if has_text and not first_audio:
+                raise ValueError("TTS audio required")
+            if pending_audio:
+                # Without alignment, only the end of the remaining audio is known.
+                yield encode_control("sentence_end", turn_id, sentence=sentence)
         except ValueError, RuntimeError:
             if record is not None:
                 await record("tts_failed", metadata)

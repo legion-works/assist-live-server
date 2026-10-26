@@ -2455,3 +2455,41 @@ Speaker URLs with a user or a password are invalid. An empty user does not chang
 The repair tests ran before the source repairs and gave unsatisfactory results.
 The baseline checks and each repair mutation ran against isolated copies. No mutation changed the working source.
 Mutation results: `PASS numbered mutations=28` and `PASS repair mutations=16`.
+
+## Text limits and TTS stream end
+
+Date: 2026-10-26 (UTC).
+
+The TTS gateway adds one last sentence marker if provider audio is after the last marker.
+Aligned streams keep their own markers. Nonempty text without audio gets `tts_failed`.
+Empty and whitespace-only text can end cleanly without audio or sentence markers.
+
+The client divides large text parts at code-point boundaries.
+It measures the complete JSON message, with JSON-escaped text, before it sends each part.
+The fake server gets ASCII text, JSON-escaped text, and four-byte characters unchanged.
+
+The transcript budget is 16000 JSON-escaped bytes, without the two outer quotation marks.
+Deepgram and the local STT gateway use this budget. It fits the two control messages, `final` and `partial`.
+Text above the budget gives one terminal `stt_failed` error. The gateway does not send oversized text.
+
+The server keeps the dependency pin `yarl==1.25.1`.
+The public `SentenceAssembler` keeps the same sentence rules.
+
+Commands from the repository root:
+
+```sh
+uv run --locked pytest -q tests/contract/test_streaming_tts.py tests/contract/test_streaming_stt.py tests/providers/test_deepgram.py tests/providers/test_piper.py -k 'configured_cloud_tts_factory or covers_only_audio or splits_text_to_actual or transcript_cap or local_final_above or public_sentence_assembler'
+uv run --locked pytest -q tests/providers/test_deepgram.py -k cloud_transcript_encoded_budget --tb=short
+uv run --locked pytest -q tests/contract/test_streaming_tts.py -k 'configured_cloud_tts_factory and (empty or whitespace)' --tb=short
+uv run --locked pytest -q tests/contract/test_streaming_tts.py tests/contract/test_streaming_stt.py tests/providers/test_deepgram.py tests/providers/test_elevenlabs.py tests/providers/test_piper.py tests/test_audio_gateway.py --tb=short
+```
+
+Initial results: `22 failed, 2 passed, 106 deselected in 4.94s` and `4 failed, 4 passed, 48 deselected in 0.19s`.
+
+The empty-text check first gave `2 failed, 25 deselected in 0.49s` with `ProtocolError: audio refused`.
+
+The complete test run gave `195 passed in 5.79s`.
+
+Thirteen isolated mutations test missing or duplicate markers, silent output, text division, byte size, JSON-escaped text, transcript limits, and the public assembler.
+They also test the empty-text rule and the dependency pin.
+Result: `PASS numbered mutations=13`. The working source did not change during these checks.

@@ -17,6 +17,15 @@ from assist_live_server.providers.tts import provider_factory, provider_names
 VOICE = "en_US-lessac-medium"
 
 
+def test_public_sentence_assembler_keeps_split_text_boundaries():
+    from assist_live_server.providers.tts import SentenceAssembler
+
+    assembler = SentenceAssembler()
+    assert assembler.feed("Dr. Test says hel") == []
+    assert assembler.feed("lo. Next") == ["Dr. Test says hello."]
+    assert "".join(assembler.buffer).strip() == "Next"
+
+
 class Voice:
     config = SimpleNamespace(sample_rate=22050)
 

@@ -28,6 +28,7 @@ from .protocol import (
     decode_control,
     encode_audio,
     encode_control,
+    encode_text,
     parse_json,
 )
 
@@ -265,9 +266,8 @@ class AssistLiveClient:
                             await ws.send_bytes(encode_audio(turn_id, seq, chunk))
                             seq += 1
                         elif mode == "tts" and isinstance(chunk, str):
-                            await ws.send_json(
-                                encode_control("text", turn_id, text=chunk)
-                            )
+                            for message in encode_text(turn_id, chunk):
+                                await ws.send_str(message)
                         else:
                             raise ProtocolError("invalid audio input")
                     await ws.send_json(encode_control("end", turn_id))

@@ -29,8 +29,11 @@ def test_cloud_gateway_refuses_before_provider_or_text():
     asyncio.run(run())
 
 
+@pytest.mark.parametrize(
+    "response", ["aligned", "unaligned", "silent", "empty", "whitespace"]
+)
 def test_configured_cloud_tts_factory_keeps_wire_contract(
-    monkeypatch, tmp_path, turn_id, store, replay_store
+    monkeypatch, tmp_path, turn_id, store, replay_store, response
 ):
     import base64
 
@@ -57,17 +60,15 @@ def test_configured_cloud_tts_factory_keeps_wire_contract(
             async for message in ws:
                 value = message.json()
                 sent.append(value)
-                if value.get("text") == "Test. ":
-                    await ws.send_json(
-                        {
-                            "audio": base64.b64encode(b"\x01\x00").decode(),
-                            "alignment": {
-                                "chars": list("Test. "),
-                                "charStartTimesMs": list(range(6)),
-                                "charDurationsMs": [1] * 6,
-                            },
+                if value.get("text") == "Test. " and response != "silent":
+                    payload = {"audio": base64.b64encode(b"\x01\x00").decode()}
+                    if response == "aligned":
+                        payload["alignment"] = {
+                            "chars": list("Test. "),
+                            "charStartTimesMs": list(range(6)),
+                            "charDurationsMs": [1] * 6,
                         }
-                    )
+                    await ws.send_json(payload)
                 if value == {"text": ""}:
                     await ws.send_json({"isFinal": True})
                     await ws.close()
@@ -109,12 +110,24 @@ def test_configured_cloud_tts_factory_keeps_wire_contract(
                 )
 
                 async def text():
-                    yield "Test. "
+                    yield {"empty": "", "whitespace": " \n "}.get(response, "Test. ")
 
-                assert [
-                    item
-                    async for item in client.tts_stream(turn_id, text(), "test-voice")
-                ] == [
+                stream = client.tts_stream(turn_id, text(), "test-voice")
+                if response == "silent":
+                    from assist_live_client.protocol import ProtocolError
+
+                    with pytest.raises(ProtocolError):
+                        [item async for item in stream]
+                    return
+                if response in {"empty", "whitespace"}:
+                    assert [item async for item in stream] == [
+                        TTSFormat("pcm_s16le", 16000, 1, 2)
+                    ]
+                    assert not any(
+                        row["event"]["stage"] == "tts_failed" for row in store.rows
+                    )
+                    return
+                assert [item async for item in stream] == [
                     TTSFormat("pcm_s16le", 16000, 1, 2),
                     TTSAudio(b"\x01\x00"),
                     TTSSentenceEnd(0),
@@ -138,6 +151,118 @@ def test_configured_cloud_tts_factory_keeps_wire_contract(
             await cloud.cleanup()
 
     asyncio.run(asyncio.wait_for(run(), 10))
+
+
+@pytest.mark.parametrize("marked", [False, True])
+def test_gateway_covers_only_audio_after_the_last_provider_marker(turn_id, marked):
+    from assist_live_client import TTSAudio, TTSFormat, TTSSentenceEnd
+    from assist_live_server.tts_gateway import TTSGateway
+
+    class Provider:
+        async def stream(self, text, voice):
+            assert [part async for part in text] == ["First. Tail"]
+            yield TTSFormat("pcm_s16le", 16000, 1, 2)
+            yield TTSAudio(b"\x01\x00")
+            yield TTSSentenceEnd(0)
+            yield TTSAudio(b"\x02\x00")
+            if marked:
+                yield TTSSentenceEnd(1)
+
+    async def run():
+        async def text():
+            yield "First. Tail"
+
+        gateway = TTSGateway(lambda _: Provider())
+        replies = [item async for item in gateway.stream(turn_id, text(), "voice")]
+        assert [r["type"] if isinstance(r, dict) else "audio" for r in replies] == [
+            "format",
+            "audio",
+            "sentence_end",
+            "audio",
+            "sentence_end",
+        ]
+        assert [
+            r["sentence"]
+            for r in replies
+            if isinstance(r, dict) and r["type"] == "sentence_end"
+        ] == [0, 1]
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("method", ["tts", "tts_stream"])
+@pytest.mark.parametrize(
+    "part",
+    ["x" * 16384, '"\x01' * 8192, "\U0001f642" * 16384],
+    ids=["ascii", "escaped", "four-byte"],
+)
+def test_client_splits_text_to_actual_wire_bound(tmp_path, turn_id, method, part):
+    from aiohttp import ClientSession, UnixConnector, web
+    from assist_live_client import AssistLiveClient, TTSFormat
+    from assist_live_client.protocol import MAX_CONTROL, decode_control, encode_control
+
+    async def run():
+        received = []
+        sizes = []
+
+        async def peer(request):
+            ws = web.WebSocketResponse()
+            await ws.prepare(request)
+            await ws.receive_json()
+            await ws.send_json(
+                encode_control("negotiated", turn_id, capabilities=["tts"])
+            )
+            async for message in ws:
+                value = decode_control(message.data, turn_id)
+                sizes.append(len(message.data.encode("utf-8")))
+                if value["type"] == "end":
+                    break
+                assert value["type"] == "text"
+                received.append(value["text"])
+            await ws.send_json(
+                encode_control(
+                    "format",
+                    turn_id,
+                    codec="pcm_s16le",
+                    rate=16000,
+                    channels=1,
+                    width=2,
+                )
+            )
+            await ws.send_json(encode_control("end", turn_id))
+            await ws.close()
+            return ws
+
+        app = web.Application()
+        app.router.add_get("/v1/audio", peer)
+        runner = web.AppRunner(app, access_log=None)
+        await runner.setup()
+        path = tmp_path / "text-bound.sock"
+        await web.UnixSite(runner, path).start()
+        try:
+            async with ClientSession(connector=UnixConnector(path=path)) as session:
+                client = AssistLiveClient(
+                    "http://service.invalid", "synthetic-token", session=session
+                )
+
+                async def text():
+                    yield part
+                    yield " unchanged tail"
+
+                items = [
+                    item
+                    async for item in getattr(client, method)(turn_id, text(), "voice")
+                ]
+                assert items == (
+                    [] if method == "tts" else [TTSFormat("pcm_s16le", 16000, 1, 2)]
+                )
+            assert "".join(received) == part + " unchanged tail"
+            assert len(received) > 2
+            assert max(sizes) <= MAX_CONTROL
+        finally:
+            await runner.cleanup()
+
+    asyncio.run(asyncio.wait_for(run(), 3))
 
 
 @pytest.mark.parametrize(

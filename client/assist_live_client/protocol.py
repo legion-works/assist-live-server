@@ -1,6 +1,7 @@
 import json
 import math
 import struct
+from collections.abc import Iterator
 from typing import Any
 from uuid import UUID
 
@@ -8,6 +9,8 @@ from .models import turn_uuid, unsigned
 
 VERSION = 1
 MAX_CONTROL = 16384
+# This JSON-escaped text budget lets each transcript envelope fit.
+MAX_TRANSCRIPT_BYTES = 16000
 MAX_PCM = 32000
 MAX_AUDIO = 21 + MAX_PCM
 MESSAGE_DEADLINE = 0.6
@@ -137,6 +140,39 @@ def encode_control(kind: str, turn_id: str, **fields: object) -> dict[str, Any]:
     return decode_control(
         json.dumps(value, ensure_ascii=False, allow_nan=False), turn_id
     )
+
+
+def encode_text(turn_id: str, text: str) -> Iterator[str]:
+    """Divide text at code-point boundaries into complete wire messages."""
+    envelope = encode_control("text", turn_id, text="")
+    if not text:
+        yield json.dumps(envelope, ensure_ascii=False)
+        return
+    start = 0
+    while start < len(text):
+        low, high = 0, min(len(text) - start, MAX_CONTROL)
+        raw = ""
+        while low < high:
+            size = (low + high + 1) // 2
+            candidate = json.dumps(
+                {**envelope, "text": text[start : start + size]}, ensure_ascii=False
+            )
+            if len(candidate.encode("utf-8")) <= MAX_CONTROL:
+                low = size
+                raw = candidate
+            else:
+                high = size - 1
+        if not low:
+            raise ValueError("text character exceeds control limit")
+        yield raw
+        start += low
+
+
+def encode_transcript(kind: str, turn_id: str, text: str) -> dict[str, Any]:
+    """Keep transcript text in the server's JSON wire budget."""
+    if len(json.dumps(text).encode("utf-8")) - 2 > MAX_TRANSCRIPT_BYTES:
+        raise ValueError("transcript limit exceeded")
+    return encode_control(kind, turn_id, text=text)
 
 
 def encode_audio(turn_id: str, sequence: int, pcm: bytes) -> bytes:

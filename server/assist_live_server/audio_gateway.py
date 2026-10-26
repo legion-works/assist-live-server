@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
-from assist_live_client.protocol import encode_control
+from assist_live_client.protocol import encode_control, encode_transcript
 
 from .destinations import Destination, require_destination
 from .providers.parakeet import MAX_AUDIO_BYTES
@@ -164,7 +164,7 @@ class AudioGateway:
                         if not stopped and text and text != partial:
                             partial = text
                             await output.put(
-                                encode_control("partial", turn_id, text=text)
+                                encode_transcript("partial", turn_id, text)
                             )
 
                 collector = asyncio.create_task(collect())
@@ -177,7 +177,7 @@ class AudioGateway:
                     task.result()
                 await collector
                 text = await active_session.finish()
-                await output.put(encode_control("final", turn_id, text=text))
+                await output.put(encode_transcript("final", turn_id, text))
                 if self.speaker is not None:
                     try:
                         require_destination(self.speaker.destination, self.local_only)

@@ -325,7 +325,11 @@ The sample rate does not change in one stream. PCM chunks have no WAV header.
 After all audio for each sentence, the server sends `sentence_end` with an unsigned `sentence` index.
 Sentence indices start at `0` and increase by one. The last text fragment also gets a sentence index.
 This index identifies the last complete sentence for fallback continuation.
-An empty text stream has a format control and no sentence controls or audio.
+
+If a provider ends with audio after its last marker, the gateway adds one last `sentence_end` for that audio.
+It does not add markers in audio without `alignment`. The provider's own markers stay unchanged.
+For nonempty text, a stream without audio ends with `tts_failed`, not a sentence marker.
+Empty or whitespace-only text can end cleanly with a format control and no sentence controls or audio.
 
 ```json
 {"type":"format","version":1,"turn_id":"01900000-0000-7000-8000-000000000001","codec":"pcm_s16le","rate":22050,"channels":1,"width":2}
@@ -340,6 +344,10 @@ The `tts()` method continues to yield only bytes for 16 kHz, 16-bit, mono PCM.
 For other declared formats, it gives `ProtocolError("audio format needs the typed TTS stream")` before it yields audio.
 This refusal prevents a legacy consumer from using a constant 16 kHz WAV header with 22050 Hz audio.
 Use the typed API for native Piper audio.
+
+The two client TTS methods divide input parts into `text` messages at code-point boundaries.
+Each complete encoded message fits the 16384-byte control limit, with its JSON envelope and JSON-escaped text.
+The receiver gets the complete input text without added or removed characters.
 
 `create_app(..., tts_provider=provider)` connects a sentence-level provider to this route.
 The provider registry selects `PiperProvider.load(cache)` for `piper`. Loading uses the two hash-checked voice files in the external cache.
@@ -386,6 +394,12 @@ The server sends `end_decision`, one `final`, then `speaker_result` before `end`
 A provider failure sends one terminal `error` with code `stt_failed`, not a `final`.
 The server does not retry or use fallback after a `final`.
 The `final.text` value stays unchanged. Text from `partial` is not a complete result.
+
+The transcript limit is 16000 JSON-escaped bytes, without the two outer quotation marks.
+This budget fits the two control envelopes in the 16384-byte limit.
+It applies to local and cloud providers. Parakeet uses the same limit.
+A transcript above this limit gives one terminal `error` with code `stt_failed`.
+The gateway does not truncate text or send an oversized `final` or `partial`.
 
 The store receives `speech_start`, `end_candidate`, `end_decision`, `stt_partial`, `stt_final`, and `speaker_result` timing events.
 These events use server UTC time and `quality=measured` at the server observation, not a device sample timestamp.
