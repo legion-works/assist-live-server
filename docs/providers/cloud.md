@@ -191,7 +191,7 @@ Cancellation stops the text iterator, cancels the sender, and closes the WebSock
 
 The TTS stream uses a 10-second margin plus one second for each eight input characters sent.
 This conservative rate lets the service make slow voice output without a short limit on legitimate long replies.
-The adapter recomputes the allowance after each text part. It accepts a maximum of 16384 input characters, as the server does.
+The adapter recomputes the allowance after each text part. It accepts a maximum of 16384 input characters in total for one stream.
 The maximum allowance is thus 2058 seconds. Empty initialization and flush messages do not increase the allowance.
 
 The deadline is the stream start time plus this allowance, not the last response time plus the allowance.
