@@ -9,8 +9,8 @@
 !assets/manifest.json
 !LICENSE
 !THIRD_PARTY_NOTICES.md
-!assist_live_server/
-!assist_live_server/run.py
+!assist-live-server/
+!assist-live-server/run.py
 !tools/
 !tools/check_release.py
 !tools/check_assets.py

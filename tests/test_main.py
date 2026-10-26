@@ -247,7 +247,7 @@ def test_bad_cached_hash_exits_without_traceback(tmp_path):
 
 def test_app_option_mapping_keeps_password_out_of_output(tmp_path, monkeypatch, capsys):
     spec = importlib.util.spec_from_file_location(
-        "app_run", ROOT / "assist_live_server/run.py"
+        "app_run", ROOT / "assist-live-server/run.py"
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

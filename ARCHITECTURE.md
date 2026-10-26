@@ -12,4 +12,4 @@ The client package will give the Home Assistant integration its Python client. I
 
 ## Home Assistant app
 
-The `assist_live_server/` directory packages the server for Home Assistant. It does not give the server an administrator credential.
+The `assist-live-server/` directory packages the server for Home Assistant. It does not give the server an administrator credential.

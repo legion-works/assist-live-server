@@ -1,6 +1,6 @@
 name: assist-live-server
 version: "0.0.0"
-slug: assist_live_server
+slug: assist-live-server
 description: Experimental realtime voice server for Assist
 url: https://github.com/legion-works/assist-live-server
 arch:

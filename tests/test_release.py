@@ -40,7 +40,7 @@ def test_runtime_stage_keeps_base_intact_and_copies_no_build_tools():
 
 
 def test_app_has_no_ha_api_access():
-    config = yaml.safe_load((ROOT / "assist_live_server/config.yaml").read_text())
+    config = yaml.safe_load((ROOT / "assist-live-server/config.yaml").read_text())
     assert "homeassistant_api" not in config
     assert "hassio_api" not in config
     assert not config.get("host_network", False)
@@ -54,7 +54,7 @@ def test_app_has_no_ha_api_access():
 def test_app_repository_layout_has_one_config_and_no_duplicate_dockerfile():
     from tools.check_assets import release_files
 
-    config = yaml.safe_load((ROOT / "assist_live_server/config.yaml").read_text())
+    config = yaml.safe_load((ROOT / "assist-live-server/config.yaml").read_text())
     assert (ROOT / "repository.yaml").is_file()
     configs = sorted(
         path.relative_to(ROOT).as_posix()

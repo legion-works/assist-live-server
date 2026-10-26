@@ -2716,3 +2716,5 @@ The unchanged image is the positive control.
 
 The full gates run after all source and documentation changes.
 No history length is part of the privacy result record.
+
+The app folder and its slug use `assist-live-server`. This name is different from the Python package name.

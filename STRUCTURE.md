@@ -6,7 +6,7 @@ The `server/` directory holds the server package.
 
 The `client/` directory holds the client package.
 
-The `assist_live_server/` directory holds Home Assistant app files. Its name is the app `slug`.
+The `assist-live-server/` directory holds Home Assistant app files. Its name is the app `slug`.
 The root `repository.yaml` identifies the app repository.
 The root Dockerfile has the `service` and `app` targets. There is no app Dockerfile in the app directory.
 

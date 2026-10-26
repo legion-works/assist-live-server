@@ -29,7 +29,7 @@ CMD ["assist-live-server"]
 
 FROM runtime AS app
 USER root
-COPY assist_live_server/run.py /app/run.py
+COPY assist-live-server/run.py /app/run.py
 LABEL io.hass.type="addon" io.hass.name="assist-live-server" \
       io.hass.description="Experimental realtime voice server" \
       io.hass.url="https://github.com/legion-works/assist-live-server"

@@ -149,7 +149,7 @@ With an empty registry, it accepts only the documented `401 unauthorized` respon
 The service does not use an HA administrator credential.
 
 The server command sets `ORT_DISABLE_TELEMETRY=1` before ONNX Runtime loads. It does not use a different value from the caller.
-This disables the default 1DS `telemetry channel`. It also applies to a server installed from a wheel.
+This stops ONNX Runtime from sending its default telemetry data. It also applies to a server installed from a wheel.
 
 | Environment variable | Default | App option | Purpose |
 |---|---|---|---|

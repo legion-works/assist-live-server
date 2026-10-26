@@ -4,7 +4,7 @@ The project has three deliverables:
 
 - `assist-live-server` is the server service package.
 - `assist-live-client` is the Python client library used by the Home Assistant integration.
-- `assist_live_server/` contains the Home Assistant app packaging.
+- `assist-live-server/` contains the Home Assistant app packaging.
 
 The root `repository.yaml` identifies the HA app repository.
 

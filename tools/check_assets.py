@@ -247,7 +247,7 @@ def check_absent(
         if path.is_file()
         and (
             path.relative_to(root).parts[0]
-            in {"server", "client", "assist_live_server"}
+            in {"server", "client", "assist-live-server"}
             or (
                 len(path.relative_to(root).parts) == 1
                 and (
