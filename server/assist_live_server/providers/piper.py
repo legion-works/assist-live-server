@@ -99,11 +99,11 @@ class PiperProvider:
         sentence_stream = sentences(text)
         try:
             index = 0
-            async for sentence in sentence_stream:
+            async for sentence, text_end in sentence_stream:
                 chunks = await run_synthesis(partial(self._sentence, sentence))
                 for chunk in chunks:
                     yield TTSAudio(chunk)
-                yield TTSSentenceEnd(index)
+                yield TTSSentenceEnd(index, text_end)
                 index += 1
         finally:
             await sentence_stream.aclose()

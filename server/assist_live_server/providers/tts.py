@@ -60,6 +60,7 @@ class SentenceAssembler:
         self._token: str | None = ""
         self._opening = True
         self._initials = 0
+        self.received = 0
 
     def _read_token(self, character: str) -> None:
         if character.isspace():
@@ -85,6 +86,9 @@ class SentenceAssembler:
                 self._initials = -1
 
     def feed(self, part: str) -> list[str]:
+        return [sentence for sentence, _ in self.feed_positions(part)]
+
+    def feed_positions(self, part: str) -> list[tuple[str, int]]:
         ready = []
         for character in part:
             if self._boundary and character.isspace():
@@ -93,7 +97,7 @@ class SentenceAssembler:
                 ):
                     sentence = "".join(self.buffer).strip()
                     if sentence:
-                        ready.append(sentence)
+                        ready.append((sentence, self.received))
                     self.buffer.clear()
                 self._boundary = 0
             elif character in ".!?":
@@ -107,19 +111,20 @@ class SentenceAssembler:
             # Each character advances the scan once, even when parts contain
             # only one character. No old prefix is scanned or copied again.
             self.buffer.append(character)
+            self.received += 1
             self._read_token(character)
         if len(self.buffer) > 16384:
             raise ValueError("TTS sentence exceeds 16384 characters")
         return ready
 
 
-async def sentences(text: AsyncIterator[str]) -> AsyncGenerator[str]:
+async def sentences(text: AsyncIterator[str]) -> AsyncGenerator[tuple[str, int]]:
     assembler = SentenceAssembler()
     async for part in text:
-        for sentence in assembler.feed(part):
+        for sentence in assembler.feed_positions(part):
             yield sentence
     if fragment := "".join(assembler.buffer).strip():
-        yield fragment
+        yield fragment, assembler.received
 
 
 type ProviderFactory = Callable[..., Awaitable[TTSProvider]]

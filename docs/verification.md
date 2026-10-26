@@ -2497,3 +2497,85 @@ The complete test run gave `195 passed in 5.79s`.
 Thirteen isolated mutations test missing or duplicate markers, silent output, text division, byte size, JSON-escaped text, transcript limits, and the public assembler.
 They also test the empty-text rule and the dependency pin.
 Result: `PASS numbered mutations=13`. The working source did not change during these checks.
+
+## TTS sentence text positions
+
+Date: 2026-10-26.
+
+The protocol contract is in `docs/protocol.md`.
+Request positions count Unicode code points, not encoded bytes or graphemes.
+Piper gives positions from the sentence assembler. ElevenLabs uses request positions after the `alignment` ends for each sentence.
+The last added gateway marker gives the full input count.
+Legacy backend markers have no position.
+
+The initial position command was:
+
+```sh
+uv run --locked pytest -q tests/providers/test_piper.py -k positions
+```
+
+Result: `11 failed, 29 deselected in 0.87s`.
+The error was `AttributeError: 'TTSSentenceEnd' object has no attribute 'text_end'`.
+
+The initial protocol, cloud, and health checks gave `16 failed, 22 passed, 77 deselected in 0.48s`.
+The schema refused `text_end`. The gateway had no request option. The health body had no position flag.
+
+The property test uses random text and random code-point divisions.
+For each marker, the test checks this equality:
+
+```python
+" ".join(full_text[:text_end].split()) == " ".join(" ".join(spoken_sentences).split())
+```
+
+This normalizes whitespace on each side. The right side connects the spoken sentences through the current marker.
+Tests also check nondecreasing positions and the unsaid suffix.
+
+Historical decoders at `8f3d60a` and `eb35c61` refuse unknown request and marker keys.
+The historical decoders accept default server markers.
+The historical server decoders accept the two default client TTS methods.
+The historical decoders refuse the explicit position option.
+Thus the client requests positions only after the caller reads the server's health flag.
+The method option and the missing health flag default to `false`.
+
+The mutation checks gave `PASS 25/25 behavioral mutations killed; all source files restored`.
+The selected tests gave `173 passed in 3.02s`.
+
+Commands from the repository root:
+
+```sh
+export UV_LINK_MODE=copy
+export ASSIST_LIVE_MODEL_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/assist-live/turn"
+task check
+UV_PROJECT_ENVIRONMENT="$FLOOR_ENV" uv run --locked --python 3.14.2 pytest -q
+unshare -rn sh -c 'ip link set lo up && UV_OFFLINE=1 uv run --locked pytest -q'
+uv run --project "$WORKSPACE/assist-live" python "$WORKSPACE/assist-live/tools/check_public_tree.py" --history --root . --private-denylist "$PRIVATE_DENYLIST"
+```
+
+`FLOOR_ENV` selects an isolated temporary environment. `PRIVATE_DENYLIST` selects the local privacy input.
+
+| Check | UTC time on 2026-10-26 | Result |
+| --- | --- | --- |
+| `task check` | 10:42:03Z to 10:42:40Z | Exit 0. `831 passed in 30.74s`. |
+| Python 3.14.2 | 10:42:03Z to 10:42:35Z | `831 passed in 31.57s`. |
+| Offline network namespace | 10:42:03Z to 10:42:35Z | `831 passed in 31.55s`. |
+| Privacy, history, and compatibility | 10:42:03Z to 10:42:07Z | All checks give exit 0. |
+| ASD-STE100 | 10:42:03Z to 10:42:07Z | `docs/protocol.md`: 0 findings. `docs/verification.md`: 0 findings. |
+
+The load averages before the complete gates were `6.86, 7.67, 8.74`, below the limit of `32`.
+Formatting checked `101` files. Ruff gave `All checks passed!`.
+Mypy gave `Success: no issues found in 43 source files`.
+The bootstrap, isolated client and server packages, and asset license checks gave `PASS`.
+Gitleaks found no leaks in files or in `45` commits.
+
+The embedded public-tree command gave `NOT CHECKED public tree` because this worktree has no sibling checkout for that tool.
+The canonical command above ran the full check:
+
+```text
+PASS own Git root
+PASS history secrets commits=45
+PASS public data matches=0
+```
+
+The publishable-file count check found `denylist=0 home_paths=0 private_ipv4=0`.
+The historical compatibility check gave `PASS` for each revision and each default TTS method.
+No cloud service or paid API was necessary.

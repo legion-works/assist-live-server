@@ -3,6 +3,144 @@ import asyncio
 import pytest
 
 
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("covering", [False, True])
+def test_gateway_positions_are_opt_in_and_cover_all_input(turn_id, enabled, covering):
+    from assist_live_client import TTSAudio, TTSFormat, TTSSentenceEnd
+    from assist_live_server.tts_gateway import TTSGateway
+
+    class Provider:
+        async def stream(self, text, voice):
+            assert "".join([part async for part in text]) == "\U0001f642. Tail  "
+            yield TTSFormat("pcm_s16le", 16000, 1, 2)
+            yield TTSAudio(b"\x01\0")
+            yield TTSSentenceEnd(0, 2)
+            yield TTSAudio(b"\x02\0")
+            if not covering:
+                yield TTSSentenceEnd(1, 9)
+
+    async def run():
+        async def text():
+            for character in "\U0001f642. Tail  ":
+                yield character
+
+        replies = [
+            item
+            async for item in TTSGateway(lambda _: Provider()).stream(
+                turn_id, text(), "voice", text_positions=enabled
+            )
+        ]
+        markers = [
+            item
+            for item in replies
+            if isinstance(item, dict) and item["type"] == "sentence_end"
+        ]
+        assert [m.get("text_end") for m in markers] == (
+            [2, 9] if enabled else [None, None]
+        )
+        if not enabled:
+            assert all(
+                set(m) == {"type", "version", "turn_id", "sentence"} for m in markers
+            )
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("method", ["tts", "tts_stream"])
+@pytest.mark.parametrize(
+    "positions,reject",
+    [
+        ([-1], True),
+        ([True], True),
+        ([False], True),
+        ([1.5], True),
+        ([1.0], True),
+        (["2"], True),
+        ([None], True),
+        ([5], True),
+        ([3, 2], True),
+        ([0, 0, 2, 4], False),
+    ],
+)
+def test_client_refuses_invalid_sentence_positions(
+    tmp_path, turn_id, method, positions, reject
+):
+    import json
+
+    from aiohttp import ClientSession, UnixConnector, web
+    from assist_live_client import AssistLiveClient
+    from assist_live_client.protocol import ProtocolError, encode_control
+
+    async def run():
+        async def peer(request):
+            ws = web.WebSocketResponse()
+            await ws.prepare(request)
+            await ws.receive_json()
+            await ws.send_json(
+                encode_control("negotiated", turn_id, capabilities=["tts"])
+            )
+            async for message in ws:
+                if message.json()["type"] == "end":
+                    break
+            await ws.send_json(
+                encode_control(
+                    "format",
+                    turn_id,
+                    codec="pcm_s16le",
+                    rate=16000,
+                    channels=1,
+                    width=2,
+                )
+            )
+            for index, position in enumerate(positions):
+                await ws.send_str(
+                    json.dumps(
+                        {
+                            "type": "sentence_end",
+                            "version": 1,
+                            "turn_id": turn_id,
+                            "sentence": index,
+                            "text_end": position,
+                        }
+                    )
+                )
+            await ws.send_json(encode_control("end", turn_id))
+            await ws.close()
+            return ws
+
+        app = web.Application()
+        app.router.add_get("/v1/audio", peer)
+        runner = web.AppRunner(app, access_log=None)
+        await runner.setup()
+        path = tmp_path / "positions.sock"
+        await web.UnixSite(runner, path).start()
+        try:
+            async with ClientSession(connector=UnixConnector(path=path)) as session:
+                client = AssistLiveClient(
+                    "http://service.invalid", "synthetic-token", session=session
+                )
+
+                async def text():
+                    yield "\U0001f642. x"
+
+                stream = getattr(client, method)(turn_id, text(), "voice")
+                if reject:
+                    with pytest.raises(ProtocolError):
+                        [item async for item in stream]
+                else:
+                    from assist_live_client import TTSSentenceEnd
+
+                    items = [item async for item in stream]
+                    if method == "tts_stream":
+                        assert [
+                            i.text_end for i in items if isinstance(i, TTSSentenceEnd)
+                        ] == positions
+        finally:
+            await runner.cleanup()
+
+    asyncio.run(run())
+
+
 def test_cloud_gateway_refuses_before_provider_or_text():
     from assist_live_server.tts_gateway import TTSGateway
 
@@ -32,8 +170,9 @@ def test_cloud_gateway_refuses_before_provider_or_text():
 @pytest.mark.parametrize(
     "response", ["aligned", "unaligned", "silent", "empty", "whitespace"]
 )
+@pytest.mark.parametrize("text_positions", [False, True])
 def test_configured_cloud_tts_factory_keeps_wire_contract(
-    monkeypatch, tmp_path, turn_id, store, replay_store, response
+    monkeypatch, tmp_path, turn_id, store, replay_store, response, text_positions
 ):
     import base64
 
@@ -112,7 +251,9 @@ def test_configured_cloud_tts_factory_keeps_wire_contract(
                 async def text():
                     yield {"empty": "", "whitespace": " \n "}.get(response, "Test. ")
 
-                stream = client.tts_stream(turn_id, text(), "test-voice")
+                stream = client.tts_stream(
+                    turn_id, text(), "test-voice", text_positions=text_positions
+                )
                 if response == "silent":
                     from assist_live_client.protocol import ProtocolError
 
@@ -130,10 +271,14 @@ def test_configured_cloud_tts_factory_keeps_wire_contract(
                 assert [item async for item in stream] == [
                     TTSFormat("pcm_s16le", 16000, 1, 2),
                     TTSAudio(b"\x01\x00"),
-                    TTSSentenceEnd(0),
+                    TTSSentenceEnd(
+                        0,
+                        (5 if response == "aligned" else 6) if text_positions else None,
+                    ),
                 ]
                 status = await client.health_capabilities()
                 assert status.tts and not status.stt and status.healthy
+                assert status.text_positions
                 assert sent == [
                     {"text": " ", "generation_config": {"chunk_length_schedule": [50]}},
                     {"text": "Test. "},
@@ -327,7 +472,10 @@ def test_legacy_backend_declares_native_format_and_finishes_sentences(
                     TurnOpen(turn_id, "satellite-a", "tts_only", None, None)
                 )
 
-                stream = client.tts_stream(turn_id, text(), "test-voice")
+                assert not (await client.health_capabilities()).text_positions
+                stream = client.tts_stream(
+                    turn_id, text(), "test-voice", text_positions=True
+                )
                 if failure is None:
                     assert [item async for item in stream] == [
                         TTSFormat("pcm_s16le", 22050, 1, 2),

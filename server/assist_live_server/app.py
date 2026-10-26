@@ -250,6 +250,8 @@ def create_app(
                 "capabilities": {
                     "stt": backend is not None or audio_gateway is not None,
                     "tts": backend is not None or tts_gateway is not None,
+                    "text_positions": tts_gateway is not None
+                    and tts_gateway.provider_factory is not None,
                 },
             }
         )
@@ -633,6 +635,7 @@ def create_app(
                             text_input(),
                             negotiation.get("voice", ""),
                             record=record,
+                            text_positions=negotiation.get("text_positions", False),
                         )
                         try:
                             async for item in tts_stream:

@@ -19,6 +19,73 @@ async def parts(*values):
         yield value
 
 
+def test_normalized_alignment_uses_request_sentence_positions(cloud_ws_server):
+    async def run():
+        async def handler(request):
+            ws = web.WebSocketResponse()
+            await ws.prepare(request)
+            async for message in ws:
+                value = message.json()
+                if value == {"text": ""}:
+                    alignment = "Set three point five.  \U0001f642! Tail"
+                    await ws.send_json(
+                        {
+                            "audio": base64.b64encode(b"\x01\0").decode(),
+                            "normalizedAlignment": {
+                                "chars": list(alignment),
+                                "charStartTimesMs": list(range(len(alignment))),
+                                "charDurationsMs": [1] * len(alignment),
+                            },
+                            "isFinal": True,
+                        }
+                    )
+                    await ws.close()
+            return ws
+
+        async with cloud_ws_server(handler) as fake:
+            provider = ElevenLabsProvider(KEY, endpoint=fake.url)
+            items = [
+                item
+                async for item in provider.stream(
+                    parts(*"Set 3.5.\n\U0001f642! Tail  "), "test-voice"
+                )
+            ]
+            assert [
+                item.text_end for item in items if isinstance(item, TTSSentenceEnd)
+            ] == [8, 11, 18]
+
+    asyncio.run(run())
+
+
+def test_alignment_cannot_claim_more_request_sentences(cloud_ws_server):
+    async def run():
+        async def handler(request):
+            ws = web.WebSocketResponse()
+            await ws.prepare(request)
+            async for message in ws:
+                if message.json() == {"text": ""}:
+                    chars = list("One. Two.")
+                    await ws.send_json(
+                        {
+                            "alignment": {
+                                "chars": chars,
+                                "charStartTimesMs": [0] * len(chars),
+                                "charDurationsMs": [1] * len(chars),
+                            },
+                            "isFinal": True,
+                        }
+                    )
+                    await ws.close()
+            return ws
+
+        async with cloud_ws_server(handler) as fake:
+            provider = ElevenLabsProvider(KEY, endpoint=fake.url)
+            with pytest.raises(ElevenLabsError):
+                [item async for item in provider.stream(parts("One."), "test-voice")]
+
+    asyncio.run(run())
+
+
 def test_small_schedule_immediate_parts_first_byte_flush_and_alignment(cloud_ws_server):
     async def run():
         sent = []
@@ -67,7 +134,7 @@ def test_small_schedule_immediate_parts_first_byte_flush_and_alignment(cloud_ws_
                     "generation_config": {"chunk_length_schedule": [50]},
                 }
                 assert sent[1] == {"text": "First. "}
-                assert await anext(stream) == TTSSentenceEnd(0)
+                assert await anext(stream) == TTSSentenceEnd(0, 6)
                 release.set()
                 rest = [item async for item in stream]
                 assert rest == [TTSAudio(b"\x02\0")]
@@ -350,7 +417,7 @@ def test_pcm_splitting_alignment_tail_and_empty_parts(cloud_ws_server):
         chunks = [item.data for item in items if isinstance(item, TTSAudio)]
         assert [len(chunk) for chunk in chunks] == [32000, 8000]
         assert b"".join(chunks) == pcm
-        assert items[-1] == TTSSentenceEnd(0)
+        assert items[-1] == TTSSentenceEnd(0, 4)
         assert messages[1:] == [
             {"text": "Tail"},
             {"text": " ", "flush": True},
@@ -444,7 +511,7 @@ def test_input_cleanup_after_final_response_is_awaited(cloud_ws_server):
             stream = provider.stream(Text(), "test-voice")
             await anext(stream)
             assert await anext(stream) == TTSAudio(b"\0\0")
-            assert await anext(stream) == TTSSentenceEnd(0)
+            assert await anext(stream) == TTSSentenceEnd(0, 2)
             assert cleaning.is_set()
             release.set()
             assert [item async for item in stream] == []

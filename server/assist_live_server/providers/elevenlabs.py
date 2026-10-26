@@ -1,8 +1,9 @@
-"""Explicit cloud TTS without a second input-text buffer."""
+"""Explicit cloud TTS with request positions and provider alignment."""
 
 import asyncio
 import base64
 import json
+from collections import deque
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import suppress
 from time import monotonic
@@ -104,6 +105,9 @@ class ElevenLabsProvider:
         input_ended = False
         aligned = False
         assembler = SentenceAssembler()
+        request_assembler = SentenceAssembler()
+        positions: deque[int] = deque()
+        aligned_sentences = 0
         sentence = 0
         audio_bytes = 0
         alignment_bytes = 0
@@ -134,6 +138,9 @@ class ElevenLabsProvider:
                         if part:
                             if sent_characters + len(part) > MAX_TEXT_CHARACTERS:
                                 raise ValueError("ElevenLabs text limit exceeded")
+                            positions.extend(
+                                end for _, end in request_assembler.feed_positions(part)
+                            )
                             await ws.send_json({"text": part})
                             sent_characters += len(part)
                             allowance = (
@@ -142,6 +149,8 @@ class ElevenLabsProvider:
                             )
                             deadline = started + allowance
                             audio_limit = int(allowance * bytes_per_second)
+                    if "".join(request_assembler.buffer).strip():
+                        positions.append(request_assembler.received)
                     await ws.send_json({"text": " ", "flush": True})
                     await ws.send_json({"text": ""})
                     input_ended = True
@@ -208,17 +217,25 @@ class ElevenLabsProvider:
                     if alignment_bytes > MAX_ALIGNMENT_BYTES:
                         raise ValueError("ElevenLabs alignment limit exceeded")
                     aligned = True
-                    # This assembler reads returned alignment, never input text.
-                    # Markers follow the audio chunk that contains each ending.
-                    for _ in assembler.feed(alignment_text):
+                    # Alignment can change spelling. Only request positions index
+                    # the original text. Alignment controls when markers leave.
+                    aligned_sentences += len(assembler.feed(alignment_text))
+                    while positions and sentence < aligned_sentences:
                         if monotonic() >= deadline:
                             raise ValueError("ElevenLabs stream deadline exceeded")
-                        yield TTSSentenceEnd(sentence)
+                        yield TTSSentenceEnd(sentence, positions.popleft())
                         sentence += 1
                 if value.get("isFinal") is True:
                     complete = True
                     if aligned and "".join(assembler.buffer).strip():
-                        yield TTSSentenceEnd(sentence)
+                        aligned_sentences += 1
+                    while positions and sentence < aligned_sentences:
+                        yield TTSSentenceEnd(sentence, positions.popleft())
+                        sentence += 1
+                    if sentence != aligned_sentences:
+                        raise ValueError(
+                            "ElevenLabs alignment exceeds request sentences"
+                        )
                     break
             if not complete:
                 failed = True

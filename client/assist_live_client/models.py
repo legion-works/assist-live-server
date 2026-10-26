@@ -57,6 +57,7 @@ class TTSSentenceEnd:
     """All audio for this zero-based sentence index has arrived."""
 
     sentence: int
+    text_end: int | None = None
 
 
 type TTSItem = TTSFormat | TTSAudio | TTSSentenceEnd
@@ -67,6 +68,7 @@ class HealthCapabilities:
     healthy: bool
     stt: bool = False
     tts: bool = False
+    text_positions: bool = False
 
 
 @dataclass(frozen=True)

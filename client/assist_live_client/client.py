@@ -125,12 +125,12 @@ class AssistLiveClient:
         if not isinstance(capabilities, dict):
             raise ProtocolError("invalid health capabilities")
         fields = {}
-        for key in ("stt", "tts"):
+        for key in ("stt", "tts", "text_positions"):
             item = capabilities.get(key, False)
             if type(item) is not bool:
                 raise ProtocolError("invalid health capability")
             fields[key] = item
-        return HealthCapabilities(value["healthy"], fields["stt"], fields["tts"])
+        return HealthCapabilities(value["healthy"], **fields)
 
     async def open_turn(self, turn: TurnOpen) -> None:
         await self._request("POST", "/v1/turns", data=asdict(turn))
@@ -231,9 +231,12 @@ class AssistLiveClient:
         source: AsyncIterator[bytes] | AsyncIterator[str],
         mode: str,
         voice: str = "",
+        text_positions: bool = False,
     ) -> AsyncGenerator[dict[str, Any] | bytes]:
         sender: asyncio.Task[None] | None = None
         received_terminal = False
+        sent_characters = 0
+        previous_text_end = 0
         try:
             async with self._connection().ws_connect(
                 self.url + "/v1/audio",
@@ -248,6 +251,8 @@ class AssistLiveClient:
                 }
                 if mode == "tts":
                     fields["voice"] = voice
+                    if text_positions:
+                        fields["text_positions"] = True
                 await ws.send_json(encode_control("negotiate", turn_id, **fields))
                 reply = await ws.receive(timeout=MESSAGE_DEADLINE)
                 if reply.type != aiohttp.WSMsgType.TEXT:
@@ -260,6 +265,7 @@ class AssistLiveClient:
                     raise ProtocolError("negotiation refused")
 
                 async def send() -> None:
+                    nonlocal sent_characters
                     seq = 0
                     async for chunk in source:
                         if mode == "stt" and isinstance(chunk, bytes):
@@ -267,6 +273,7 @@ class AssistLiveClient:
                             seq += 1
                         elif mode == "tts" and isinstance(chunk, str):
                             for message in encode_text(turn_id, chunk):
+                                sent_characters += len(decode_control(message)["text"])
                                 await ws.send_str(message)
                         else:
                             raise ProtocolError("invalid audio input")
@@ -291,6 +298,15 @@ class AssistLiveClient:
                         yield pcm
                     elif reply.type == aiohttp.WSMsgType.TEXT:
                         value = decode_control(reply.data, turn_id)
+                        if (
+                            mode == "tts"
+                            and value["type"] == "sentence_end"
+                            and "text_end" in value
+                        ):
+                            text_end = value["text_end"]
+                            if not previous_text_end <= text_end <= sent_characters:
+                                raise ProtocolError("TTS text position out of range")
+                            previous_text_end = text_end
                         if value["type"] in {"end", "error"} or (
                             mode == "stt" and value["type"] == "final"
                         ):
@@ -332,9 +348,14 @@ class AssistLiveClient:
             await stream.aclose()
 
     async def tts(
-        self, turn_id: str, text: AsyncIterator[str], voice: str
+        self,
+        turn_id: str,
+        text: AsyncIterator[str],
+        voice: str,
+        *,
+        text_positions: bool = False,
     ) -> AsyncIterator[bytes]:
-        stream = self._audio(turn_id, text, "tts", voice)
+        stream = self._audio(turn_id, text, "tts", voice, text_positions)
         try:
             async for value in stream:
                 if (
@@ -355,10 +376,15 @@ class AssistLiveClient:
             await stream.aclose()
 
     async def tts_stream(
-        self, turn_id: str, text: AsyncIterator[str], voice: str
+        self,
+        turn_id: str,
+        text: AsyncIterator[str],
+        voice: str,
+        *,
+        text_positions: bool = False,
     ) -> AsyncIterator[TTSItem]:
         """Yield the declared format, audio, and sentence-completion items."""
-        stream = self._audio(turn_id, text, "tts", voice)
+        stream = self._audio(turn_id, text, "tts", voice, text_positions)
         got_format = False
         pending_audio = False
         sentence = 0
@@ -381,7 +407,7 @@ class AssistLiveClient:
                         raise ProtocolError("TTS sentence sequence mismatch")
                     sentence += 1
                     pending_audio = False
-                    yield TTSSentenceEnd(value["sentence"])
+                    yield TTSSentenceEnd(value["sentence"], value.get("text_end"))
             if not got_format or pending_audio:
                 raise ProtocolError("incomplete TTS sentence stream")
         finally:

@@ -3,6 +3,13 @@ import asyncio
 import pytest
 
 
+def test_three_health_arguments_keep_positions_disabled():
+    from assist_live_client import HealthCapabilities
+
+    assert HealthCapabilities(True, True, True).text_positions is False
+    assert HealthCapabilities(False, False, False).text_positions is False
+
+
 @pytest.mark.parametrize(
     "stt,tts", [(False, True), (True, False), (True, True), (False, False)]
 )
@@ -54,11 +61,12 @@ def test_health_capabilities_and_legacy_boolean(
                     assert await response.json() == {
                         "version": 1,
                         "healthy": ready,
-                        "capabilities": {"stt": stt, "tts": tts},
+                        "capabilities": {"stt": stt, "tts": tts, "text_positions": tts},
                     }
                 status = await client.health_capabilities()
                 assert status.stt is stt
                 assert status.tts is tts
+                assert status.text_positions is tts
                 assert status.healthy is ready
         finally:
             await runner.cleanup()
@@ -90,6 +98,7 @@ def test_old_health_body_has_no_audio_capabilities(tmp_path, healthy):
                 assert await client.health_capabilities() == HealthCapabilities(
                     healthy, False, False
                 )
+                assert not (await client.health_capabilities()).text_positions
         finally:
             await runner.cleanup()
 

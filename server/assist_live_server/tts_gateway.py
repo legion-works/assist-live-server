@@ -73,6 +73,7 @@ class TTSGateway:
         voice: str,
         *,
         record: Recorder | None = None,
+        text_positions: bool = False,
     ) -> AsyncIterator[dict[str, Any] | bytes]:
         metadata: dict[str, object] = {
             "part": "tts",
@@ -85,10 +86,12 @@ class TTSGateway:
         first_audio = False
         pending_audio = False
         sentence = 0
+        received = 0
 
         async def input_text() -> AsyncIterator[str]:
-            nonlocal first_text, has_text
+            nonlocal first_text, has_text, received
             async for chunk in text:
+                received += len(chunk)
                 has_text = has_text or bool(chunk.strip())
                 if chunk and not first_text:
                     first_text = True
@@ -122,8 +125,13 @@ class TTSGateway:
                             await record("tts_first_byte", metadata)
                     yield item.data
                 elif isinstance(item, TTSSentenceEnd):
+                    fields = (
+                        {"text_end": item.text_end}
+                        if text_positions and item.text_end is not None
+                        else {}
+                    )
                     yield encode_control(
-                        "sentence_end", turn_id, sentence=item.sentence
+                        "sentence_end", turn_id, sentence=item.sentence, **fields
                     )
                     pending_audio = False
                     sentence = item.sentence + 1
@@ -131,7 +139,10 @@ class TTSGateway:
                 raise ValueError("TTS audio required")
             if pending_audio:
                 # Without alignment, only the end of the remaining audio is known.
-                yield encode_control("sentence_end", turn_id, sentence=sentence)
+                fields = {"text_end": received} if text_positions else {}
+                yield encode_control(
+                    "sentence_end", turn_id, sentence=sentence, **fields
+                )
         except ValueError, RuntimeError:
             if record is not None:
                 await record("tts_failed", metadata)

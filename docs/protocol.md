@@ -14,7 +14,7 @@ It also states: "The first message selects the protocol version and functions."
 Authenticated `GET /health` gives this body:
 
 ```json
-{"version": 1, "healthy": true, "capabilities": {"stt": true, "tts": true}}
+{"version": 1, "healthy": true, "capabilities": {"stt": true, "tts": true, "text_positions": true}}
 ```
 
 `healthy` is `true` only when the store and replay storage are available.
@@ -27,8 +27,14 @@ Audio provider selection does not change `healthy`. A server with no audio funct
 `capabilities.tts` is `true` when a TTS gateway, TTS provider, or legacy backend is available.
 
 The client `health(timeout=0.2)` method keeps its boolean result: protocol version 1 and `healthy=true`.
-`health_capabilities(timeout=0.2)` gives `HealthCapabilities(healthy, stt, tts)`.
-For an older server without `capabilities`, the two function flags default to `false` without an error.
+`health_capabilities(timeout=0.2)` gives `HealthCapabilities(healthy, stt, tts, text_positions)`.
+Missing function flags default to `false` without an error.
+Three positional constructor arguments keep `text_positions=false`.
+
+`capabilities.text_positions` is `true` for a factory TTS provider through the gateway.
+It is `false` for a legacy backend or a server without TTS.
+When this flag is `true`, callers can use `text_positions=True` with the two client TTS methods.
+The default is `False`. Only `True` adds `text_positions: true` to the TTS `negotiate` message.
 
 ## Credentials and identity
 
@@ -282,6 +288,7 @@ The server replies with `negotiated` before it accepts audio.
 `protocol/control.schema.json` specifies the control messages.
 Each control message has `type`, `version`, and `turn_id`.
 The version is an integer. The turn identifier is a UUIDv7.
+
 The parser refuses unknown fields and mismatched turn identifiers.
 `partial` and `final` contain `text`.
 
@@ -324,7 +331,33 @@ The sample rate does not change in one stream. PCM chunks have no WAV header.
 
 After all audio for each sentence, the server sends `sentence_end` with an unsigned `sentence` index.
 Sentence indices start at `0` and increase by one. The last text fragment also gets a sentence index.
-This index identifies the last complete sentence for fallback continuation.
+This index identifies the last complete sentence. It is not a text position.
+
+With `text_positions: true` in TTS negotiation, each provider marker also gives an optional non-negative integer `text_end`.
+This value counts Unicode code points in the concatenation of all request `text` messages, not UTF-8 bytes or graphemes.
+The count starts at the start of the request and ends at the end of that sentence.
+For a sentence that ends at whitespace, the count does not include that whitespace.
+It includes attached quotation marks and brackets.
+
+For the last fragment at input end, the count includes all input characters, with the last whitespace.
+The gateway's last added marker also gives the total input count.
+The values do not decrease. Equal values and `0` are correct.
+
+Piper uses request sentence positions.
+ElevenLabs uses request positions and sends markers after the `alignment` ends for those sentences.
+Provider `alignment` can change number spelling or whitespace. Its offsets do not index request text.
+
+Without the request option, the server sends no `text_end`.
+Legacy backend markers have no position, with or without the request option.
+The client gives a missing position as `None`. A fallback consumer must not guess a position from the sentence index.
+The two client TTS methods refuse negative, boolean, non-integer, decreasing, or not-yet-sent positions with `ProtocolError`.
+The last position lets the fallback continue from `full_text[text_end:]` when the audio formats agree.
+
+Older peers reject unknown keys in the two directions. Thus callers must read the health flag before they request positions.
+At `8f3d60a`, `client/assist_live_client/protocol.py:70,81,92-93` limits request and marker fields.
+At `eb35c61`, the same checks are at `client/assist_live_client/protocol.py:73,84,95-96`.
+The two server revisions call that decoder for negotiation at `server/assist_live_server/app.py:436`.
+The default client request and default server markers keep the earlier fields unchanged.
 
 If a provider ends with audio after its last marker, the gateway adds one last `sentence_end` for that audio.
 The gateway adds no marker while the stream runs. The provider's own markers stay unchanged.
@@ -336,7 +369,7 @@ Empty or whitespace-only text can end cleanly with a format control and no sente
 {"type":"sentence_end","version":1,"turn_id":"01900000-0000-7000-8000-000000000001","sentence":0}
 ```
 
-`AssistLiveClient.tts_stream()` yields `TTSFormat`, `TTSAudio(data)`, and `TTSSentenceEnd(sentence)` items in message order.
+`AssistLiveClient.tts_stream()` yields `TTSFormat`, `TTSAudio(data)`, and `TTSSentenceEnd(sentence, text_end=None)` items in message order.
 It refuses duplicate formats, missing formats, incorrect sentence indices, and audio without a last sentence control.
 Heartbeats stay internal to the client.
 

@@ -70,7 +70,7 @@ def parse_json(raw: str | bytes, maximum: int) -> dict[str, Any]:
 
 
 CONTROL_FIELDS: dict[str, tuple[set[str], set[str]]] = {
-    "negotiate": ({"mode", "capabilities"}, {"voice"}),
+    "negotiate": ({"mode", "capabilities"}, {"voice", "text_positions"}),
     "negotiated": ({"capabilities"}, set()),
     "partial": ({"text"}, set()),
     "final": ({"text"}, set()),
@@ -81,7 +81,7 @@ CONTROL_FIELDS: dict[str, tuple[set[str], set[str]]] = {
     "text": ({"text"}, set()),
     "speaker_result": ({"name", "distance", "destination"}, set()),
     "format": ({"codec", "rate", "channels", "width"}, set()),
-    "sentence_end": ({"sentence"}, set()),
+    "sentence_end": ({"sentence"}, {"text_end"}),
 }
 
 
@@ -112,6 +112,14 @@ def decode_control(raw: str | bytes, turn_id: str | None = None) -> dict[str, An
         or value["mode"] not in value["capabilities"]
     ):
         raise ValueError("unsupported mode")
+    if "text_positions" in value and (
+        type(value["text_positions"]) is not bool or value["mode"] != "tts"
+    ):
+        raise ValueError("invalid text position option")
+    if "text_end" in value and (
+        type(value["text_end"]) is not int or value["text_end"] < 0
+    ):
+        raise ValueError("invalid sentence text position")
     for key in ("text", "name", "destination", "voice", "codec", "code"):
         if key in value and not isinstance(value[key], str):
             raise ValueError("invalid text field")

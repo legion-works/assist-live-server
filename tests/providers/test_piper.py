@@ -26,6 +26,85 @@ def test_public_sentence_assembler_keeps_split_text_boundaries():
     assert "".join(assembler.buffer).strip() == "Next"
 
 
+@pytest.mark.parametrize(
+    ("text", "ends"),
+    [
+        ("One. Two! Tail", [4, 9, 14]),
+        ("Dr. Test uses 3.5 units. Done.", [24, 30]),
+        ("Wait...\n[Yes.] “Fine.” Tail", [7, 14, 22, 27]),
+        ("\U0001f642. e\u0301! \U0001f469\u200d\U0001f680", [2, 6, 10]),
+        ("  No punctuation  ", [18]),
+        ("No punctuation", [14]),
+    ],
+)
+@pytest.mark.parametrize("split", [False, True])
+def test_sentence_positions_index_original_code_points(text, ends, split):
+    async def run():
+        model = Voice()
+        chunks = list(text) if split else [text]
+        items = [
+            item async for item in PiperProvider(model).stream(parts(*chunks), VOICE)
+        ]
+        assert [i.text_end for i in items if isinstance(i, TTSSentenceEnd)] == ends
+
+    asyncio.run(run())
+
+
+def test_random_sentence_positions_preserve_spoken_prefix():
+    import random
+
+    async def run():
+        randomizer = random.Random(314)
+        for _ in range(100):
+            text = (
+                "".join(
+                    randomizer.choice(
+                        [
+                            "One. ",
+                            "Dr. Test!\n",
+                            "3.5 ",
+                            "\U0001f642? ",
+                            "e\u0301 ",
+                            "“Yes.”  ",
+                        ]
+                    )
+                    for _ in range(randomizer.randrange(1, 20))
+                )
+                + "tail  "
+            )
+            if randomizer.choice([False, True]):
+                text = "".join(
+                    randomizer.choices(
+                        "abc.?! \n\t…'\"()[]\U0001f642e\u0301"
+                        "\U0001f469\u200d\U0001f680",
+                        k=randomizer.randrange(1, 200),
+                    )
+                )
+            cuts = sorted(
+                {
+                    0,
+                    len(text),
+                    *(randomizer.randrange(len(text) + 1) for _ in range(20)),
+                }
+            )
+            chunks = [text[a:b] for a, b in zip(cuts[:-1], cuts[1:], strict=True)]
+            model = Voice()
+            spoken = []
+            previous = 0
+            async for item in PiperProvider(model).stream(parts(*chunks), VOICE):
+                if isinstance(item, TTSAudio):
+                    spoken.append(item.data.decode("utf-16le"))
+                elif isinstance(item, TTSSentenceEnd):
+                    assert previous <= item.text_end <= len(text)
+                    assert " ".join(text[: item.text_end].split()) == " ".join(
+                        " ".join(spoken).split()
+                    )
+                    previous = item.text_end
+            assert not text[previous:].strip()
+
+    asyncio.run(run())
+
+
 class Voice:
     config = SimpleNamespace(sample_rate=22050)
 
@@ -286,7 +365,7 @@ def test_opening_quotes_and_brackets_do_not_break_abbreviations(opening):
     text = f"{opening}Dr. Smith arrived late.{closing}, she noted."
 
     async def run():
-        assert [s async for s in sentences(parts(*text))] == [text]
+        assert [s async for s, _ in sentences(parts(*text))] == [text]
 
     asyncio.run(run())
 
@@ -297,7 +376,7 @@ def test_curly_quoted_abbreviation_from_reply():
     text = "“Dr. Watson came home.”"
 
     async def run():
-        assert [s async for s in sentences(parts(*text))] == [text]
+        assert [s async for s, _ in sentences(parts(*text))] == [text]
 
     asyncio.run(run())
 
@@ -309,7 +388,7 @@ def test_long_dotted_initial_token_keeps_its_full_prefix_meaning(prefix):
     token = prefix + "a." * 100
 
     async def run():
-        result = [s async for s in sentences(parts(*f"{token} next. "))]
+        result = [s async for s, _ in sentences(parts(*f"{token} next. "))]
         assert result == ([token, "next."] if prefix else [f"{token} next."])
 
     asyncio.run(run())
@@ -321,7 +400,7 @@ def test_unfinished_fragment_cap_survives_small_parts():
     async def run():
         text = "a. " * 5461 + "a"
         assert len(text) == 16384
-        assert [s async for s in sentences(parts(text))] == [text]
+        assert [s async for s, _ in sentences(parts(text))] == [text]
         with pytest.raises(ValueError, match="16384"):
             [s async for s in sentences(parts(text, "a"))]
 
@@ -334,7 +413,7 @@ def _assembly_metrics(mode):
     async def collect(size):
         text = ("a. " * ((size + 2) // 3))[:size]
         start = time.perf_counter()
-        result = [s async for s in sentences(parts(*text))]
+        result = [s async for s, _ in sentences(parts(*text))]
         elapsed = (time.perf_counter() - start) * 1000
         assert result == [text.strip()]
         return elapsed

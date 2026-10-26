@@ -6,6 +6,85 @@ from uuid import UUID
 import pytest
 
 
+@pytest.mark.parametrize(
+    "mode,option,valid",
+    [
+        ("tts", True, True),
+        ("tts", False, True),
+        ("tts", 1, False),
+        ("tts", None, False),
+        ("stt", True, False),
+    ],
+)
+def test_text_position_request_option_schema(turn_id, mode, option, valid):
+    from assist_live_client.protocol import decode_control
+    from jsonschema import Draft202012Validator
+
+    root = Path(__file__).resolve().parents[2]
+    validator = Draft202012Validator(
+        json.loads((root / "protocol/control.schema.json").read_text())
+    )
+    message = {
+        "type": "negotiate",
+        "version": 1,
+        "turn_id": turn_id,
+        "mode": mode,
+        "capabilities": [mode],
+        "text_positions": option,
+    }
+    assert bool(list(validator.iter_errors(message))) is not valid
+    if valid:
+        assert decode_control(json.dumps(message)) == message
+    else:
+        with pytest.raises(ValueError):
+            decode_control(json.dumps(message))
+
+
+@pytest.mark.parametrize("position", [0, 17, 2**64])
+def test_sentence_position_schema_and_decoder(turn_id, position):
+    from assist_live_client.protocol import decode_control, encode_control
+    from jsonschema import Draft202012Validator
+
+    root = Path(__file__).resolve().parents[2]
+    validator = Draft202012Validator(
+        json.loads((root / "protocol/control.schema.json").read_text())
+    )
+    message = {
+        "type": "sentence_end",
+        "version": 1,
+        "turn_id": turn_id,
+        "sentence": 0,
+        "text_end": position,
+    }
+    assert not list(validator.iter_errors(message))
+    assert decode_control(json.dumps(message)) == message
+    assert (
+        encode_control("sentence_end", turn_id, sentence=0, text_end=position)
+        == message
+    )
+
+
+@pytest.mark.parametrize("position", [-1, True, False, 1.5, "1", None])
+def test_sentence_position_decoder_refuses_invalid(turn_id, position):
+    from assist_live_client.protocol import decode_control
+    from jsonschema import Draft202012Validator
+
+    root = Path(__file__).resolve().parents[2]
+    validator = Draft202012Validator(
+        json.loads((root / "protocol/control.schema.json").read_text())
+    )
+    message = {
+        "type": "sentence_end",
+        "version": 1,
+        "turn_id": turn_id,
+        "sentence": 0,
+        "text_end": position,
+    }
+    assert list(validator.iter_errors(message))
+    with pytest.raises(ValueError):
+        decode_control(json.dumps(message))
+
+
 def test_audio_network_order_and_bounds(turn_id):
     from assist_live_client.protocol import decode_audio, encode_audio
 
