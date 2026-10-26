@@ -2504,7 +2504,8 @@ Date: 2026-10-26.
 
 The protocol contract is in `docs/protocol.md`.
 Request positions count Unicode code points, not encoded bytes or graphemes.
-Piper gives positions from the sentence assembler. ElevenLabs uses request positions after the `alignment` ends for each sentence.
+Piper gives positions from the sentence assembler.
+ElevenLabs gives a request position only when the sentence text from `alignment` agrees with the request sentence after whitespace normalization.
 The last added gateway marker gives the full input count.
 Legacy backend markers have no position.
 
@@ -2565,17 +2566,56 @@ The load averages before the complete gates were `6.86, 7.67, 8.74`, below the l
 Formatting checked `101` files. Ruff gave `All checks passed!`.
 Mypy gave `Success: no issues found in 43 source files`.
 The bootstrap, isolated client and server packages, and asset license checks gave `PASS`.
-Gitleaks found no leaks in files or in `45` commits.
+Gitleaks found no leaks in files or checked history.
 
 The embedded public-tree command gave `NOT CHECKED public tree` because this worktree has no sibling checkout for that tool.
 The canonical command above ran the full check:
 
 ```text
 PASS own Git root
-PASS history secrets commits=45
+PASS history secrets
 PASS public data matches=0
 ```
 
 The publishable-file count check found `denylist=0 home_paths=0 private_ipv4=0`.
 The historical compatibility check gave `PASS` for each revision and each default TTS method.
 No cloud service or paid API was necessary.
+
+## TTS sentence position proof
+
+Date: 2026-10-26.
+
+The contract is in `docs/protocol.md`.
+An ElevenLabs position is correct only when request and `alignment` sentence text agrees after whitespace normalization.
+The first mismatch stops positions for that marker and each subsequent marker.
+`normalizedAlignment` without `alignment` also stops positions for the remaining part of the stream.
+The audio and sentence markers continue when text does not agree or the provider gives more sentences.
+
+Tests include month and abbreviation expansion, decimal spelling, different sentence structures in the two `alignment` fields, and a mismatch in the middle.
+They also check whitespace normalization, divided words, and the same sentence after positions stop.
+The two client TTS methods ignore incoming positions without the request option.
+With the option, the position checks apply.
+
+The initial full suite gave `29 failed, 831 passed in 25.21s`.
+The document test refused the history count. The other failures showed unproved positions and a turn failure for more provider sentences.
+The public record does not keep a commit count for these checks.
+
+The full suite then gave `862 passed in 27.52s`.
+The mutation checks gave `PASS 9/9 repair mutations killed by the full suite; all source files restored`.
+The tests find a preference for `normalizedAlignment` and missing sentence text checks.
+They find position recovery after a mismatch and turn failures when the provider gives more sentences.
+They also find unrequested client positions and acceptance of decimal integer tokens.
+
+Commands from the repository root:
+
+```sh
+export UV_LINK_MODE=copy
+export ASSIST_LIVE_MODEL_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/assist-live/turn"
+task check
+UV_PROJECT_ENVIRONMENT="$FLOOR_ENV" uv run --locked --python 3.14.2 pytest -q
+unshare -rn sh -c 'ip link set lo up && UV_OFFLINE=1 uv run --locked pytest -q'
+uv run --project "$WORKSPACE/assist-live" python "$WORKSPACE/assist-live/tools/check_public_tree.py" --history --root . --private-denylist "$PRIVATE_DENYLIST"
+```
+
+The full suite runs after all file changes, with this document included.
+The full checks run again after each result entry.

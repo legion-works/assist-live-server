@@ -106,8 +106,9 @@ class ElevenLabsProvider:
         aligned = False
         assembler = SentenceAssembler()
         request_assembler = SentenceAssembler()
-        positions: deque[int] = deque()
-        aligned_sentences = 0
+        request_sentences: deque[tuple[str, int]] = deque()
+        alignment_sentences: deque[str] = deque()
+        positions_proved = True
         sentence = 0
         audio_bytes = 0
         alignment_bytes = 0
@@ -138,8 +139,11 @@ class ElevenLabsProvider:
                         if part:
                             if sent_characters + len(part) > MAX_TEXT_CHARACTERS:
                                 raise ValueError("ElevenLabs text limit exceeded")
-                            positions.extend(
-                                end for _, end in request_assembler.feed_positions(part)
+                            request_sentences.extend(
+                                (" ".join(sentence.split()), end)
+                                for sentence, end in request_assembler.feed_positions(
+                                    part
+                                )
                             )
                             await ws.send_json({"text": part})
                             sent_characters += len(part)
@@ -150,7 +154,12 @@ class ElevenLabsProvider:
                             deadline = started + allowance
                             audio_limit = int(allowance * bytes_per_second)
                     if "".join(request_assembler.buffer).strip():
-                        positions.append(request_assembler.received)
+                        request_sentences.append(
+                            (
+                                " ".join("".join(request_assembler.buffer).split()),
+                                request_assembler.received,
+                            )
+                        )
                     await ws.send_json({"text": " ", "flush": True})
                     await ws.send_json({"text": ""})
                     input_ended = True
@@ -201,7 +210,10 @@ class ElevenLabsProvider:
                         if monotonic() >= deadline:
                             raise ValueError("ElevenLabs stream deadline exceeded")
                         yield TTSAudio(pcm[offset : offset + MAX_PCM])
-                alignment = value.get("alignment") or value.get("normalizedAlignment")
+                alignment = value.get("alignment")
+                if alignment is None and value.get("normalizedAlignment") is not None:
+                    positions_proved = False
+                    alignment = value["normalizedAlignment"]
                 if alignment is not None:
                     chars = alignment["chars"]
                     if (
@@ -217,25 +229,39 @@ class ElevenLabsProvider:
                     if alignment_bytes > MAX_ALIGNMENT_BYTES:
                         raise ValueError("ElevenLabs alignment limit exceeded")
                     aligned = True
-                    # Alignment can change spelling. Only request positions index
-                    # the original text. Alignment controls when markers leave.
-                    aligned_sentences += len(assembler.feed(alignment_text))
-                    while positions and sentence < aligned_sentences:
-                        if monotonic() >= deadline:
-                            raise ValueError("ElevenLabs stream deadline exceeded")
-                        yield TTSSentenceEnd(sentence, positions.popleft())
-                        sentence += 1
+                    alignment_sentences.extend(assembler.feed(alignment_text))
                 if value.get("isFinal") is True:
                     complete = True
                     if aligned and "".join(assembler.buffer).strip():
-                        aligned_sentences += 1
-                    while positions and sentence < aligned_sentences:
-                        yield TTSSentenceEnd(sentence, positions.popleft())
-                        sentence += 1
-                    if sentence != aligned_sentences:
-                        raise ValueError(
-                            "ElevenLabs alignment exceeds request sentences"
-                        )
+                        alignment_sentences.append("".join(assembler.buffer).strip())
+                while alignment_sentences:
+                    if (
+                        positions_proved
+                        and not request_sentences
+                        and not input_ended
+                        and not complete
+                    ):
+                        break
+                    if monotonic() >= deadline:
+                        raise ValueError("ElevenLabs stream deadline exceeded")
+                    aligned_sentence = alignment_sentences.popleft()
+                    text_end = None
+                    # A mismatch breaks the proof for all subsequent sentences.
+                    # Normalized alignment cannot prove a request position.
+                    if positions_proved:
+                        if request_sentences:
+                            requested_sentence, endpoint = request_sentences.popleft()
+                            if " ".join(aligned_sentence.split()) == requested_sentence:
+                                text_end = endpoint
+                            else:
+                                positions_proved = False
+                        else:
+                            positions_proved = False
+                    if not positions_proved:
+                        request_sentences.clear()
+                    yield TTSSentenceEnd(sentence, text_end)
+                    sentence += 1
+                if complete:
                     break
             if not complete:
                 failed = True

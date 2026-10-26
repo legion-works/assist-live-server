@@ -85,7 +85,9 @@ CONTROL_FIELDS: dict[str, tuple[set[str], set[str]]] = {
 }
 
 
-def decode_control(raw: str | bytes, turn_id: str | None = None) -> dict[str, Any]:
+def decode_control(
+    raw: str | bytes, turn_id: str | None = None, *, text_positions: bool = True
+) -> dict[str, Any]:
     value = parse_json(raw, MAX_CONTROL)
     kind = value.get("type")
     if not isinstance(kind, str) or kind not in CONTROL_FIELDS:
@@ -94,6 +96,8 @@ def decode_control(raw: str | bytes, turn_id: str | None = None) -> dict[str, An
     required = required | {"type", "version", "turn_id"}
     if not required <= value.keys() or value.keys() - required - optional:
         raise ValueError("invalid control fields")
+    if kind == "sentence_end" and not text_positions:
+        value.pop("text_end", None)
     if type(value["version"]) is not int or value["version"] != VERSION:
         raise ValueError("unsupported protocol version")
     turn_uuid(value["turn_id"])

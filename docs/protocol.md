@@ -334,6 +334,10 @@ Sentence indices start at `0` and increase by one. The last text fragment also g
 This index identifies the last complete sentence. It is not a text position.
 
 With `text_positions: true` in TTS negotiation, each provider marker also gives an optional non-negative integer `text_end`.
+
+`text_end` must be a JSON integer without a decimal point or exponent, such as `1`, not `1.0` or `1e0`.
+The schema cannot express this difference. The decoder applies this stricter rule.
+
 This value counts Unicode code points in the concatenation of all request `text` messages, not UTF-8 bytes or graphemes.
 The count starts at the start of the request and ends at the end of that sentence.
 For a sentence that ends at whitespace, the count does not include that whitespace.
@@ -344,10 +348,17 @@ The gateway's last added marker also gives the total input count.
 The values do not decrease. Equal values and `0` are correct.
 
 Piper uses request sentence positions.
-ElevenLabs uses request positions and sends markers after the `alignment` ends for those sentences.
-Provider `alignment` can change number spelling or whitespace. Its offsets do not index request text.
+ElevenLabs gives a position only when the provider's `alignment` text agrees with the request sentence text after whitespace normalization.
+It compares the text of each sentence, not sentence counts.
+After the first mismatch, that marker and each subsequent marker have no position.
+
+A message with only `normalizedAlignment` also stops positions for the remaining part of that stream.
+When a message has the two keys, the provider uses `alignment` and ignores `normalizedAlignment`.
+Provider sentences without a request sentence have no position. Their audio and markers continue without a turn failure.
 
 Without the request option, the server sends no `text_end`.
+Without this option, the client ignores an incoming `text_end` and gives `None`, in the two TTS methods.
+
 Legacy backend markers have no position, with or without the request option.
 The client gives a missing position as `None`. A fallback consumer must not guess a position from the sentence index.
 The two client TTS methods refuse negative, boolean, non-integer, decreasing, or not-yet-sent positions with `ProtocolError`.

@@ -297,7 +297,11 @@ class AssistLiveClient:
                         expected_seq += 1
                         yield pcm
                     elif reply.type == aiohttp.WSMsgType.TEXT:
-                        value = decode_control(reply.data, turn_id)
+                        value = decode_control(
+                            reply.data,
+                            turn_id,
+                            text_positions=mode != "tts" or text_positions,
+                        )
                         if (
                             mode == "tts"
                             and value["type"] == "sentence_end"

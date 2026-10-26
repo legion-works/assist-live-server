@@ -47,6 +47,7 @@ def test_gateway_positions_are_opt_in_and_cover_all_input(turn_id, enabled, cove
 
 
 @pytest.mark.parametrize("method", ["tts", "tts_stream"])
+@pytest.mark.parametrize("text_positions", [False, True])
 @pytest.mark.parametrize(
     "positions,reject",
     [
@@ -63,7 +64,7 @@ def test_gateway_positions_are_opt_in_and_cover_all_input(turn_id, enabled, cove
     ],
 )
 def test_client_refuses_invalid_sentence_positions(
-    tmp_path, turn_id, method, positions, reject
+    tmp_path, turn_id, method, positions, reject, text_positions
 ):
     import json
 
@@ -75,7 +76,8 @@ def test_client_refuses_invalid_sentence_positions(
         async def peer(request):
             ws = web.WebSocketResponse()
             await ws.prepare(request)
-            await ws.receive_json()
+            negotiation = await ws.receive_json()
+            assert negotiation.get("text_positions", False) is text_positions
             await ws.send_json(
                 encode_control("negotiated", turn_id, capabilities=["tts"])
             )
@@ -123,8 +125,10 @@ def test_client_refuses_invalid_sentence_positions(
                 async def text():
                     yield "\U0001f642. x"
 
-                stream = getattr(client, method)(turn_id, text(), "voice")
-                if reject:
+                stream = getattr(client, method)(
+                    turn_id, text(), "voice", text_positions=text_positions
+                )
+                if reject and text_positions:
                     with pytest.raises(ProtocolError):
                         [item async for item in stream]
                 else:
@@ -134,7 +138,7 @@ def test_client_refuses_invalid_sentence_positions(
                     if method == "tts_stream":
                         assert [
                             i.text_end for i in items if isinstance(i, TTSSentenceEnd)
-                        ] == positions
+                        ] == (positions if text_positions else [None] * len(positions))
         finally:
             await runner.cleanup()
 

@@ -19,7 +19,7 @@ async def parts(*values):
         yield value
 
 
-def test_normalized_alignment_uses_request_sentence_positions(cloud_ws_server):
+def test_normalized_alignment_has_no_request_sentence_positions(cloud_ws_server):
     async def run():
         async def handler(request):
             ws = web.WebSocketResponse()
@@ -52,36 +52,117 @@ def test_normalized_alignment_uses_request_sentence_positions(cloud_ws_server):
             ]
             assert [
                 item.text_end for item in items if isinstance(item, TTSSentenceEnd)
-            ] == [8, 11, 18]
+            ] == [None, None, None]
 
     asyncio.run(run())
 
 
-def test_alignment_cannot_claim_more_request_sentences(cloud_ws_server):
+@pytest.mark.parametrize(
+    "request_text,frames,expected",
+    [
+        (
+            "Jan. 5 is the date. ",
+            [{"normalizedAlignment": "January 5 is the date. "}],
+            [None],
+        ),
+        (
+            "Jan. 5 is the date. ",
+            [
+                {
+                    "alignment": "Jan. 5 is the date. ",
+                    "normalizedAlignment": "January 5 is the date. ",
+                }
+            ],
+            [4, 19],
+        ),
+        (
+            "Dr. Test arrived. Tail.",
+            [{"alignment": "Doctor Test arrived. Tail."}],
+            [None, None],
+        ),
+        (
+            "Set 3.5. Next.",
+            [{"alignment": "Set three point five. Next."}],
+            [None, None],
+        ),
+        ("One. Two. Three.", [{"alignment": "One. Changed. Three."}], [4, None, None]),
+        (
+            "One. Two. Three.",
+            [
+                {"alignment": "One. "},
+                {"normalizedAlignment": "Two. "},
+                {"alignment": "Three."},
+            ],
+            [4, None, None],
+        ),
+        (
+            "One. Two. Three.",
+            [
+                {"alignment": "One. "},
+                {"alignment": "Cha"},
+                {"alignment": "nged. Three."},
+            ],
+            [4, None, None],
+        ),
+        (
+            "One.  \nTwo.\t\U0001f642!",
+            [{"alignment": " One. \tTw"}, {"alignment": "o. \U0001f642!"}],
+            [4, 11, 14],
+        ),
+        ("One.", [{"alignment": "One. Two."}], [4, None]),
+        ("One.", [{"normalizedAlignment": "One. Two."}], [None, None]),
+        ("One. Two. Three.", [{"alignment": "One. Bad. Three."}], [4, None, None]),
+        ("Tail  ", [{"alignment": "Tail"}], [6]),
+    ],
+    ids=[
+        "month-expansion",
+        "raw-precedes-normalized",
+        "abbreviation-expansion",
+        "decimal-expansion",
+        "middle-mismatch",
+        "normalized-disables-later",
+        "split-middle-mismatch",
+        "whitespace-and-split-word",
+        "extra-raw-sentence",
+        "extra-normalized-sentence",
+        "same-length-middle-mismatch",
+        "last-fragment-total",
+    ],
+)
+def test_alignment_positions_require_matching_request_sentences(
+    cloud_ws_server, request_text, frames, expected
+):
     async def run():
         async def handler(request):
             ws = web.WebSocketResponse()
             await ws.prepare(request)
             async for message in ws:
                 if message.json() == {"text": ""}:
-                    chars = list("One. Two.")
-                    await ws.send_json(
-                        {
-                            "alignment": {
-                                "chars": chars,
-                                "charStartTimesMs": [0] * len(chars),
-                                "charDurationsMs": [1] * len(chars),
-                            },
-                            "isFinal": True,
-                        }
-                    )
+                    for frame in frames:
+                        payload = {"audio": base64.b64encode(b"\x01\0").decode()}
+                        for key, text in frame.items():
+                            payload[key] = {
+                                "chars": list(text),
+                                "charStartTimesMs": [0] * len(text),
+                                "charDurationsMs": [1] * len(text),
+                            }
+                        await ws.send_json(payload)
+                    await ws.send_json({"isFinal": True})
                     await ws.close()
             return ws
 
         async with cloud_ws_server(handler) as fake:
             provider = ElevenLabsProvider(KEY, endpoint=fake.url)
-            with pytest.raises(ElevenLabsError):
-                [item async for item in provider.stream(parts("One."), "test-voice")]
+            items = [
+                item
+                async for item in provider.stream(parts(*request_text), "test-voice")
+            ]
+            markers = [item for item in items if isinstance(item, TTSSentenceEnd)]
+            assert [item.text_end for item in markers] == expected
+            assert [item.sentence for item in markers] == list(range(len(expected)))
+            assert b"".join(
+                item.data for item in items if isinstance(item, TTSAudio)
+            ) == b"\x01\0" * len(frames)
 
     asyncio.run(run())
 
@@ -417,7 +498,7 @@ def test_pcm_splitting_alignment_tail_and_empty_parts(cloud_ws_server):
         chunks = [item.data for item in items if isinstance(item, TTSAudio)]
         assert [len(chunk) for chunk in chunks] == [32000, 8000]
         assert b"".join(chunks) == pcm
-        assert items[-1] == TTSSentenceEnd(0, 4)
+        assert items[-1] == TTSSentenceEnd(0, None)
         assert messages[1:] == [
             {"text": "Tail"},
             {"text": " ", "flush": True},
