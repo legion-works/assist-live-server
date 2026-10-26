@@ -82,3 +82,14 @@ The client package has no model runtime or asset manifest.
 - `docs/providers/tts-local.md`: local voice, audio format, executor limits, fallback, and latency measurements.
 
 The client `models.py` also holds the typed TTS items. The client has no Piper dependency.
+
+## Cloud voice adapters
+
+- `server/assist_live_server/providers/deepgram.py`: explicit Nova-3 STT sessions with per-connection opt-out and header authentication.
+- `server/assist_live_server/providers/elevenlabs.py`: explicit Flash TTS with text streaming, flush, PCM, and service character times.
+- `tests/providers/test_deepgram.py`: fake WebSocket protocol, reconnect options, cancellation, credential protection, and local defaults.
+- `tests/providers/test_elevenlabs.py`: fake WebSocket protocol, first audio, text order, flush, cancellation, and credential protection.
+- `tests/providers/conftest.py`: local decode fixtures and a fake-server network limit.
+- `docs/providers/cloud.md`: adapter contracts, provider data use, and public source text with retrieval dates.
+
+The local provider factories do not include cloud adapters. Credentials alone do not select a cloud service.

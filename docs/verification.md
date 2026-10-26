@@ -2140,3 +2140,114 @@ Two mutation checks tested the new guards:
 
 The second mutation made the maximum-input and scaling assertions give unsatisfactory results, not only subprocess timeouts.
 The parser agreed with its saved snapshot after restoration.
+
+## Explicit cloud voice adapters
+
+Date: 2026-10-25 (UTC).
+The project is experimental and has no release.
+The provider data-use and protocol sources are in [Cloud voice services](providers/cloud.md).
+
+The initial command was:
+
+```sh
+uv run pytest tests/providers/test_deepgram.py tests/providers/test_elevenlabs.py -q
+```
+
+Initial result:
+
+```text
+ModuleNotFoundError: No module named 'assist_live_server.providers.deepgram'
+ModuleNotFoundError: No module named 'assist_live_server.providers.elevenlabs'
+2 errors in 0.17s
+```
+
+The adapters supply constructors without cloud factory entries.
+Each connection sends credentials only in the documented authentication header.
+Tests use fake WebSocket servers with the documented request and response fields.
+The fake-server fixture refuses other TCP destinations and DNS queries.
+Its teardown also finds refused connections when an adapter catches their errors.
+
+The adapter tests examine reconnect opt-out, first audio before input end, text order, flush, cancellation, and credential protection.
+Other tests examine redirect refusal, character times, PCM chunk limits, and cleanup after the last response.
+These tests are protocol checks, not live latency measurements.
+
+Live checks: `NOT RUN (needs operator credentials and spend approval)`.
+
+### Cloud adapter repository checks
+
+Date: 2026-10-26 (UTC).
+The model cache uses `${XDG_CACHE_HOME:-$HOME/.cache}/assist-live/turn` through `ASSIST_LIVE_MODEL_CACHE`.
+The environment also sets `UV_LINK_MODE=copy`.
+
+Command:
+
+```sh
+uv run pytest tests/providers/test_deepgram.py tests/providers/test_elevenlabs.py -q && task check && uv run python tools/check_assets.py --manifest assets/manifest.json --release
+```
+
+Result:
+
+```text
+53 passed in 0.46s
+93 files already formatted
+All checks passed!
+PASS CI boundaries
+Success: no issues found in 39 source files
+PASS pinned turn models fetched with SHA-256 checks
+634 passed in 31.13s
+PASS server bootstrap
+PASS isolated client and server packages
+PASS isolated client and server packages
+PASS asset licenses
+NOT CHECKED public tree
+PASS asset licenses
+```
+
+Gitleaks found no leaks in files or the 37-commit history.
+The relative public-tree task has no sibling integration checkout. The explicit canonical check below supplies this gate.
+
+Command:
+
+```sh
+UV_PROJECT_ENVIRONMENT=$SCRATCH/venv3142 uv run --locked --python 3.14.2 pytest -q
+```
+
+Result: `634 passed in 36.01s`.
+
+Command:
+
+```sh
+unshare -rn sh -c 'ip link set lo up && UV_OFFLINE=1 uv run --locked pytest -q'
+```
+
+Result: `634 passed in 31.33s`.
+The suite completed with no external network and with loopback available for fake servers.
+
+The ASD-STE100 checker found 0 findings in `docs/providers/cloud.md`, `STRUCTURE.md`, and this record.
+
+Command:
+
+```sh
+uv run --project $WORKSPACE/assist-live python $WORKSPACE/assist-live/tools/check_public_tree.py --history --root . --private-denylist $WORKSPACE/.opencode/private/denylist.txt
+```
+
+Result:
+
+```text
+PASS own Git root
+PASS history secrets commits=37
+PASS public data matches=0
+```
+
+Six mutation checks made isolated copies of the server source.
+The Python parser accepted each copy. Each test loaded its copy from the isolated path.
+Each mutation caused one unsatisfactory behavioral test result:
+
+1. Remove opt-out on reconnect: unsatisfactory request-option assertion.
+2. Put the credential in a log: unsatisfactory credential-protection assertion.
+3. Use the default chunk schedule: unsatisfactory initial-message assertion.
+4. Add a second 120-character text buffer: first-audio timeout before input end.
+5. Remove flush: unsatisfactory flush-message assertion.
+6. Call a cloud constructor from the default factory: unsatisfactory default-provider assertion.
+
+No mutation changed the working source. No commit or live cloud check occurred.
