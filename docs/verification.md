@@ -2287,3 +2287,147 @@ Eleven mutation checks removed transcript limits, `alignment` limits, output bud
 Each changed copy gave an unsatisfactory test result. The working source did not change during the checks.
 The logging default stays the provider default, `enable_logging=True`. An explicit adapter option can request `False` for an eligible account.
 The provider contract records the public logging, account restriction, and PCM format sources.
+
+## Provider destinations and speaker metadata
+
+Date: 2026-10-26 (UTC).
+
+Initial command:
+
+```sh
+uv run pytest tests/test_destinations.py tests/test_speaker.py tests/contract/test_streaming_tts.py -q
+```
+
+Initial result: `22 failed, 8 passed`.
+The failures included `ModuleNotFoundError: No module named 'assist_live_server.destinations'`.
+
+The same command after implementation gave `39 passed`.
+
+Expanded command:
+
+```sh
+uv run pytest tests/test_destinations.py tests/test_speaker.py tests/test_audio_gateway.py tests/contract/test_streaming_tts.py -q
+```
+
+Result: `48 passed`.
+The tests use synthetic PCM and local fake HTTP and WebSocket services.
+No paid cloud request or live Murdock request ran.
+The Murdock request shape comes from release `v0.13.0`, as recorded in `configuration.md`.
+
+The health matrix checks STT-only, TTS-only, full, and disabled configurations.
+Its initial TTS-only result was `assert False is ((False or True))`.
+The client and SQLite tests check unchanged transcripts, speaker metadata, and the two transcript options.
+Speaker names use NFC, 1 to 64 characters, and at most 256 UTF-8 bytes.
+Invalid names have no stored value and no truncated value. Counters identify each drop cause without the name.
+
+The DNS tests check configuration answers and connection answers independently.
+They also check the HTTP host, the explicit TLS name, and the destination class of the selected connection.
+Standard address definitions use integer octets and prefix lengths, not deployment addresses.
+
+The Python parser accepted 23 isolated source mutations. Each mutation caused a behavioral test failure:
+
+1. Check DNS only at configuration load.
+2. Use `is_private` as the address policy.
+3. Follow an HTTP redirect.
+4. Load a cloud provider because of a credential.
+5. Accept a cloud provider with `local_only`.
+6. Add a speaker prefix to the transcript.
+7. Write speaker audio to a file.
+8. Remove TTS from health.
+9. Set transcript storage to `true` by default.
+10. Remove NFC from speaker names.
+11. Accept control characters in speaker names.
+12. Accept a speaker name one character above the limit.
+13. Accept an empty speaker name.
+14. Accept whitespace at the start or end of a speaker name.
+15. Accept a display name in a different event `stage`.
+16. Accept a display name in the provider key.
+17. Do not count a dropped speaker name.
+18. Decrease the speaker-name byte limit by one.
+19. Remove the factory destination check at request selection.
+20. Put a speaker name in a log message.
+21. Put a speaker name in a metric dimension.
+22. Truncate a speaker name before storage.
+23. Use the pinned address as the TLS name.
+
+The working source did not change for these tests.
+
+Repository commands:
+
+```sh
+ASSIST_LIVE_MODEL_CACHE="$MODEL_CACHE" task check
+UV_LINK_MODE=copy ASSIST_LIVE_MODEL_CACHE="$MODEL_CACHE" UV_PROJECT_ENVIRONMENT="$FLOOR_ENV" uv run --locked --python 3.14.2 pytest tests/ -q
+ASSIST_LIVE_MODEL_CACHE="$MODEL_CACHE" unshare -rn sh -c 'ip link set lo up && UV_OFFLINE=1 uv run --locked pytest -q'
+```
+
+The first repository, floor-Python, and network-blocked runs each had one unsatisfactory documentation check:
+`test_profile_documentation_records_particle_cost_without_fixed_ref_counts`.
+Formatting, lint, CI boundaries, and mypy gave satisfactory results. The network-blocked run had loopback enabled.
+
+The ASD-STE100 check found no findings in `configuration.md`, `protocol.md`, or `STRUCTURE.md`.
+The canonical public-tree check gave `PASS public data matches=0`.
+No commit occurred.
+
+Subsequent complete runs on 2026-10-26 gave these results:
+
+```text
+task check: 697 passed in 23.85s
+Python 3.14.2: 697 passed in 24.21s
+Network-blocked suite: 697 passed in 22.25s
+```
+
+The full repository command ran from `07:21:05Z` to `07:21:35Z`.
+The floor command ran from `07:21:05Z` to `07:21:30Z`.
+The network-blocked command ran from `07:21:56Z` to `07:22:19Z`.
+The documentation history-count check gave a satisfactory result in each run.
+The repository check also gave `PASS server bootstrap`, `PASS isolated client and server packages`, and `PASS asset licenses`.
+Gitleaks found no leaks in the working tree or history.
+
+The worktree has no adjacent copy of the canonical checker. Its `task check` public-tree step reports `NOT CHECKED public tree`.
+The canonical command below checks the working tree and history with the private denylist:
+
+```sh
+uv run --project "$WORKSPACE/assist-live" python "$WORKSPACE/assist-live/tools/check_public_tree.py" --history --root . --private-denylist "$WORKSPACE/.opencode/private/denylist.txt"
+```
+
+Result: `PASS public data matches=0`.
+
+## Health readiness and backend synthesis
+
+Date: 2026-10-26 (UTC).
+
+Initial command:
+
+```sh
+uv run pytest tests/contract/test_health.py tests/contract/test_streaming_tts.py -q
+```
+
+Initial result: `9 failed, 11 passed`.
+The response did not have the nested `capabilities` object. The client did not export `HealthCapabilities`.
+The legacy backend also sent a 16000 Hz format for declared 22050 Hz audio.
+
+Complete command:
+
+```sh
+uv run pytest tests/test_destinations.py tests/test_speaker.py tests/test_audio_gateway.py tests/contract/test_streaming_tts.py tests/contract/test_health.py -q
+```
+
+Result: `62 passed`.
+The health body has `version`, `healthy`, and `capabilities` only.
+`healthy` shows store and replay readiness without a provider condition.
+The client keeps `health()` and adds `health_capabilities()`. An older body gives two `false` function flags without an error.
+
+The legacy backend stays available for embedding code and uses the TTS gateway.
+Its `audio_format` field declares the sample rate. Each sentence must end with `sentence_end`.
+The gateway refuses a missing format, a missing last marker, and an incorrect sentence index.
+An `error` response before audio also stops the client sender before cleanup.
+
+Five more isolated checks gave unsatisfactory behavioral test results:
+
+24. Make legacy output use 16000 Hz.
+25. Accept a backend sentence without its last marker.
+26. Accept an incorrect backend sentence index.
+27. Make health readiness use an audio provider condition.
+28. Advertise audio functions for an older server without `capabilities`.
+
+All 28 changed copies gave the necessary test failure. The working source did not change during these checks.

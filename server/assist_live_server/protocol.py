@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from aiohttp import WSMsgType, web
-from assist_live_client.models import TimingEvent, TurnOpen, TurnRecord
+from assist_live_client.models import TimingEvent, TTSFormat, TurnOpen, TurnRecord
 from assist_live_client.protocol import parse_json
 
 from .auth import Registry, verify_event
@@ -36,6 +36,14 @@ class TurnStore(Protocol):
 
 
 class AudioBackend(Protocol):
+    """Declare the PCM format and end each audio sentence with sentence_end.
+
+    TTS supplies raw PCM and sentence_end controls with indices from 0.
+    The gateway sends audio_format first. It refuses a missing sentence_end.
+    """
+
+    audio_format: TTSFormat
+
     def stt(
         self, turn_id: str, audio: AsyncIterator[bytes]
     ) -> AsyncIterator[dict[str, Any]]: ...

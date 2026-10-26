@@ -2,6 +2,8 @@ import asyncio
 import json
 import sqlite3
 import time
+import unicodedata
+from collections import Counter
 from collections.abc import AsyncIterator, Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, replace
@@ -21,11 +23,49 @@ from .auth import Registry
 from .protocol import DeviceEvent, TurnExistsError
 from .replay_store import SQLiteReplayStore, connect
 
+SPEAKER_NAME_DROPS: Counter[str] = Counter(
+    dict.fromkeys(
+        ("stage", "type", "empty", "control", "whitespace", "bound", "encoding"), 0
+    )
+)
+
+
+def safe_speaker_name(value: object, stage: str) -> str | None:
+    reason = ""
+    if stage != "speaker_result":
+        reason = "stage"
+    elif not isinstance(value, str):
+        reason = "type"
+    else:
+        value = unicodedata.normalize("NFC", value)
+        if not value:
+            reason = "empty"
+        elif any(unicodedata.category(c) == "Cc" for c in value):
+            reason = "control"
+        elif value != value.strip():
+            reason = "whitespace"
+        else:
+            try:
+                if len(value) > 64 or len(value.encode("utf-8")) > 256:
+                    reason = "bound"
+            except UnicodeEncodeError:
+                reason = "encoding"
+        if not reason:
+            return value
+    SPEAKER_NAME_DROPS[reason] += 1
+    return None
+
 
 def safe_data(event: TimingEvent, transcript: bool = False) -> dict[str, object]:
     data: dict[str, object] = {}
     for key in ("part", "destination", "provider", "name", "original_stage"):
         value = event.data.get(key)
+        if key == "name":
+            if key in event.data:
+                name = safe_speaker_name(value, event.stage)
+                if name is not None:
+                    data[key] = name
+            continue
         if not isinstance(value, str):
             continue
         if key == "part" and value not in {"stt", "tts"}:

@@ -63,6 +63,13 @@ type TTSItem = TTSFormat | TTSAudio | TTSSentenceEnd
 
 
 @dataclass(frozen=True)
+class HealthCapabilities:
+    healthy: bool
+    stt: bool = False
+    tts: bool = False
+
+
+@dataclass(frozen=True)
 class TurnOpen:
     turn_id: str
     satellite: str

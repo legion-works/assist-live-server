@@ -1,10 +1,19 @@
 """Assist Live Python client package."""
 
 from .client import AssistLiveClient
-from .models import TimingEvent, TTSAudio, TTSFormat, TTSItem, TTSSentenceEnd, TurnOpen
+from .models import (
+    HealthCapabilities,
+    TimingEvent,
+    TTSAudio,
+    TTSFormat,
+    TTSItem,
+    TTSSentenceEnd,
+    TurnOpen,
+)
 
 __all__ = [
     "AssistLiveClient",
+    "HealthCapabilities",
     "TTSAudio",
     "TTSFormat",
     "TTSItem",

@@ -8,6 +8,7 @@ from typing import Any
 import aiohttp
 
 from .models import (
+    HealthCapabilities,
     TimingEvent,
     TTSAudio,
     TTSFormat,
@@ -114,6 +115,21 @@ class AssistLiveClient:
             return value.get("version") == 1 and value.get("healthy") is True
         except ProtocolError:
             return False
+
+    async def health_capabilities(self, timeout: float = 0.2) -> HealthCapabilities:
+        value = await self._request("GET", "/health", timeout=timeout)
+        if value.get("version") != 1 or type(value.get("healthy")) is not bool:
+            raise ProtocolError("invalid health response")
+        capabilities = value.get("capabilities", {})
+        if not isinstance(capabilities, dict):
+            raise ProtocolError("invalid health capabilities")
+        fields = {}
+        for key in ("stt", "tts"):
+            item = capabilities.get(key, False)
+            if type(item) is not bool:
+                raise ProtocolError("invalid health capability")
+            fields[key] = item
+        return HealthCapabilities(value["healthy"], fields["stt"], fields["tts"])
 
     async def open_turn(self, turn: TurnOpen) -> None:
         await self._request("POST", "/v1/turns", data=asdict(turn))
@@ -275,7 +291,7 @@ class AssistLiveClient:
                         yield pcm
                     elif reply.type == aiohttp.WSMsgType.TEXT:
                         value = decode_control(reply.data, turn_id)
-                        if value["type"] == "end" or (
+                        if value["type"] in {"end", "error"} or (
                             mode == "stt" and value["type"] == "final"
                         ):
                             received_terminal = True

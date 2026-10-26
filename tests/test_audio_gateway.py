@@ -11,6 +11,23 @@ from assist_live_server.turn.detector import TurnDetector
 TURN = "01900000-0000-7000-8000-000000000001"
 
 
+def test_cloud_request_refused_before_factory_and_audio():
+    def forbidden(_):
+        raise AssertionError("cloud factory reached")
+
+    async def audio():
+        raise AssertionError("audio consumed before refusal")
+        yield b""
+
+    async def run():
+        gateway = AudioGateway(
+            forbidden, provider="deepgram", destination="cloud", local_only=True
+        )
+        assert [r["type"] async for r in gateway.stt(TURN, audio())] == ["error"]
+
+    asyncio.run(run())
+
+
 def test_gateway_uses_provider_audio_bound():
     code = """
 import asyncio

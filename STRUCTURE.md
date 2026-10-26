@@ -92,4 +92,17 @@ The client `models.py` also holds the typed TTS items. The client has no Piper d
 - `tests/providers/conftest.py`: local decode fixtures and a fake-server network limit.
 - `docs/providers/cloud.md`: adapter contracts, provider data use, and public source text with retrieval dates.
 
-The local provider factories do not include cloud adapters. Credentials alone do not select a cloud service.
+Credentials alone do not select a cloud service.
+
+## Destination policy and speaker metadata
+
+- `server/assist_live_server/config.py`: explicit local or cloud provider selection and false-by-default transcript storage.
+- `server/assist_live_server/destinations.py`: explicit address classes, DNS checks, and connection address pins.
+- `server/assist_live_server/speaker.py`: optional Murdock HTTP requests and speaker metadata without audio storage.
+- `server/assist_live_server/tts_gateway.py`: provider checks for each request and typed TTS messages.
+- `tests/test_destinations.py`: address boundaries, cloud refusal, and selected-provider audio flow.
+- `tests/test_speaker.py`: DNS changes, redirects, speaker records, name limits, and unchanged transcripts.
+- `tests/contract/test_health.py`: STT-only, TTS-only, and full health responses.
+- `docs/configuration.md`: provider options, speaker request shape, source revision, and privacy policy.
+
+The client `models.py` exports `HealthCapabilities`. The boolean `health()` method stays compatible with older clients.

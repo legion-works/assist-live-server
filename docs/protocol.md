@@ -9,6 +9,27 @@ The public [design record](https://github.com/legion-works/assist-live/blob/main
 "A new boot ID starts a new sequence and clock window."
 It also states: "The first message selects the protocol version and functions."
 
+## Health functions
+
+Authenticated `GET /health` gives this body:
+
+```json
+{"version": 1, "healthy": true, "capabilities": {"stt": true, "tts": true}}
+```
+
+`healthy` is `true` only when the store and replay storage are available.
+This value shows liveness and store readiness.
+
+Audio provider selection does not change `healthy`. A server with no audio functions can be healthy.
+
+`capabilities.stt` is `true` when an audio gateway or legacy backend is available.
+
+`capabilities.tts` is `true` when a TTS gateway, TTS provider, or legacy backend is available.
+
+The client `health(timeout=0.2)` method keeps its boolean result: protocol version 1 and `healthy=true`.
+`health_capabilities(timeout=0.2)` gives `HealthCapabilities(healthy, stt, tts)`.
+For an older server without `capabilities`, the two function flags default to `false` without an error.
+
 ## Credentials and identity
 
 Each satellite has an anonymous `satellite_key`.
@@ -324,6 +345,12 @@ Use the typed API for native Piper audio.
 The provider registry selects `PiperProvider.load(cache)` for `piper`. Loading uses the two hash-checked voice files in the external cache.
 An unknown voice gets `error` with `code=tts_failed`, not a default voice.
 
+The legacy `AudioBackend` route stays available for embedding code.
+It uses the same TTS gateway, not a different audio path.
+The backend must declare `audio_format: TTSFormat`. The gateway uses the declared sample rate.
+The backend supplies PCM and one `sentence_end` control after each sentence, with indices from `0`.
+The gateway refuses missing formats, invalid PCM, incorrect indices, or a missing last sentence control with `tts_failed`.
+
 `speaker_result` and `final.text` are different messages. The speaker message can follow the transcript before stream close:
 
 ```json
@@ -443,7 +470,7 @@ Expired events keep their quality and uncertainty, get `stage=unmatched`, and ke
 
 | Route | Contract |
 |---|---|
-| `GET /health` | Version and Boolean health, with authentication |
+| `GET /health` | Authenticated `{"version": 1, "healthy": true, "capabilities": {"stt": true, "tts": true}}`. `healthy` shows store readiness, and `capabilities` shows audio paths. |
 | `GET /v1/bindings` | List of approved anonymous satellite mappings |
 | `POST /v1/turns` | Open a turn in the store |
 | `POST /v1/event` | Append an integration or HA-state timing event |
@@ -464,7 +491,7 @@ The maintenance task checks retention each minute, not in event-acceptance trans
 `GET /metrics` supplies Prometheus text with the integration token's satellite access checks.
 Ordinary diagnostics contain counts only, without audio or transcripts.
 Without a store, record routes give a service-unavailable response.
-Without a backend, audio gives a service-unavailable response and health is `false`.
+Without an audio path, audio gives a service-unavailable response. Store readiness controls `healthy`.
 
 Transcript storage is on only when server policy and `TurnOpen.record_transcripts` are the two `true` values.
 The two settings default to `false`.

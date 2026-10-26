@@ -85,7 +85,7 @@ def service(tmp_path, replay_store):
         replay=True,
     ):
         from aiohttp import ClientSession, UnixConnector, web
-        from assist_live_client import AssistLiveClient
+        from assist_live_client import AssistLiveClient, TTSFormat
         from assist_live_client.protocol import encode_control
         from assist_live_server.app import create_app
         from assist_live_server.auth import Registry
@@ -96,6 +96,8 @@ def service(tmp_path, replay_store):
         )
 
         class Backend:
+            audio_format = TTSFormat("pcm_s16le", 16000, 1, 2)
+
             async def stt(self, turn_id, audio):
                 try:
                     async for chunk in audio:

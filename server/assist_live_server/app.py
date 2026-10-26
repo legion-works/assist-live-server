@@ -11,9 +11,6 @@ from typing import Any
 from aiohttp import WSMsgType, web
 from assist_live_client.models import (
     TimingEvent,
-    TTSAudio,
-    TTSFormat,
-    TTSSentenceEnd,
     TurnOpen,
     identifier,
     unsigned,
@@ -32,6 +29,8 @@ from assist_live_client.protocol import (
 
 from .audio_gateway import AudioGateway
 from .auth import Registry
+from .config import ProviderFactory, provider_destination
+from .destinations import Destination
 from .event_gateway import EventGateway
 from .protocol import (
     WS_CLOSE_TIMEOUT,
@@ -43,7 +42,8 @@ from .protocol import (
     WebSocketTransport,
 )
 from .providers.tts import TTSProvider
-from .store import SQLiteStore, safe_data
+from .store import SPEAKER_NAME_DROPS, SQLiteStore, safe_data
+from .tts_gateway import TTSGateway
 
 UDP_ADDRESS = web.AppKey("udp_address", tuple[str, int])
 TEXT_IDLE_TIMEOUT = 30.0
@@ -62,7 +62,46 @@ def create_app(
     ingress: TimingIngress | None = None,
     udp_address: tuple[str, int] | None = None,
     tts_provider: TTSProvider | None = None,
+    providers: ProviderFactory | None = None,
+    tts_gateway: TTSGateway | None = None,
 ) -> web.Application:
+    if providers is not None:
+        if any(
+            value is not None
+            for value in (backend, audio_gateway, tts_provider, tts_gateway)
+        ):
+            raise ValueError("configured providers and injected providers conflict")
+        config = providers.config
+        record_transcripts = config.record_transcripts
+        if config.stt_provider is not None:
+            audio_gateway = AudioGateway(
+                providers.stt,
+                provider=config.stt_provider,
+                destination=provider_destination(config.stt_provider),
+                local_only=config.local_only,
+                speaker=providers.speaker,
+            )
+        if config.tts_provider is not None:
+            tts_gateway = TTSGateway(
+                providers.tts,
+                provider=config.tts_provider,
+                destination=provider_destination(config.tts_provider),
+                local_only=config.local_only,
+            )
+    elif tts_provider is not None:
+        selected_tts = tts_provider
+        mode = getattr(selected_tts, "destination", "local")
+        if mode not in {"local", "cloud"}:
+            raise ValueError("unknown TTS destination")
+        destination: Destination = "cloud" if mode == "cloud" else "local"
+        tts_gateway = TTSGateway(
+            lambda _: selected_tts,
+            provider="elevenlabs" if destination == "cloud" else "piper",
+            destination=destination,
+            local_only=False,
+        )
+    elif backend is not None:
+        tts_gateway = TTSGateway(backend=backend, provider="legacy", local_only=False)
     active_auth = 0
     auth_connections: dict[bytes, int] = {}
     active_audio_turns: set[str] = set()
@@ -204,9 +243,11 @@ def create_app(
         return web.json_response(
             {
                 "version": 1,
-                "healthy": store is not None
-                and (backend is not None or audio_gateway is not None)
-                and registry.replay_store is not None,
+                "healthy": store is not None and registry.replay_store is not None,
+                "capabilities": {
+                    "stt": backend is not None or audio_gateway is not None,
+                    "tts": backend is not None or tts_gateway is not None,
+                },
             }
         )
 
@@ -236,6 +277,10 @@ def create_app(
                     "device_worker_errors_total": timing.worker_errors,
                     "authenticated_connections": active_auth,
                     "audio_store_errors_total": audio_store_errors_total,
+                    **{
+                        "speaker_name_dropped_" + reason + "_total": count
+                        for reason, count in SPEAKER_NAME_DROPS.items()
+                    },
                 }
             ),
             headers={"Content-Type": "text/plain; version=0.0.4; charset=utf-8"},
@@ -372,7 +417,7 @@ def create_app(
     async def audio(request: web.Request) -> web.WebSocketResponse:
         satellites = allowed(request)
         target = storage()
-        if backend is None and audio_gateway is None and tts_provider is None:
+        if backend is None and audio_gateway is None and tts_gateway is None:
             raise web.HTTPServiceUnavailable(text="audio unavailable")
         # aiohttp refuses equality. The protocol maximum is inclusive.
         ws = web.WebSocketResponse(
@@ -388,11 +433,7 @@ def create_app(
             negotiation = decode_control(first.data)
             if negotiation["type"] != "negotiate":
                 raise ValueError("negotiation required")
-            if (
-                negotiation["mode"] == "tts"
-                and backend is None
-                and tts_provider is None
-            ):
+            if negotiation["mode"] == "tts" and backend is None and tts_gateway is None:
                 raise ValueError("TTS unavailable")
             if (
                 negotiation["mode"] == "stt"
@@ -538,6 +579,7 @@ def create_app(
                                 metadata = {
                                     "part": "stt",
                                     "provider": audio_gateway.provider,
+                                    "destination": audio_gateway.destination,
                                 }
                             try:
                                 if kind in {"partial", "final"}:
@@ -582,67 +624,26 @@ def create_app(
                             await replies.aclose()
                 else:
                     seq = 0
-                    if tts_provider is not None:
-                        tts_stream = tts_provider.stream(
-                            text_input(), negotiation.get("voice", "")
+                    if tts_gateway is not None:
+                        tts_stream = tts_gateway.stream(
+                            turn_id,
+                            text_input(),
+                            negotiation.get("voice", ""),
+                            record=record,
                         )
                         try:
                             async for item in tts_stream:
-                                if isinstance(item, TTSFormat):
-                                    await send(
-                                        encode_control(
-                                            "format",
-                                            turn_id,
-                                            codec=item.codec,
-                                            rate=item.rate,
-                                            channels=item.channels,
-                                            width=item.width,
-                                        )
-                                    )
-                                elif isinstance(item, TTSAudio):
+                                if isinstance(item, bytes):
                                     async with lock:
                                         await ws.send_bytes(
-                                            encode_audio(turn_id, seq, item.data)
+                                            encode_audio(turn_id, seq, item)
                                         )
                                     seq += 1
-                                elif isinstance(item, TTSSentenceEnd):
-                                    await send(
-                                        encode_control(
-                                            "sentence_end",
-                                            turn_id,
-                                            sentence=item.sentence,
-                                        )
-                                    )
-                        except ValueError, RuntimeError:
-                            await send(
-                                encode_control("error", turn_id, code="tts_failed")
-                            )
+                                else:
+                                    await send(item)
                         finally:
                             if hasattr(tts_stream, "aclose"):
                                 await tts_stream.aclose()
-                    else:
-                        assert backend is not None
-                        await send(
-                            encode_control(
-                                "format",
-                                turn_id,
-                                codec="pcm_s16le",
-                                rate=16000,
-                                channels=1,
-                                width=2,
-                            )
-                        )
-                        async for tts_reply in backend.tts(
-                            turn_id, text_input(), negotiation.get("voice", "")
-                        ):
-                            if isinstance(tts_reply, bytes):
-                                async with lock:
-                                    await ws.send_bytes(
-                                        encode_audio(turn_id, seq, tts_reply)
-                                    )
-                                seq += 1
-                            else:
-                                await send(tts_reply)
                 await send(encode_control("end", turn_id))
 
             reader = asyncio.create_task(receive(), name="assist-live-audio-receive")

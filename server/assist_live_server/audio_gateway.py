@@ -6,8 +6,10 @@ from typing import Any
 
 from assist_live_client.protocol import encode_control
 
+from .destinations import Destination, require_destination
 from .providers.parakeet import MAX_AUDIO_BYTES
 from .providers.stt import STTSession
+from .speaker import SpeakerPlugin
 from .turn.detector import TurnDetector
 
 TURN_TIMEOUT = 15.0
@@ -23,10 +25,16 @@ class AudioGateway:
         *,
         provider: str = "parakeet",
         detector_factory: Callable[[], TurnDetector] = TurnDetector,
+        destination: Destination = "local",
+        local_only: bool = True,
+        speaker: SpeakerPlugin | None = None,
     ) -> None:
         self.provider_factory = provider_factory
         self.provider = provider
         self.detector_factory = detector_factory
+        self.destination = destination
+        self.local_only = local_only
+        self.speaker = speaker
 
     async def stt(
         self,
@@ -44,10 +52,19 @@ class AudioGateway:
         onset = False
         candidate = False
         total = 0
+        speaker_audio = bytearray()
 
         async def note(stage: str, **data: object) -> None:
             if record is not None:
-                await record(stage, {"provider": self.provider, "part": "stt", **data})
+                await record(
+                    stage,
+                    {
+                        "provider": self.provider,
+                        "part": "stt",
+                        "destination": self.destination,
+                        **data,
+                    },
+                )
 
         async def decide(reason: str) -> None:
             nonlocal stopped
@@ -61,6 +78,7 @@ class AudioGateway:
             nonlocal session, stopped
             try:
                 # Select the provider before the iterator can supply its first frame.
+                require_destination(self.destination, self.local_only)
                 session = self.provider_factory(self.provider)
                 detector = await asyncio.to_thread(self.detector_factory)
                 active_session = session
@@ -119,6 +137,8 @@ class AudioGateway:
                                 for offset in range(0, len(pcm), 1024):
                                     block = pcm[offset : offset + 1024]
                                     await active_session.push(block)
+                                    if self.speaker is not None:
+                                        speaker_audio.extend(block)
                                     total += len(block)
                                     changed.set()
                                     await detect(block)
@@ -158,21 +178,39 @@ class AudioGateway:
                 await collector
                 text = await active_session.finish()
                 await output.put(encode_control("final", turn_id, text=text))
-                await output.put(
-                    encode_control(
-                        "speaker_result",
-                        turn_id,
-                        name="",
-                        distance=0.0,
-                        destination="local",
+                if self.speaker is not None:
+                    try:
+                        require_destination(self.speaker.destination, self.local_only)
+                        result = await self.speaker.identify(bytes(speaker_audio))
+                        await output.put(
+                            encode_control(
+                                "speaker_result",
+                                turn_id,
+                                name=result.name,
+                                distance=result.distance,
+                                destination=self.speaker.destination,
+                            )
+                        )
+                    except Exception:
+                        # Speaker metadata is optional. A final transcript stays final.
+                        pass
+                else:
+                    await output.put(
+                        encode_control(
+                            "speaker_result",
+                            turn_id,
+                            name="",
+                            distance=0.0,
+                            destination="local",
+                        )
                     )
-                )
             except asyncio.CancelledError:
                 raise
             except Exception:
                 # Provider errors can contain text or credentials. Send a fixed code.
                 await output.put(encode_control("error", turn_id, code="stt_failed"))
             finally:
+                speaker_audio.clear()
                 stopped = True
                 if session is not None:
                     session.cancel()
