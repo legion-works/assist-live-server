@@ -327,7 +327,7 @@ Sentence indices start at `0` and increase by one. The last text fragment also g
 This index identifies the last complete sentence for fallback continuation.
 
 If a provider ends with audio after its last marker, the gateway adds one last `sentence_end` for that audio.
-It does not add markers in audio without `alignment`. The provider's own markers stay unchanged.
+The gateway adds no marker while the stream runs. The provider's own markers stay unchanged.
 For nonempty text, a stream without audio ends with `tts_failed`, not a sentence marker.
 Empty or whitespace-only text can end cleanly with a format control and no sentence controls or audio.
 

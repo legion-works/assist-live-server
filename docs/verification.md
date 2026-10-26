@@ -2478,13 +2478,17 @@ The public `SentenceAssembler` keeps the same sentence rules.
 Commands from the repository root:
 
 ```sh
-uv run --locked pytest -q tests/contract/test_streaming_tts.py tests/contract/test_streaming_stt.py tests/providers/test_deepgram.py tests/providers/test_piper.py -k 'configured_cloud_tts_factory or covers_only_audio or splits_text_to_actual or transcript_cap or local_final_above or public_sentence_assembler'
+uv run --locked pytest -q tests/contract/test_streaming_tts.py tests/contract/test_streaming_stt.py tests/providers/test_deepgram.py tests/providers/test_piper.py -k 'configured_cloud_tts_factory or covers_only_audio or splits_text_to_actual or transcript_cap or local_final_deliverable_bound or public_sentence_assembler'
 uv run --locked pytest -q tests/providers/test_deepgram.py -k cloud_transcript_encoded_budget --tb=short
 uv run --locked pytest -q tests/contract/test_streaming_tts.py -k 'configured_cloud_tts_factory and (empty or whitespace)' --tb=short
 uv run --locked pytest -q tests/contract/test_streaming_tts.py tests/contract/test_streaming_stt.py tests/providers/test_deepgram.py tests/providers/test_elevenlabs.py tests/providers/test_piper.py tests/test_audio_gateway.py --tb=short
 ```
 
 Initial results: `22 failed, 2 passed, 106 deselected in 4.94s` and `4 failed, 4 passed, 48 deselected in 0.19s`.
+
+The first command gives `30 passed, 115 deselected`.
+The initial results came from an earlier `-k` expression that did not select the 8 `test_local_final_deliverable_bound` tests.
+If the gateway sends the local `final` message without the transcript budget, 4 of these 8 tests give a failure.
 
 The empty-text check first gave `2 failed, 25 deselected in 0.49s` with `ProtocolError: audio refused`.
 
