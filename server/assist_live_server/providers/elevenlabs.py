@@ -5,6 +5,7 @@ import base64
 import json
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import suppress
+from time import monotonic
 
 import aiohttp
 from assist_live_client.models import TTSAudio, TTSFormat, TTSItem, TTSSentenceEnd
@@ -12,6 +13,12 @@ from assist_live_client.protocol import MAX_PCM
 from yarl import URL
 
 from .tts import _SentenceAssembler
+
+MAX_TEXT_CHARACTERS = 16384
+STREAM_MARGIN_SECONDS = 10.0
+CHARACTERS_PER_SECOND = 8.0
+MAX_ALIGNMENT_CHARACTERS = 4096
+MAX_ALIGNMENT_BYTES = 65536
 
 
 class ElevenLabsError(RuntimeError):
@@ -27,6 +34,7 @@ class ElevenLabsProvider:
         *,
         endpoint: str = "wss://api.elevenlabs.io",
         timeout: float = 15.0,
+        enable_logging: bool = True,
     ) -> None:
         if not api_key or any(c in api_key for c in "\r\n"):
             raise ValueError("invalid ElevenLabs credential")
@@ -46,11 +54,13 @@ class ElevenLabsProvider:
             or url.fragment
             or api_key in endpoint
             or timeout <= 0
+            or not isinstance(enable_logging, bool)
         ):
             raise ValueError("invalid ElevenLabs endpoint or timeout")
         self._api_key = api_key
         self._endpoint = url
         self._timeout = timeout
+        self._enable_logging = enable_logging
         self.audio_format = TTSFormat("pcm_s16le", 16000, 1, 2)
 
     async def stream(
@@ -62,7 +72,15 @@ class ElevenLabsProvider:
             or not all(c.isascii() and (c.isalnum() or c in "-_") for c in voice)
         ):
             raise ValueError("invalid ElevenLabs voice identifier")
-        yield self.audio_format
+        audio_format = self.audio_format
+        yield audio_format
+        started = monotonic()
+        deadline = started + STREAM_MARGIN_SECONDS
+        sent_characters = 0
+        bytes_per_second = (
+            audio_format.rate * audio_format.width * audio_format.channels
+        )
+        audio_limit = int(STREAM_MARGIN_SECONDS * bytes_per_second)
         failed = False
         trace = aiohttp.TraceConfig()
 
@@ -86,10 +104,16 @@ class ElevenLabsProvider:
         aligned = False
         assembler = _SentenceAssembler()
         sentence = 0
+        audio_bytes = 0
+        alignment_bytes = 0
         try:
             ws = await client.ws_connect(
                 self._endpoint / "v1" / "text-to-speech" / voice / "stream-input",
-                params={"model_id": "eleven_flash_v2_5", "output_format": "pcm_16000"},
+                params={
+                    "model_id": "eleven_flash_v2_5",
+                    "output_format": f"pcm_{audio_format.rate}",
+                    "enable_logging": str(self._enable_logging).lower(),
+                },
                 headers={"xi-api-key": self._api_key},
                 timeout=aiohttp.ClientWSTimeout(ws_receive=self._timeout, ws_close=1.0),
                 max_msg_size=262144,
@@ -102,12 +126,21 @@ class ElevenLabsProvider:
             )
 
             async def send() -> None:
-                nonlocal failed, input_ended
+                nonlocal failed, input_ended, sent_characters, deadline, audio_limit
                 assert ws is not None
                 try:
                     async for part in text:
                         if part:
+                            if sent_characters + len(part) > MAX_TEXT_CHARACTERS:
+                                raise ValueError("ElevenLabs text limit exceeded")
                             await ws.send_json({"text": part})
+                            sent_characters += len(part)
+                            allowance = (
+                                STREAM_MARGIN_SECONDS
+                                + sent_characters / CHARACTERS_PER_SECOND
+                            )
+                            deadline = started + allowance
+                            audio_limit = int(allowance * bytes_per_second)
                     await ws.send_json({"text": " ", "flush": True})
                     await ws.send_json({"text": ""})
                     input_ended = True
@@ -130,7 +163,18 @@ class ElevenLabsProvider:
                                 await ws.close()
 
             writer = asyncio.create_task(send())
-            async for message in ws:
+            while True:
+                remaining = deadline - monotonic()
+                if remaining <= 0:
+                    raise ValueError("ElevenLabs stream deadline exceeded")
+                try:
+                    message = await ws.receive(timeout=min(self._timeout, remaining))
+                except TimeoutError:
+                    if remaining < self._timeout and monotonic() < deadline:
+                        continue
+                    raise
+                if monotonic() >= deadline:
+                    raise ValueError("ElevenLabs stream deadline exceeded")
                 if message.type != aiohttp.WSMsgType.TEXT:
                     raise ValueError("invalid ElevenLabs message type")
                 value = json.loads(message.data)
@@ -140,22 +184,34 @@ class ElevenLabsProvider:
                     pcm = base64.b64decode(value["audio"], validate=True)
                     if len(pcm) % 2:
                         raise ValueError("invalid ElevenLabs PCM alignment")
+                    audio_bytes += len(pcm)
+                    if audio_bytes > audio_limit:
+                        raise ValueError("ElevenLabs audio limit exceeded")
                     for offset in range(0, len(pcm), MAX_PCM):
+                        if monotonic() >= deadline:
+                            raise ValueError("ElevenLabs stream deadline exceeded")
                         yield TTSAudio(pcm[offset : offset + MAX_PCM])
                 alignment = value.get("alignment") or value.get("normalizedAlignment")
                 if alignment is not None:
                     chars = alignment["chars"]
                     if (
                         not isinstance(chars, list)
+                        or len(chars) > MAX_ALIGNMENT_CHARACTERS
                         or not all(isinstance(c, str) and len(c) == 1 for c in chars)
                         or len(alignment["charStartTimesMs"]) != len(chars)
                         or len(alignment["charDurationsMs"]) != len(chars)
                     ):
                         raise ValueError("invalid ElevenLabs alignment")
+                    alignment_text = "".join(chars)
+                    alignment_bytes += len(alignment_text.encode("utf-8"))
+                    if alignment_bytes > MAX_ALIGNMENT_BYTES:
+                        raise ValueError("ElevenLabs alignment limit exceeded")
                     aligned = True
                     # This assembler reads returned alignment, never input text.
                     # Markers follow the audio chunk that contains each ending.
-                    for _ in assembler.feed("".join(chars)):
+                    for _ in assembler.feed(alignment_text):
+                        if monotonic() >= deadline:
+                            raise ValueError("ElevenLabs stream deadline exceeded")
                         yield TTSSentenceEnd(sentence)
                         sentence += 1
                 if value.get("isFinal") is True:

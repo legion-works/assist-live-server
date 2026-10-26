@@ -9,6 +9,10 @@ from yarl import URL
 
 from .stt import AudioLimitError, STTClosedError
 
+MAX_FINAL_SEGMENTS = 128
+MAX_SEGMENT_BYTES = 4096
+MAX_TRANSCRIPT_BYTES = 16384
+
 
 class DeepgramError(RuntimeError):
     """The cloud operation failed without provider response details."""
@@ -62,6 +66,8 @@ class DeepgramSession:
         self._lock = asyncio.Lock()
         self._changed = asyncio.Event()
         self._finals: list[str] = []
+        self._final_count = 0
+        self._transcript_bytes = 0
         self._interim = ""
         self._onset = False
         self._cancelled = False
@@ -112,9 +118,7 @@ class DeepgramSession:
                     "interim_results": "true",
                 },
                 headers={"Authorization": "Token " + self._provider._api_key},
-                timeout=aiohttp.ClientWSTimeout(
-                    ws_receive=self._provider._timeout, ws_close=1.0
-                ),
+                timeout=aiohttp.ClientWSTimeout(ws_receive=None, ws_close=1.0),
                 max_msg_size=262144,
             )
             self._reader = asyncio.create_task(self._receive())
@@ -141,13 +145,24 @@ class DeepgramSession:
                 value = json.loads(message.data)
                 if value.get("type") == "Results":
                     text = value["channel"]["alternatives"][0]["transcript"]
-                    if not isinstance(text, str) or not isinstance(
-                        value["is_final"], bool
-                    ):
+                    is_final = value.get("is_final", False)
+                    if not isinstance(text, str) or not isinstance(is_final, bool):
                         raise ValueError("invalid transcript result")
-                    if value["is_final"]:
+                    size = len(text.encode("utf-8"))
+                    separator = int(bool(text and self._finals))
+                    if (
+                        size > MAX_SEGMENT_BYTES
+                        or self._transcript_bytes + separator + size
+                        > MAX_TRANSCRIPT_BYTES
+                    ):
+                        raise ValueError("transcript limit exceeded")
+                    if is_final:
+                        self._final_count += 1
+                        if self._final_count > MAX_FINAL_SEGMENTS:
+                            raise ValueError("transcript segment limit exceeded")
                         if text:
                             self._finals.append(text)
+                            self._transcript_bytes += separator + size
                         self._interim = ""
                     else:
                         self._interim = text
@@ -207,20 +222,6 @@ class DeepgramSession:
         self._check()
         if not self._onset:
             return ""
-        if self._bytes and not self._changed.is_set():
-            failed = False
-            try:
-                async with asyncio.timeout(self._provider._timeout):
-                    await self._changed.wait()
-            except asyncio.CancelledError:
-                self.cancel()
-                await self.aclose()
-                raise
-            except Exception:
-                failed = True
-            if failed:
-                self._failed = True
-        self._check()
         return " ".join([*self._finals, self._interim]).strip()
 
     async def finish(self) -> str:

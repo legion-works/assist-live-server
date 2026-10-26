@@ -149,6 +149,18 @@ Each session accepts mono 16 kHz little-endian signed int16 PCM.
 
 The audio limit is 15 seconds. A push above the limit accepts no part of that push.
 `partial` stays empty before `speech_started`. This gate does not remove initial audio.
+After voice onset, `partial` immediately gives the latest text. Quiet periods do not cause a provider error.
+The gateway controls turn and quiet-period limits. `finish` has a bounded wait for the last service response.
+
+Remote transcript retention has three limits:
+
+- A maximum of 128 `is_final=true` messages, with empty messages in this count.
+- A maximum of 4096 UTF-8 bytes in one committed or interim segment.
+- A maximum of 16384 UTF-8 bytes in the complete transcript, with separator spaces and the current interim segment in this count.
+
+These limits give more than eight committed segments and 1 kB of text for each second of the 15-second audio limit.
+The segment limit also prevents a single large response from using the complete transcript budget.
+Text above a limit causes a static session error. The receiver stops and closes the WebSocket before it accepts more segments.
 
 `finish` sends `CloseStream`, receives committed results and metadata, and closes the connection.
 Subsequent `finish` calls give the same transcript.
@@ -177,6 +189,26 @@ At `isFinal=true`, a remaining aligned fragment also gets a marker.
 Without character times, the adapter supplies audio without invented sentence markers.
 Cancellation stops the text iterator, cancels the sender, and closes the WebSocket and HTTP session.
 
+The TTS stream uses a 10-second margin plus one second for each eight input characters sent.
+This conservative rate lets the service make slow voice output without a short limit on legitimate long replies.
+The adapter recomputes the allowance after each text part. It accepts a maximum of 16384 input characters, as the server does.
+The maximum allowance is thus 2058 seconds. Empty initialization and flush messages do not increase the allowance.
+
+The deadline is the stream start time plus this allowance, not the last response time plus the allowance.
+Continuous audio or `alignment` messages do not change it.
+The receiver checks the deadline before it supplies each audio chunk or sentence marker.
+
+The PCM byte limit is the allowance multiplied by the declared `rate`, `width`, and `channels`.
+The default mono 16 kHz signed int16 format uses 32000 bytes for each second.
+The adapter reads the declared format. It does not use a 16 kHz constant for other formats.
+The same rate also selects the service's PCM output format.
+
+One `alignment` message has a maximum of 4096 characters. All `alignment` text together has a maximum of 65536 UTF-8 bytes.
+The sentence assembler also limits an unfinished fragment to 16384 characters.
+Sentence punctuation does not change the total `alignment` budget.
+The WebSocket limit of 262144 bytes also limits each decoded remote message and its arrays.
+Data above a limit stops output, cancels the text sender, closes the connection, and gives the static provider error.
+
 The two providers declare `destination="cloud"`. The default server and local provider factories do not call cloud constructors.
 
 API keys go only in `Authorization: Token ...` for Deepgram and `xi-api-key` for ElevenLabs.
@@ -186,9 +218,12 @@ TLS is necessary. Numeric loopback endpoints for tests can use unencrypted conne
 Errors contain no provider response text. An error has no transport `__context__`.
 Logs, metrics, and close messages contain no credentials.
 
-The adapters use the same aiohttp dependency. No vendor SDK or new package is necessary.
+The adapters use the same aiohttp dependency. No vendor SDK is necessary.
+The server declares its `yarl` import with `yarl>=1.25.1,<2`. The lockfile keeps version 1.25.1.
+The third-party notices include the wheel's license and copyright.
+
 The asset manifest lists downloaded models, voices, and runtimes. Its accepted asset types do not include a cloud service.
-These adapters download no model or voice. No cloud asset record or third-party package notice is necessary.
+These adapters download no model or voice. No cloud asset record is necessary.
 
 ## Deepgram live protocol sources
 
@@ -226,3 +261,46 @@ In addition, you may opt out of our use of your Content for training at any time
 ```
 
 An account training opt-out is not a zero-retention guarantee.
+
+## ElevenLabs request logging and output formats
+
+The WebSocket API source above declares this query option:
+
+```yaml
+            enable_logging:
+              type: boolean
+              default: true
+```
+
+`ElevenLabsProvider` supplies `enable_logging=True` and sends that value explicitly.
+An explicit `False` sends `enable_logging=false`. This option does not give account eligibility.
+The default stays `True` until operator approval for a different default.
+
+Source: [TTS API](https://elevenlabs.io/docs/api-reference/text-to-speech/convert.md).
+Retrieved: 2026-10-26T07:04:23Z (UTC). Source text from the `enable_logging` query parameter:
+
+```text
+When enable_logging is set to false zero retention mode will be used for the request. This will mean history features are unavailable for this request, including request stitching. Zero retention mode may only be used by enterprise customers.
+```
+
+That API page also lists these permitted `output_format` values:
+
+```text
+`alaw_8000`, `mp3_22050_32`, `mp3_24000_48`, `mp3_44100_128`, `mp3_44100_192`, `mp3_44100_32`, `mp3_44100_64`, `mp3_44100_96`, `opus_48000_128`, `opus_48000_192`, `opus_48000_32`, `opus_48000_64`, `opus_48000_96`, `pcm_16000`, `pcm_22050`, `pcm_24000`, `pcm_32000`, `pcm_44100`, `pcm_48000`, `pcm_8000`, `ulaw_8000`, `wav_16000`, `wav_22050`, `wav_24000`, `wav_32000`, `wav_44100`, `wav_48000`, `wav_8000`
+```
+
+This list documents `pcm_16000`. The WebSocket schema itself gives `output_format` as “Any type”.
+The adapter uses the TTS format list for the WebSocket request. Live checks: `NOT RUN`.
+
+Source: [Zero Retention Mode (Enterprise)](https://elevenlabs.io/docs/eleven-api/resources/zero-retention-mode.mdx).
+Retrieved: 2026-10-26T07:04:23Z (UTC). Source text from “When can a customer use Zero Retention Mode?”:
+
+```text
+Zero Retention Mode is available to select enterprise customers. However, access to this feature may be restricted if ElevenLabs determines a customer's use case to be high risk, if an account is flagged by an automated system for additional moderation or at ElevenLabs' sole discretion. In such cases, the enterprise administrator will be promptly notified of the restriction.
+```
+
+Source text from “Text to Speech”:
+
+```text
+All endpoints beginning with `/v1/text-to-speech/` and the TTS WebSocket connection are covered by ZRM.
+```

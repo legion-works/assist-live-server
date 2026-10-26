@@ -2235,7 +2235,7 @@ Result:
 
 ```text
 PASS own Git root
-PASS history secrets commits=37
+History secret check: PASS
 PASS public data matches=0
 ```
 
@@ -2251,3 +2251,39 @@ Each mutation caused one unsatisfactory behavioral test result:
 6. Call a cloud constructor from the default factory: unsatisfactory default-provider assertion.
 
 No mutation changed the working source. No commit or live cloud check occurred.
+
+### Cloud response limits
+
+Date: 2026-10-26 (UTC).
+Fake-server tests sent too many committed transcript segments, interim text, `alignment` text, and PCM audio.
+The initial limit tests gave 9 unsatisfactory results. The cumulative `alignment` test also gave an unsatisfactory result after sentence punctuation changed.
+The fragment limit did not test a total budget across complete sentences.
+The count-free history-result test also found the commit count in this record.
+
+The Deepgram receiver limits committed message count, segment bytes, and total transcript bytes before it keeps new text.
+The ElevenLabs receiver limits each `alignment` message, total `alignment` bytes, total audio bytes, and stream time.
+The tests examine socket closure, static errors, memory use, audio limits, and accepted transcript boundaries.
+The [cloud provider contract](providers/cloud.md) gives the limits and their units.
+
+Command:
+
+```sh
+uv run --locked pytest tests/providers/test_deepgram.py tests/providers/test_elevenlabs.py tests/turn/test_profiles.py::test_profile_documentation_records_particle_cost_without_fixed_ref_counts -q
+```
+
+The initial corrected limit checks gave `63 passed in 0.66s` before the boundary-control tests.
+
+The complete provider suite then gave `80 passed in 0.71s`.
+This includes text-derived time and PCM budgets, quiet `partial` results, optional `is_final` flags, request logging, and the URL-parser dependency.
+Long reply controls use 160 seconds of output at 16000, 22050, and 24000 Hz.
+Short-input controls reject audio above the allowance for the text sent.
+The deadline test changes the monotonic clock at a message boundary. It does not wait for real-time audio playback.
+
+Cancellation tests call only the cancellation operation before they examine socket, HTTP session, and task state.
+The STT test waits for the cleanup task that `cancel` itself schedules. It does not use `aclose` to close the session first.
+The TTS test cancels its pending stream read and examines cleanup without one more stream close.
+
+Eleven mutation checks removed transcript limits, `alignment` limits, output budgets, cancellation cleanup, the input ceiling, and the URL-parser dependency.
+Each changed copy gave an unsatisfactory test result. The working source did not change during the checks.
+The logging default stays the provider default, `enable_logging=True`. An explicit adapter option can request `False` for an eligible account.
+The provider contract records the public logging, account restriction, and PCM format sources.

@@ -80,6 +80,7 @@ def test_small_schedule_immediate_parts_first_byte_flush_and_alignment(cloud_ws_
                 assert query == {
                     "model_id": "eleven_flash_v2_5",
                     "output_format": "pcm_16000",
+                    "enable_logging": "true",
                 }
                 assert path == "/v1/text-to-speech/test-voice/stream-input"
                 assert headers["xi-api-key"] == KEY
@@ -214,7 +215,16 @@ def test_redirect_never_forwards_credentials(cloud_ws_server):
     asyncio.run(run())
 
 
-def test_cancel_stops_text_producer_and_closes_socket(cloud_ws_server):
+def test_cancel_stops_text_producer_and_closes_socket(cloud_ws_server, monkeypatch):
+    clients = []
+    close = aiohttp.ClientSession.close
+
+    async def tracked_close(client):
+        await close(client)
+        clients.append(client)
+
+    monkeypatch.setattr(aiohttp.ClientSession, "close", tracked_close)
+
     async def run():
         entered = asyncio.Event()
         closed = asyncio.Event()
@@ -245,9 +255,15 @@ def test_cancel_stops_text_producer_and_closes_socket(cloud_ws_server):
             pending.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await pending
-            await stream.aclose()
             await asyncio.wait_for(closed.wait(), 2)
             assert stopped.is_set()
+            assert clients and all(client.closed for client in clients)
+            assert pending.done()
+            assert not any(
+                "ElevenLabsProvider.stream.<locals>.send"
+                in task.get_coro().__qualname__
+                for task in asyncio.all_tasks()
+            )
 
     asyncio.run(run())
 
@@ -432,5 +448,241 @@ def test_input_cleanup_after_final_response_is_awaited(cloud_ws_server):
             assert cleaning.is_set()
             release.set()
             assert [item async for item in stream] == []
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "mode", ["alignment_chunk", "alignment_total", "audio", "deadline"]
+)
+def test_continuous_remote_output_has_stream_limits(mode, cloud_ws_server, monkeypatch):
+    from assist_live_server.providers import elevenlabs
+
+    now = 0.0
+    monkeypatch.setattr(elevenlabs, "monotonic", lambda: now, raising=False)
+
+    async def run():
+        closed = asyncio.Event()
+        received_audio = 0
+        markers = 0
+        if mode == "alignment_chunk":
+            chars, count = "a" * 4097, 1
+        else:
+            chars, count = "word. " * 500, 24
+
+        async def handler(request):
+            nonlocal now
+            ws = web.WebSocketResponse()
+            await ws.prepare(request)
+            try:
+                async for message in ws:
+                    if message.json() != {"text": ""}:
+                        continue
+                    if mode == "deadline":
+                        now = 11.0
+                        await ws.send_json({"audio": "AAA="})
+                    elif mode == "audio":
+                        chunk = base64.b64encode(bytes(128000)).decode()
+                        for _ in range(31):
+                            await ws.send_json({"audio": chunk})
+                    else:
+                        value = {
+                            "alignment": {
+                                "chars": list(chars),
+                                "charStartTimesMs": [0] * len(chars),
+                                "charDurationsMs": [1] * len(chars),
+                            }
+                        }
+                        for _ in range(count):
+                            await ws.send_json(value)
+                    await ws.send_json({"isFinal": True})
+                    await ws.receive()
+                    break
+            except ConnectionResetError:
+                pass
+            finally:
+                closed.set()
+            return ws
+
+        async with cloud_ws_server(handler) as fake:
+            stream = ElevenLabsProvider(KEY, endpoint=fake.url).stream(
+                parts("Hello "), "test-voice"
+            )
+            try:
+                with pytest.raises(ElevenLabsError) as error:
+                    async for item in stream:
+                        if isinstance(item, TTSAudio):
+                            received_audio += len(item.data)
+                        if isinstance(item, TTSSentenceEnd):
+                            markers += 1
+                assert received_audio <= 344000
+                assert markers <= 22000
+                assert KEY not in str(error.value)
+                assert error.value.__context__ is None
+                await asyncio.wait_for(closed.wait(), 2)
+            finally:
+                await stream.aclose()
+
+    asyncio.run(run())
+
+
+def test_audio_limit_accepts_exactly_two_minutes(cloud_ws_server):
+    async def run():
+        async def handler(request):
+            ws = web.WebSocketResponse()
+            await ws.prepare(request)
+            async for message in ws:
+                if message.json() != {"text": ""}:
+                    continue
+                chunk = base64.b64encode(bytes(128000)).decode()
+                for _ in range(30):
+                    await ws.send_json({"audio": chunk})
+                await ws.send_json({"isFinal": True})
+                await ws.close()
+                break
+            return ws
+
+        async with cloud_ws_server(handler) as fake:
+            provider = ElevenLabsProvider(KEY, endpoint=fake.url)
+            size = 0
+            async for chunk in provider.synthesize(parts("a" * 880), "test-voice"):
+                size += len(chunk)
+            assert size == 3840000
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("rate", [16000, 22050, 24000])
+@pytest.mark.parametrize("excess", [False, True])
+def test_audio_allowance_follows_sent_text_and_declared_format(
+    rate, excess, cloud_ws_server, monkeypatch
+):
+    from assist_live_server.providers import elevenlabs
+
+    now = 0.0
+    monkeypatch.setattr(elevenlabs, "monotonic", lambda: now)
+
+    async def run():
+        text = "a" * (8 if excess else 1200)
+        seconds = 11 if excess else 160
+        expected = seconds * rate * 2
+        supplied = 0
+
+        async def handler(request):
+            nonlocal now
+            assert request.query["output_format"] == f"pcm_{rate}"
+            ws = web.WebSocketResponse()
+            await ws.prepare(request)
+            async for message in ws:
+                if message.json() != {"text": ""}:
+                    continue
+                now = 1.0 if excess else 159.0
+                remaining = expected + (2 if excess else 0)
+                try:
+                    while remaining:
+                        size = min(remaining, 128000)
+                        await ws.send_json(
+                            {"audio": base64.b64encode(bytes(size)).decode()}
+                        )
+                        remaining -= size
+                    await ws.send_json({"isFinal": True})
+                    await ws.close()
+                except ConnectionResetError:
+                    pass
+                break
+            return ws
+
+        async with cloud_ws_server(handler) as fake:
+            provider = ElevenLabsProvider(KEY, endpoint=fake.url)
+            provider.audio_format = TTSFormat("pcm_s16le", rate, 1, 2)
+
+            async def consume():
+                nonlocal supplied
+                async for item in provider.stream(parts(text), "test-voice"):
+                    if isinstance(item, TTSAudio):
+                        supplied += len(item.data)
+
+            if excess:
+                with pytest.raises(ElevenLabsError):
+                    await consume()
+                assert supplied <= expected
+            else:
+                await consume()
+                assert supplied == expected
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("length,accepted", [(16384, True), (16385, False)])
+def test_text_budget_has_server_character_ceiling(
+    length, accepted, cloud_ws_server, monkeypatch
+):
+    from assist_live_server.providers import elevenlabs
+
+    now = 0.0
+    monkeypatch.setattr(elevenlabs, "monotonic", lambda: now)
+
+    async def run():
+        sent = []
+
+        async def handler(request):
+            nonlocal now
+            ws = web.WebSocketResponse()
+            await ws.prepare(request)
+            async for message in ws:
+                value = message.json()
+                if value.get("text", "").strip():
+                    sent.append(value["text"])
+                if value == {"text": ""}:
+                    now = 2057.0
+                    await ws.send_json({"isFinal": True})
+                    await ws.close()
+                    break
+            return ws
+
+        async with cloud_ws_server(handler) as fake:
+            provider = ElevenLabsProvider(KEY, endpoint=fake.url)
+
+            async def consume():
+                async for _ in provider.stream(parts("a" * length), "test-voice"):
+                    pass
+
+            if accepted:
+                await consume()
+                assert sent == ["a" * 16384]
+            else:
+                with pytest.raises(ElevenLabsError):
+                    await consume()
+                assert sent == []
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "setting,expected", [(None, "true"), (True, "true"), (False, "false")]
+)
+def test_logging_option_is_explicit_and_preserves_provider_default(
+    setting, expected, cloud_ws_server
+):
+    async def run():
+        seen = []
+
+        async def handler(request):
+            seen.append(request.query.get("enable_logging"))
+            ws = web.WebSocketResponse()
+            await ws.prepare(request)
+            async for message in ws:
+                if message.json() == {"text": ""}:
+                    await ws.send_json({"isFinal": True})
+                    await ws.close()
+                    break
+            return ws
+
+        async with cloud_ws_server(handler) as fake:
+            options = {} if setting is None else {"enable_logging": setting}
+            provider = ElevenLabsProvider(KEY, endpoint=fake.url, **options)
+            async for _ in provider.stream(parts("Hello "), "test-voice"):
+                pass
+        assert seen == [expected]
 
     asyncio.run(run())

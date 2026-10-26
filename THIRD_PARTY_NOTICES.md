@@ -335,3 +335,29 @@ Runtime sources:
 
 A future binary image must keep those files and all bundled-library notices.
 No built-image inventory or complete binary notice audit follows from this source record.
+
+## URL parser
+
+The cloud adapters declare `yarl` as a dependency.
+The examined installed wheel is `yarl==1.25.1`.
+Its `METADATA` declares `Apache-2.0`. Its `licenses/LICENSE` contains the Apache License, Version 2.0.
+The wheel's `licenses/NOTICE` contains this text:
+
+```text
+   Copyright 2016-2021, Andrew Svetlov and aio-libs team
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+```
+
+Keep the wheel's license and notice in each binary package.
+Source: https://pypi.org/project/yarl/1.25.1/.

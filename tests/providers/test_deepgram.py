@@ -93,6 +93,7 @@ def test_partial_gate_first_audio_final_results_and_idempotent_finish(cloud_ws_s
             try:
                 await session.push(b"\x01\x00")
                 await asyncio.wait_for(ready.wait(), 2)
+                await asyncio.wait_for(session._changed.wait(), 2)
                 assert await session.partial() == ""
                 session.speech_started()
                 assert await asyncio.wait_for(session.partial(), 2) == "turn"
@@ -123,16 +124,24 @@ def test_cancel_closes_socket_and_rejects_further_input(cloud_ws_server):
         async with cloud_ws_server(handler) as fake:
             session = DeepgramProvider(KEY, endpoint=fake.url).session()
             await session.push(b"\0\0")
-            session.cancel()
-            await session.aclose()
-            await asyncio.wait_for(closed.wait(), 2)
-            for operation in (
-                session.partial(),
-                session.finish(),
-                session.push(b"\0\0"),
-            ):
-                with pytest.raises(STTClosedError):
-                    await operation
+            try:
+                session.cancel()
+                assert session._closing is not None
+                await asyncio.wait_for(asyncio.shield(session._closing), 2)
+                await asyncio.wait_for(closed.wait(), 2)
+                assert session._ws.closed
+                assert session._client.closed
+                assert session._reader.done()
+                assert session._closing.done()
+                for operation in (
+                    session.partial(),
+                    session.finish(),
+                    session.push(b"\0\0"),
+                ):
+                    with pytest.raises(STTClosedError):
+                        await operation
+            finally:
+                await session.aclose()
 
     asyncio.run(run())
 
@@ -379,3 +388,164 @@ def test_input_validation_empty_finish_and_cancellation_cleanup(cloud_ws_server)
                 await session.push(b"\0\0")
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "text,count,final",
+    [
+        ("x", 2000, True),
+        ("é" * 2048, 5, True),
+        ("é" * 2049, 1, True),
+        ("é" * 2049, 1, False),
+        ("", 2000, True),
+    ],
+)
+def test_remote_transcript_flood_is_bounded(text, count, final, cloud_ws_server):
+    import sys
+
+    async def run():
+        closed = asyncio.Event()
+
+        async def handler(request):
+            ws = web.WebSocketResponse()
+            await ws.prepare(request)
+            await ws.receive_bytes()
+            try:
+                for _ in range(count):
+                    await ws.send_json(result(text, final))
+                await ws.receive()
+            except ConnectionResetError:
+                pass
+            finally:
+                closed.set()
+            return ws
+
+        async with cloud_ws_server(handler) as fake:
+            session = DeepgramProvider(KEY, endpoint=fake.url).session()
+            try:
+                await session.push(b"\0\0")
+                await asyncio.wait_for(asyncio.shield(session._reader), 2)
+                assert session._failed
+                assert session._ws.closed
+                assert len(session._finals) <= 128
+                assert sum(len(t.encode()) for t in session._finals) <= 16384
+                retained = (
+                    sys.getsizeof(session._finals)
+                    + sum(sys.getsizeof(t) for t in session._finals)
+                    + sys.getsizeof(session._interim)
+                )
+                assert retained < 40000
+                with pytest.raises(DeepgramError) as error:
+                    await session.finish()
+                assert KEY not in str(error.value)
+                await asyncio.wait_for(closed.wait(), 2)
+            finally:
+                await session.aclose()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("text,count", [("a", 128), ("x" * 4096, 1), ("é" * 2047, 4)])
+def test_transcript_limit_accepts_valid_boundary(text, count, cloud_ws_server):
+    async def run():
+        async def handler(request):
+            ws = web.WebSocketResponse()
+            await ws.prepare(request)
+            await ws.receive_bytes()
+            for _ in range(count):
+                await ws.send_json(result(text, True))
+            assert (await ws.receive()).json() == {"type": "CloseStream"}
+            await ws.send_json({"type": "Metadata"})
+            await ws.close()
+            return ws
+
+        async with cloud_ws_server(handler) as fake:
+            session = DeepgramProvider(KEY, endpoint=fake.url).session()
+            try:
+                await session.push(b"\0\0")
+                assert await session.finish() == " ".join([text] * count)
+            finally:
+                await session.aclose()
+
+    asyncio.run(run())
+
+
+def test_quiet_partial_is_nonblocking_and_does_not_fail_session(cloud_ws_server):
+    async def run():
+        release = asyncio.Event()
+
+        async def handler(request):
+            ws = web.WebSocketResponse()
+            await ws.prepare(request)
+            await ws.receive_bytes()
+            await release.wait()
+            await ws.send_json(result("turn"))
+            async for message in ws:
+                if message.type == WSMsgType.TEXT:
+                    await ws.send_json(result("turn", True))
+                    await ws.send_json({"type": "Metadata"})
+                    await ws.close()
+            return ws
+
+        async with cloud_ws_server(handler) as fake:
+            session = DeepgramProvider(KEY, endpoint=fake.url, timeout=1.0).session()
+            try:
+                session.speech_started()
+                await session.push(b"\0\0")
+                assert await session.partial() == ""
+                release.set()
+                await asyncio.wait_for(session._changed.wait(), 2)
+                assert await session.partial() == "turn"
+                assert not session._failed
+                assert await session.finish() == "turn"
+            finally:
+                release.set()
+                await session.aclose()
+
+    asyncio.run(run())
+
+
+def test_results_without_is_final_are_interim(cloud_ws_server):
+    async def run():
+        async def handler(request):
+            ws = web.WebSocketResponse()
+            await ws.prepare(request)
+            await ws.receive_bytes()
+            value = result("turn")
+            del value["is_final"]
+            await ws.send_json(value)
+            async for message in ws:
+                if message.type == WSMsgType.TEXT:
+                    await ws.send_json(result("turn on", True))
+                    await ws.send_json({"type": "Metadata"})
+                    await ws.close()
+            return ws
+
+        async with cloud_ws_server(handler) as fake:
+            session = DeepgramProvider(KEY, endpoint=fake.url).session()
+            try:
+                await session.push(b"\0\0")
+                await asyncio.wait_for(session._changed.wait(), 2)
+                session.speech_started()
+                assert await session.partial() == "turn"
+                assert await session.finish() == "turn on"
+            finally:
+                await session.aclose()
+
+    asyncio.run(run())
+
+
+def test_direct_url_parser_dependency_includes_installed_version():
+    import tomllib
+    from importlib.metadata import version
+    from pathlib import Path
+
+    from packaging.requirements import Requirement
+
+    root = Path(__file__).resolve().parents[2]
+    document = tomllib.loads((root / "server/pyproject.toml").read_text())
+    requirements = {
+        r.name: r for r in map(Requirement, document["project"]["dependencies"])
+    }
+    assert "yarl" in requirements
+    assert version("yarl") in requirements["yarl"].specifier
