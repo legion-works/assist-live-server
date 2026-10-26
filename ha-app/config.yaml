@@ -1,0 +1,34 @@
+name: assist-live-server
+version: "0.0.0"
+slug: assist_live_server
+description: Experimental realtime voice server for Assist
+url: https://github.com/legion-works/assist-live-server
+arch:
+  - amd64
+  - aarch64
+image: ghcr.io/legion-works/assist-live-server-app
+startup: services
+boot: manual
+init: false
+ports:
+  8099/tcp: 8099
+ports_description:
+  8099/tcp: Assist WebSocket and health endpoint
+options:
+  stt_provider: parakeet
+  tts_provider: piper
+  local_only: true
+  record_transcripts: false
+  speaker_url: ""
+  download_models: true
+  deepgram_api_key: ""
+  elevenlabs_api_key: ""
+schema:
+  stt_provider: list(parakeet|deepgram|none)
+  tts_provider: list(piper|elevenlabs|none)
+  local_only: bool
+  record_transcripts: bool
+  speaker_url: str
+  download_models: bool
+  deepgram_api_key: password
+  elevenlabs_api_key: password

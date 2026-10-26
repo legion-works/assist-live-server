@@ -70,9 +70,9 @@ The model `smart-turn-v3.2-cpu.onnx` has a BSD-2-Clause rights record.
 Smart Turn v3.2. Copyright (c) 2024–2025, Daily. BSD-2-Clause. Full notice, conditions, and disclaimer in THIRD_PARTY_NOTICES.md.
 ```
 
-The repository does not contain the model. There is no server image.
+The repository does not contain the model. The service image downloads it at startup.
 `assets/manifest.json` records a planned startup download with an immutable revision and SHA-256.
-There is no startup downloader at this time.
+The startup command checks each downloaded file against its recorded SHA-256.
 See `docs/research/q5-smart-turn.md` for the file-level source records and license scope.
 
 The upstream project supplies this license text:
@@ -109,7 +109,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 The server runtime uses NumPy 2.5.4 and ONNX Runtime 1.31.0.
 The development environment also uses Transformers 5.20.2.
-The client package has none of these dependencies. There is no server image at this time.
+The client package has none of these dependencies. The service image includes the runtime libraries.
 The package metadata declares these licenses:
 
 - NumPy: `BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0`.
@@ -123,7 +123,7 @@ The `feature extractor` uses constructor defaults. It downloads no configuration
 ## Kokoro runtime and candidate voice
 
 Kokoro local synthesis has status `not_selected`, with `reason: technical`.
-The project is experimental and has no release. There is no server image.
+The project is experimental and has no release. The service image does not include Kokoro.
 The repository does not supply Kokoro weights, voices, dictionaries, or runtime packages.
 The default voice allowlist is empty. No Kokoro component is in the startup download plan.
 
@@ -176,7 +176,7 @@ Silero VAD v6.2.3. Copyright (c) 2020-present Silero Team. MIT. Keep the copyrig
 ```
 
 The startup download plan includes the model. No model bytes are in the repository.
-Image inventory stays `NOT CHECKED` because there is no image.
+The release checker examines each image layer and the startup plan.
 
 `assets/manifest.json` has the pinned file, package, and source statements.
 `docs/research/q8-silero.md` records the owner answer and initial conflicting statements.
@@ -217,7 +217,7 @@ SOFTWARE.
 
 The server runtime uses Piper 1.8.0 and pathvalidate 3.3.1.
 NumPy 2.5.4 and ONNX Runtime 1.31.0 are also runtime dependencies, not development-only dependencies.
-These records are for installed packages, not a built image.
+The service image keeps the installed packages and their license files.
 The model and package bytes stay external to the repository.
 Sources accessed: 2026-10-25. See `docs/research/q7t-local-tts.md` for the pinned sources and quotations.
 
@@ -333,8 +333,8 @@ Runtime sources:
 - ONNX Runtime: https://github.com/microsoft/onnxruntime
 - NumPy: https://github.com/numpy/numpy
 
-A future binary image must keep those files and all bundled-library notices.
-No built-image inventory or complete binary notice audit follows from this source record.
+Each binary image must keep those files and all bundled-library notices.
+The release checker makes a different inventory from the image layers.
 
 ## URL parser
 
@@ -361,3 +361,94 @@ The wheel's `licenses/NOTICE` contains this text:
 
 Keep the wheel's license and notice in each binary package.
 Source: https://pypi.org/project/yarl/1.25.1/.
+
+## Bundled package data
+
+The image keeps the installed runtime wheels without changes. This includes package data that the selected providers do not use.
+The records in `assets/manifest.json` give each model-like file, size, SHA-256, wheel source, and license quotation.
+These files do not select a different provider or voice.
+Only `onnx_asr/preprocessors/data/fbanks.npz` supplies data for the selected NumPy preprocessor.
+The selected providers do not use the other bundled ONNX files and NumPy arrays.
+
+```text
+numpy 2.5.4. BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0. Preserve the wheel license and notices.
+onnx-asr 0.12.0. MIT. Preserve the wheel license and notices.
+onnxruntime 1.31.0. MIT. Preserve the wheel license and notices.
+piper-tts 1.8.0. GPL-3.0-or-later. Preserve the wheel license and notices.
+Nakdimon. Copyright 2022, Elazar Gershuni. MIT. Preserve piper/hebrew/LICENSE and SOURCE.
+```
+
+The Nakdimon file has its own MIT notice in `piper/hebrew/LICENSE`.
+The Piper wheel also has a different Apache license for parts of the `g2pW` bridge.
+That notice does not change the license of Piper or the Lessac voice.
+The complete upstream notices stay in the installed packages.
+
+## Network and runtime libraries
+
+The image also contains these Python dependencies.
+Their wheel metadata gives these license statements:
+
+| Package | Version | License statement |
+|---|---|---|
+| aiohappyeyeballs | 2.7.1 | PSF-2.0 |
+| aiohttp | 3.14.5 | Apache-2.0 AND MIT |
+| aiosignal | 1.4.0 | Apache 2.0 |
+| attrs | 26.1.0 | MIT |
+| flatbuffers | 25.12.19 | Apache 2.0 |
+| frozenlist | 1.8.0 | Apache-2.0 |
+| idna | 3.20 | BSD-3-Clause |
+| multidict | 7.2.1 | Apache-2.0 |
+| packaging | 26.3 | Apache-2.0 OR BSD-2-Clause |
+| propcache | 0.5.4 | Apache-2.0 |
+| protobuf | 7.36.2 | 3-Clause BSD License |
+
+The image keeps the license and notice files from each wheel.
+
+`uv.lock` gives the versioned PyPI wheel URLs and SHA-256 values.
+
+`/app/wheel-provenance.json` identifies the installed wheel for each external runtime package.
+
+The image checker compares this record with the manifest and installed metadata.
+
+## Base image and operating-system packages
+
+The base is the official `python:3.14.3-slim-bookworm` multi-platform image:
+
+```text
+sha256:f21c0d5a44c56805654c15abccc1b2fd576c8d93aca0a3f74b4aba2dc92510e2
+```
+
+Python uses the PSF license. Its license text is `/usr/local/lib/python3.14/LICENSE.txt`.
+Source: https://www.python.org/downloads/release/python-3143/.
+The base image also keeps its `pip` installer, its MIT notice files, and its Python headers.
+The server does not use these files. The image does not delete base-image package files.
+
+The image build uses `uv==0.13.1` only in its `build stage`. `uv` uses MIT OR Apache-2.0.
+Source: https://github.com/astral-sh/uv/tree/0.13.1.
+
+The Debian base keeps package notices in `/usr/share/doc/<package>/copyright`.
+Some package notices use `symbolic links` to the source package notice.
+Full license texts are in `/usr/share/common-licenses`.
+Debian source packages and copyright records are available from https://sources.debian.org/.
+The base digest sets the OS package bytes. The build installs no more OS packages.
+
+The base package inventory is:
+
+```text
+adduser apt base-files base-passwd bash bsdutils ca-certificates coreutils dash
+debconf debian-archive-keyring debianutils diffutils dpkg e2fsprogs findutils
+gcc-12-base gpgv grep gzip hostname init-system-helpers libacl1 libapt-pkg6.0
+libattr1 libaudit-common libaudit1 libblkid1 libbz2-1.0 libc-bin libc6 libcap-ng0
+libcap2 libcom-err2 libcrypt1 libdb5.3 libdebconfclient0 libext2fs2 libffi8
+libgcc-s1 libgcrypt20 libgdbm6 libgmp10 libgnutls30 libgpg-error0 libhogweed6
+libidn2-0 liblz4-1 liblzma5 libmd0 libmount1 libncursesw6 libnettle8 libp11-kit0
+libpam-modules libpam-modules-bin libpam-runtime libpam0g libpcre2-8-0
+libreadline8 libseccomp2 libselinux1 libsemanage-common libsemanage2 libsepol2
+libsmartcols1 libsqlite3-0 libss2 libssl3 libstdc++6 libsystemd0 libtasn1-6
+libtinfo6 libudev1 libunistring2 libuuid1 libxxhash0 libzstd1 login logsave mawk
+mount ncurses-base ncurses-bin netbase openssl passwd perl-base readline-common
+sed sysvinit-utils tar tzdata usr-is-merged util-linux util-linux-extra zlib1g
+```
+
+`gcc-12-base` supplies runtime records, not a compiler.
+The build does not copy a compiler, `uv`, or a wheel-build environment to the last image.

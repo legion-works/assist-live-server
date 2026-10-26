@@ -116,3 +116,42 @@ Names do not go into log messages, errors, or metric dimensions. The event-reten
 The server stores a `final` transcript only when the server and the turn each set `record_transcripts=True`.
 The two options default to `false`. The server does not store `partial` transcripts.
 STT and TTS timing records include the selected provider and the actual destination.
+
+## Server command and image options
+
+Run `assist-live-server` or `python -m assist_live_server` to start the service.
+The service keeps `registry.json` and `turns.sqlite3` in its data directory.
+The registry uses mode `0600`. Provision integration credentials before the authenticated health check can succeed.
+The service does not use an HA administrator credential.
+
+| Environment variable | Default | App option | Purpose |
+|---|---|---|---|
+| `ASSIST_LIVE_STT_PROVIDER` | `parakeet` | `stt_provider` | Select STT, or `none` to disable it. |
+| `ASSIST_LIVE_TTS_PROVIDER` | `piper` | `tts_provider` | Select TTS, or `none` to disable it. |
+| `ASSIST_LIVE_LOCAL_ONLY` | `true` | `local_only` | Refuse cloud providers. |
+| `ASSIST_LIVE_RECORD_TRANSCRIPTS` | `false` | `record_transcripts` | Set the server transcript policy. |
+| `ASSIST_LIVE_SPEAKER_URL` | empty | `speaker_url` | Set the speaker destination. |
+| `ASSIST_LIVE_DOWNLOAD_MODELS` | `true` | `download_models` | Download missing selected startup files. |
+| `DEEPGRAM_API_KEY` | empty | `deepgram_api_key` | Supply a runtime secret. |
+| `ELEVENLABS_API_KEY` | empty | `elevenlabs_api_key` | Supply a runtime secret. |
+| `ASSIST_LIVE_DATA` | `/data` | none | Set the data directory. |
+| `ASSIST_LIVE_MODEL_CACHE` | data directory plus `cache` | none | Set the local model cache. |
+| `ASSIST_LIVE_HOST` | `0.0.0.0` | none | Set the server address. |
+| `ASSIST_LIVE_PORT` | `8099` | none | Set the TCP port. |
+| `ASSIST_LIVE_ASSET_MANIFEST` | packaged manifest | none | Set the manifest for `--fetch-models` only. |
+
+Boolean environment values must be `true` or `false`. The data directory must be writable by the service user.
+The app reads `/data/options.json` and maps only the listed app options.
+It does not put secrets in command arguments or print their values.
+
+The manifest `download_plan` supplies startup models, tokenizers, and voices only.
+`build_plan` supplies package provenance. The image installs these runtime wheels from `uv.lock` during the build.
+The server does not download runtime wheel archives at startup.
+Each download goes to its canonical cache path. A checked `hard link` also supplies the basename that the provider loaders use.
+The same SHA-256 check applies to files in the cache.
+
+Use `assist-live-server --fetch-models` to prepare the selected downloads without starting the service.
+Use `assist-live-server --healthcheck` for the authenticated `/health` check on loopback.
+That check reads a token from the private registry. It prints no token or key.
+The command gives a nonzero status and one named failure line for a startup or model-check error.
+No cloud credential test is part of the local package checks.

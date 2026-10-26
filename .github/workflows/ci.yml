@@ -87,8 +87,38 @@ jobs:
         run: |
           gitleaks git . --redact --exit-code 1
           gitleaks dir . --redact --exit-code 1
+  images:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@85856786d1ce8acfbcc2f13a5f3fbd6b938f9f41 # v7.1.2
+        with:
+          version: "0.13.1"
+          python-version: "3.14.3"
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+        with:
+          platforms: arm64
+          image: tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+        with:
+          version: v0.38.1
+          driver: docker-container
+          driver-opts: image=moby/buildkit@sha256:0039c1d47e8748b5afea56f4e85f14febaf34452bd99d9552d2daa82262b5cc5
+      - name: Build and check platform artifacts
+        run: |
+          for platform in linux/amd64 linux/arm64; do
+            arch="${platform#linux/}"
+            for target in service app; do
+              docker buildx build --platform "$platform" --target "$target" --provenance=false --output "type=oci,dest=$RUNNER_TEMP/$target-$arch.tar" .
+              uv run --locked python tools/check_release.py --image "$RUNNER_TEMP/$target-$arch.tar" --assets assets/manifest.json --expect-platform "$platform" --inventory "$RUNNER_TEMP/$target-$arch.json"
+            done
+          done
+          uv run --locked python tools/check_release.py --image "$RUNNER_TEMP/service-arm64.tar" --assets assets/manifest.json --compare-inventory "$RUNNER_TEMP/service-amd64.json"
+          uv run --locked python tools/check_release.py --image "$RUNNER_TEMP/app-arm64.tar" --assets assets/manifest.json --compare-inventory "$RUNNER_TEMP/app-amd64.json"
   ci-complete:
-    needs: [checks, secret-scan]
+    needs: [checks, secret-scan, images]
     if: always()
     runs-on: ubuntu-latest
     steps:

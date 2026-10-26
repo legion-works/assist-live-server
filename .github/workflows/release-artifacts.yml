@@ -28,6 +28,11 @@ jobs:
         run: uv run --locked python tools/check_ci.py --package client
       - name: Check repository asset rights
         run: uv run --locked python tools/check_assets.py --manifest assets/manifest.json --release
+      - name: Check client wheel and published dependency
+        run: |
+          CLIENT_VERSION=$(uv run --locked python -c 'import tomllib; from pathlib import Path; print(tomllib.loads(Path("client/pyproject.toml").read_text())["project"]["version"])')
+          uv build --package assist-live-client
+          uv run --locked python tools/check_release.py --wheel dist --assets assets/manifest.json --pypi-version "$CLIENT_VERSION" --require-published
   server:
     runs-on: ubuntu-latest
     steps:
@@ -49,3 +54,20 @@ jobs:
         run: uv run --locked python tools/check_assets.py --manifest assets/manifest.json --release
       - name: Check isolated server distribution
         run: uv run --locked python tools/check_ci.py --package server
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+        with:
+          platforms: arm64
+          image: tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+        with:
+          version: v0.38.1
+          driver: docker-container
+          driver-opts: image=moby/buildkit@sha256:0039c1d47e8748b5afea56f4e85f14febaf34452bd99d9552d2daa82262b5cc5
+      - name: Check image records without publication
+        run: |
+          for platform in linux/amd64 linux/arm64; do
+            arch="${platform#linux/}"
+            docker buildx build --platform "$platform" --provenance=false --output "type=oci,dest=$RUNNER_TEMP/server-$arch.tar" .
+            uv run --locked python tools/check_release.py --image "$RUNNER_TEMP/server-$arch.tar" --assets assets/manifest.json --expect-platform "$platform" --inventory "$RUNNER_TEMP/server-$arch.json"
+          done
+          uv run --locked python tools/check_release.py --image "$RUNNER_TEMP/server-arm64.tar" --assets assets/manifest.json --compare-inventory "$RUNNER_TEMP/server-amd64.json"

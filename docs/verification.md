@@ -2619,3 +2619,74 @@ uv run --project "$WORKSPACE/assist-live" python "$WORKSPACE/assist-live/tools/c
 
 The full suite runs after all file changes, with this document included.
 The full checks run again after each result entry.
+
+## Release artifact packaging
+
+Date: 2026-10-26 (UTC).
+
+The initial `uv run pytest tests/test_release.py -q` gave `1 failed`.
+The error was `FileNotFoundError` for the missing `ha-app/config.yaml`.
+The test checks that the app has no HA API access.
+
+The package check command is:
+
+```sh
+uv run pytest tests/test_release.py tests/test_main.py tests/test_ci.py -q
+```
+
+Result: `53 passed`. The tests include archive record mutations and server startup on loopback.
+Bad configuration and an incorrect SHA-256 give one named failure line without secret values.
+
+The native artifact commands are:
+
+```sh
+uv build --package assist-live-client
+docker build --platform linux/amd64 --tag assist-live-server:check .
+
+docker save --output "$RUNROOT/server-image.tar" assist-live-server:check
+uv run python tools/check_release.py --wheel dist --image "$RUNROOT/server-image.tar" --assets assets/manifest.json
+```
+
+Result: `PASS release checks`. The image contains 42 recorded model-like package files, with 32980143 bytes in total.
+The selected providers do not use 32960567 of these bytes. The image keeps all runtime wheel files without changes.
+
+The client wheel uses `aiohttp<4,>=3.14.4` as its only `direct dependency`.
+A new Python `3.14.2` environment installed this wheel and its dependencies only.
+Result: `PASS isolated model-free client`. The environment had no server package or model runtime.
+
+The app uses `root`. The standalone service uses UID `10001`.
+The [HA options notice](https://developers.home-assistant.io/blog/2020/10/29/supervisor-update/#add-on-options) states that `/data/options.json` uses mode `600`.
+It gives `root` as the default container user.
+
+The [current HA folder document](https://developers.home-assistant.io/docs/apps/configuration/#folders) identifies `/data` as private app data with read and write access.
+A local app container read root-owned mode-`0600` options and wrote its SQLite store to a root-owned `/data` directory.
+Result: `PASS app started with root-owned mode-0600 options and wrote SQLite store`.
+No live Supervisor installation test ran.
+
+The [HA BuildKit document](https://developers.home-assistant.io/blog/2026/04/02/builder-migration/#update-dockerfiles) says that new builds do not use `build.yaml`.
+The app uses Dockerfile base-image definitions, not the deprecated file.
+
+The startup plan downloads models, tokenizers, and voices only. The build plan identifies installed runtime wheel sources.
+The image checker compares installed versions and wheel hashes with these records.
+It also checks model-like file bytes, source quotations, attribution, and license claims.
+
+Seventeen isolated source mutations each gave an unsatisfactory behavior test result.
+Result: `PASS numbered mutations=17`. The source tree did not change during the mutation checks.
+
+The base image keeps its installer and headers without changes.
+A runtime-image check makes sure that no compiler or `uv` is available.
+The Dockerfile test refuses a base-image path deletion or a build-tool copy from the build environment.
+
+Command: `ASSIST_LIVE_MODEL_CACHE="$MODEL_CACHE" task check`.
+Results: `806 passed`, `Success: no issues found in 45 source files`, `PASS CI boundaries`, and `PASS asset licenses`.
+The two isolated package checks gave `PASS isolated client and server packages`.
+The `secret scans` found no leaks in the files or history.
+
+The worktree has no sibling privacy-checker directory, so the task prints `NOT CHECKED public tree`.
+The last privacy gate uses the canonical checker from the integration repository with `--history` and the private denylist.
+This command does not change the public tree or its history.
+
+CI has amd64 and aarch64 OCI builds that compare license inventories without a push.
+No local aarch64 build or hosted run completed in this check.
+The artifact workflow stays manual and fail-closed behind the publication approval `variable`.
+No publication, registry login, tag, or release ran.

@@ -7,6 +7,52 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_images_use_pinned_emulation_and_no_push():
+    import re
+
+    workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+    images = workflow["jobs"]["images"]
+    actions = {
+        step.get("uses", "").split("@")[0]: step
+        for step in images["steps"]
+        if "uses" in step
+    }
+    for action in ("docker/setup-qemu-action", "docker/setup-buildx-action"):
+        assert re.fullmatch(r"[a-f0-9]{40}", actions[action]["uses"].split("@")[1])
+    assert actions["docker/setup-buildx-action"]["with"]["driver"] == "docker-container"
+    build = next(
+        step["run"]
+        for step in images["steps"]
+        if step.get("name") == "Build and check platform artifacts"
+    )
+    assert "--push" not in build
+    assert "linux/amd64 linux/arm64" in build
+    assert "type=oci" in build and "RUNNER_TEMP" in build
+    assert "--image" in build and "--compare-inventory" in build
+    assert "--expect-platform" in build
+    assert "images" in workflow["jobs"]["ci-complete"]["needs"]
+
+
+def test_release_checks_keep_first_step_guard_and_check_pypi():
+    workflow = yaml.safe_load(
+        (ROOT / ".github/workflows/release-artifacts.yml").read_text()
+    )
+    for job in workflow["jobs"].values():
+        assert job["steps"][0]["run"] == 'test "$RELEASES_APPROVED" = "true"'
+    scripts = "\n".join(
+        step.get("run", "")
+        for job in workflow["jobs"].values()
+        for step in job["steps"]
+    )
+    assert "--wheel" in scripts and "--image" in scripts
+    assert "--pypi-version" in scripts and "--require-published" in scripts
+    assert not any(
+        step.get("uses", "").startswith("actions/upload-artifact")
+        for job in workflow["jobs"].values()
+        for step in job["steps"]
+    )
+
+
 def test_secret_scans_include_history_and_full_checkout(tmp_path):
     import json
     import os
