@@ -17,10 +17,29 @@ from assist_live_server.auth import Registry
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def entrypoint_command(tmp_path, name, *args):
+    report = tmp_path / f"{name}-imports.json"
+    code = f"""
+import atexit
+import json
+import runpy
+import sys
+from pathlib import Path
+def report():
+    Path({str(report)!r}).write_text(json.dumps(sorted(
+        name for name in sys.modules if name.startswith("onnxruntime")
+    )))
+atexit.register(report)
+runpy.run_module("assist_live_server", run_name="__main__")
+"""
+    return [sys.executable, "-c", code, *args]
+
+
 def environment(tmp_path):
     return {
         **os.environ,
         "ASSIST_LIVE_DATA": str(tmp_path),
+        "ASSIST_LIVE_MODEL_CACHE": str(tmp_path / "cache"),
         "ASSIST_LIVE_STT_PROVIDER": "none",
         "ASSIST_LIVE_TTS_PROVIDER": "none",
         "ASSIST_LIVE_DOWNLOAD_MODELS": "false",
@@ -37,7 +56,7 @@ def test_valid_startup_serves_health(tmp_path, provisioned):
         registry.bind("test-satellite", "test-satellite", b"x" * 32)
         registry.add_token("synthetic-health-token", ["test-satellite"])
     process = subprocess.Popen(
-        [sys.executable, "-m", "assist_live_server"],
+        entrypoint_command(tmp_path, "server"),
         env=environment(tmp_path),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -49,7 +68,7 @@ def test_valid_startup_serves_health(tmp_path, provisioned):
         assert line.startswith("PASS server: listening "), line
         port = int(line.split()[-1])
         health = subprocess.run(
-            [sys.executable, "-m", "assist_live_server", "--healthcheck"],
+            entrypoint_command(tmp_path, "health", "--healthcheck"),
             env={**environment(tmp_path), "ASSIST_LIVE_PORT": str(port)},
             capture_output=True,
             text=True,
@@ -58,6 +77,7 @@ def test_valid_startup_serves_health(tmp_path, provisioned):
         assert health.returncode == 0, health.stdout + health.stderr
         assert health.stdout == "PASS server: health checked\n"
         assert health.stderr == ""
+        assert json.loads((tmp_path / "health-imports.json").read_text()) == []
         if provisioned:
             request = Request(
                 f"http://127.0.0.1:{port}/health",
@@ -70,51 +90,162 @@ def test_valid_startup_serves_health(tmp_path, provisioned):
         process.terminate()
         stdout, stderr = process.communicate(timeout=10)
     assert process.returncode == 0
+    assert json.loads((tmp_path / "server-imports.json").read_text()) == []
     assert "synthetic-password-value" not in stdout + stderr
     assert (tmp_path / "turns.sqlite3").exists()
     assert (tmp_path / "registry.json").stat().st_mode & 0o777 == 0o600
 
 
 @pytest.mark.parametrize("initial", [None, "0"])
-def test_entrypoint_disables_telemetry_before_onnxruntime_import(initial):
-    code = """
+@pytest.mark.parametrize("failure", [None, "missing", "broken"])
+def test_entrypoint_disables_telemetry_before_onnxruntime_import(
+    tmp_path, initial, failure
+):
+    provider = tmp_path / "fake_piper.py"
+    provider.write_text("""
+import onnxruntime
+class PiperProvider:
+    @classmethod
+    async def load(cls, cache):
+        return cls()
+""")
+    code = f"""
 import importlib.abc
+import importlib.util
+import hashlib
 import os
 import sys
+from pathlib import Path
 seen = []
+cache = Path(os.environ["ASSIST_LIVE_DATA"]) / "cache"
 class Check(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
+        if fullname == "assist_live_server.providers.piper":
+            return importlib.util.spec_from_file_location(fullname, {str(provider)!r})
         if fullname == "onnxruntime":
             assert "onnxruntime" not in sys.modules
             assert os.environ.get("ORT_DISABLE_TELEMETRY") == "1"
+            assert (cache / "voice.onnx").read_bytes() == b"synthetic model bytes"
             seen.append(fullname)
+            if {failure!r} == "missing":
+                raise ModuleNotFoundError("synthetic missing runtime")
+            if {failure!r} == "broken":
+                raise OSError("synthetic broken runtime")
         return None
 sys.meta_path.insert(0, Check())
-import assist_live_server.__main__
+import assist_live_server.__main__ as startup
+assert seen == []
+path = cache / "models/voice.onnx"
+path.parent.mkdir(parents=True)
+path.write_bytes(b"synthetic model bytes")
+record = {{
+    "id": "voice", "kind": "voice", "download": "startup", "status": "included",
+    "revision": "a" * 40, "url": "https://example.com/" + "a" * 40 + "/voice.onnx",
+    "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+    "paths": ["models/voice.onnx"], "components": [],
+}}
+startup.load_asset_manifest = lambda: {{
+    "assets": [record],
+    "download_plan": [{{"id": "voice", "path": "models/voice.onnx",
+                       "url": record["url"], "sha256": record["sha256"]}}],
+}}
+status = startup.main([])
 assert seen == ["onnxruntime"]
 assert os.environ["ORT_DISABLE_TELEMETRY"] == "1"
+assert ("onnxruntime" in sys.modules) == {failure is None!r}
 print("PASS telemetry disabled before ONNX Runtime import")
+raise SystemExit(status)
 """
-    env = dict(os.environ)
+    env = {**environment(tmp_path), "ASSIST_LIVE_TTS_PROVIDER": "piper"}
     env.pop("ORT_DISABLE_TELEMETRY", None)
     if initial is not None:
         env["ORT_DISABLE_TELEMETRY"] = initial
-    result = subprocess.run(
+    process = subprocess.Popen(
         [sys.executable, "-c", code],
         env=env,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        timeout=20,
+    )
+    try:
+        line = ""
+        if failure is None:
+            assert select.select([process.stdout], [], [], 20)[0]
+            line = process.stdout.readline()
+            assert line.startswith("PASS server: listening "), line
+            health = subprocess.run(
+                [sys.executable, "-m", "assist_live_server", "--healthcheck"],
+                env={**env, "ASSIST_LIVE_PORT": line.split()[-1]},
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            assert health.returncode == 0, health.stdout + health.stderr
+            process.terminate()
+        stdout, stderr = process.communicate(timeout=20)
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.communicate(timeout=10)
+    assert process.returncode == (0 if failure is None else 1), line + stdout + stderr
+    expected = "PASS telemetry disabled before ONNX Runtime import\n"
+    if failure is not None:
+        expected = (
+            "FAIL server: startup configuration or model check failed\n" + expected
+        )
+    assert stdout == expected
+    assert "synthetic-password-value" not in line + stdout + stderr
+    assert "Traceback" not in stderr and "telemetry_1ds" not in stderr
+    # Hyper-V CI hosts can emit an ONNX Runtime PCI device-discovery warning.
+    assert all("onnxruntime" in row for row in stderr.splitlines())
+
+
+@pytest.mark.parametrize("failure", ["missing", "broken"])
+def test_detector_import_defers_runtime_failure_until_construction(tmp_path, failure):
+    code = f"""
+import importlib.abc
+import hashlib
+import sys
+from pathlib import Path
+class Check(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "onnxruntime":
+            if {failure!r} == "missing":
+                raise ModuleNotFoundError("synthetic missing runtime")
+            raise OSError("synthetic broken runtime")
+        return None
+sys.meta_path.insert(0, Check())
+from assist_live_server.turn import detector
+from assist_live_server.assets import model_path, verified_model
+assert detector.model_path is model_path
+assert detector.verified_model is verified_model
+assert "onnxruntime" not in sys.modules
+cache = Path({str(tmp_path)!r})
+path = cache / "model.onnx"
+path.write_bytes(b"synthetic model bytes")
+record = {{"id": "model", "path": path.name,
+           "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}}
+detector.model_records = lambda manifest: dict.fromkeys(detector.MODEL_IDS, record)
+try:
+    detector.ModelRuntime(cache)
+except (ModuleNotFoundError, OSError) as error:
+    assert str(error) == "synthetic " + {failure!r} + " runtime"
+else:
+    raise AssertionError("runtime failure was hidden")
+print("PASS runtime failure at construction")
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, timeout=20
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert result.stdout == "PASS telemetry disabled before ONNX Runtime import\n"
-    assert "telemetry_1ds" not in result.stderr
+    assert result.stdout == "PASS runtime failure at construction\n"
+    assert result.stderr == ""
 
 
 def test_health_failure_has_its_own_sanitized_line(tmp_path):
     Registry(tmp_path / "registry.json").save()
     result = subprocess.run(
-        [sys.executable, "-m", "assist_live_server", "--healthcheck"],
+        entrypoint_command(tmp_path, "health-failure", "--healthcheck"),
         env=environment(tmp_path),
         capture_output=True,
         text=True,
@@ -125,10 +256,12 @@ def test_health_failure_has_its_own_sanitized_line(tmp_path):
         result.stdout == "FAIL health: server unavailable or health response invalid\n"
     )
     assert result.stderr == ""
+    assert json.loads((tmp_path / "health-failure-imports.json").read_text()) == []
 
 
 def test_default_cache_reaches_turn_detector_environment(tmp_path, monkeypatch):
     import assist_live_server.__main__ as startup
+    from assist_live_server.config import ProviderFactory
 
     monkeypatch.setenv("ASSIST_LIVE_DATA", str(tmp_path))
     monkeypatch.setenv("ASSIST_LIVE_STT_PROVIDER", "none")
@@ -141,7 +274,7 @@ def test_default_cache_reaches_turn_detector_environment(tmp_path, monkeypatch):
         assert resolved_cache == str(cache) == str(tmp_path / "cache")
         raise RuntimeError("stop before app setup")
 
-    monkeypatch.setattr(startup.ProviderFactory, "load", load)
+    monkeypatch.setattr(ProviderFactory, "load", load)
     with pytest.raises(RuntimeError, match="stop before app setup"):
         asyncio.run(startup.serve())
 
@@ -184,7 +317,7 @@ def test_health_does_not_accept_other_refusals(
 
 def test_bad_configuration_exits_without_secret(tmp_path):
     result = subprocess.run(
-        [sys.executable, "-m", "assist_live_server"],
+        entrypoint_command(tmp_path, "configuration"),
         env={
             **environment(tmp_path),
             "ASSIST_LIVE_STT_PROVIDER": "synthetic-password-value",
@@ -196,9 +329,11 @@ def test_bad_configuration_exits_without_secret(tmp_path):
     assert result.returncode == 1
     assert result.stdout == "FAIL server: startup configuration or model check failed\n"
     assert result.stderr == ""
+    assert json.loads((tmp_path / "configuration-imports.json").read_text()) == []
 
 
-def test_bad_cached_hash_exits_without_traceback(tmp_path):
+@pytest.mark.parametrize("fetch_only", [False, True])
+def test_bad_cached_hash_exits_without_traceback(tmp_path, fetch_only):
     cache = tmp_path / "cache"
     (cache / "models").mkdir(parents=True)
     (cache / "models/voice.onnx").write_bytes(b"wrong")
@@ -229,10 +364,20 @@ def test_bad_cached_hash_exits_without_traceback(tmp_path):
             }
         )
     )
+    if not fetch_only:
+        from assist_live_server.assets import load_asset_manifest
+
+        entry = load_asset_manifest()["download_plan"][0]
+        path = cache / entry["path"]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"wrong")
     result = subprocess.run(
-        [sys.executable, "-m", "assist_live_server", "--fetch-models"],
+        entrypoint_command(
+            tmp_path, "hash", *(["--fetch-models"] if fetch_only else [])
+        ),
         env={
             **environment(tmp_path),
+            "ASSIST_LIVE_TTS_PROVIDER": "piper",
             "ASSIST_LIVE_ASSET_MANIFEST": str(manifest),
             "ASSIST_LIVE_MODEL_CACHE": str(cache),
         },
@@ -243,6 +388,7 @@ def test_bad_cached_hash_exits_without_traceback(tmp_path):
     assert result.returncode == 1
     assert result.stdout == "FAIL server: startup configuration or model check failed\n"
     assert result.stderr == ""
+    assert json.loads((tmp_path / "hash-imports.json").read_text()) == []
 
 
 def test_app_option_mapping_keeps_password_out_of_output(tmp_path, monkeypatch, capsys):

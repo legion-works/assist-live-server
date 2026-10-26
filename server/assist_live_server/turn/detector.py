@@ -13,10 +13,10 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ..assets import load_asset_manifest
+from ..assets import model_path as model_path
+from ..assets import verified_model as verified_model
 from .profiles import HARD_ENDPOINT_MS, PROFILES, Profile
 from .transcript_guard import complete_partial
-
-ort = importlib.import_module("onnxruntime")
 
 Samples = NDArray[np.float32]
 Probability = Callable[[Samples], float]
@@ -68,25 +68,6 @@ def model_records(manifest: Path | str | None = None) -> dict[str, dict[str, Any
             raise ValueError("model download path must be relative to cache")
         selected[name] = {**row, **entry}
     return selected
-
-
-def model_path(cache: Path, record: dict[str, Any]) -> Path:
-    root = cache.resolve()
-    path = (root / record["path"]).resolve()
-    if not path.is_relative_to(root):
-        raise ValueError("model download path must stay inside cache")
-    return path
-
-
-def verified_model(cache: Path, record: dict[str, Any]) -> Path:
-    path = model_path(cache, record)
-    if not path.is_file():
-        raise ValueError(
-            f"FAIL model cache: missing {record['id']}; run --fetch-models"
-        )
-    if hashlib.sha256(path.read_bytes()).hexdigest() != record["sha256"]:
-        raise ValueError(f"model SHA-256 mismatch: {record['id']}")
-    return path
 
 
 def fetch_models(cache: Path | str, manifest: Path | str) -> None:
@@ -145,6 +126,7 @@ class ModelRuntime:
             name: verified_model(Path(cache), record)
             for name, record in records.items()
         }
+        ort = importlib.import_module("onnxruntime")
         options = ort.SessionOptions()
         options.intra_op_num_threads = 1
         options.inter_op_num_threads = 1

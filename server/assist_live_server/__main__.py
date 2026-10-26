@@ -14,14 +14,8 @@ from urllib.request import Request, urlopen
 # ONNX Runtime reads this opt-out before its first import, not at session setup.
 os.environ["ORT_DISABLE_TELEMETRY"] = "1"
 
-from aiohttp import web  # noqa: E402
-
-from .app import create_app  # noqa: E402
-from .assets import load_asset_manifest  # noqa: E402
+from .assets import load_asset_manifest, model_path, verified_model  # noqa: E402
 from .auth import Registry  # noqa: E402
-from .config import ProviderFactory, ServerConfig  # noqa: E402
-from .store import SQLiteStore  # noqa: E402
-from .turn.detector import model_path, verified_model  # noqa: E402
 
 
 def boolean(name: str, default: str) -> bool:
@@ -111,6 +105,8 @@ def fetch_plan(cache: Path, document: dict[str, Any], *, download: bool) -> None
 
 
 async def serve() -> None:
+    from .config import ProviderFactory, ServerConfig
+
     def provider(name: str, default: str) -> str | None:
         value = os.environ.get(name, default)
         return None if value == "none" else value
@@ -134,6 +130,11 @@ async def serve() -> None:
             download=boolean("ASSIST_LIVE_DOWNLOAD_MODELS", "true"),
         )
     factory = await ProviderFactory.load(config, cache=cache)
+    from aiohttp import web
+
+    from .app import create_app
+    from .store import SQLiteStore
+
     registry_path = data / "registry.json"
     if registry_path.exists():
         registry = Registry.load(registry_path)

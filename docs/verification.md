@@ -2718,3 +2718,33 @@ The full gates run after all source and documentation changes.
 No history length is part of the privacy result record.
 
 The app folder and its slug use `assist-live-server`. This name is different from the Python package name.
+
+## Startup runtime imports
+
+Date: 2026-10-26.
+
+The Python `3.14.2` and `3.14.3` CI checks reported `5 failed, 901 passed`.
+The failure line included `[W:onnxruntime:Default, device_discovery.cc:95 GetPciBusId] Skipping pci_bus_id`.
+An eager detector import loaded ONNX Runtime before configuration and model checks.
+The Hyper-V CI host then emitted a PCI device-discovery warning on stderr.
+
+The command sets `ORT_DISABLE_TELEMETRY=1` before provider setup. The caller cannot override this value.
+Shared path and SHA-256 checks do not import the detector.
+The detector loads ONNX Runtime only when it makes a model runtime, after the model checks.
+The server imports `app` after configuration, download checks, and selected provider setup.
+
+Subprocess tests examine `sys.modules` after a live health check, disabled-provider startup, bad configuration, and bad cached hashes.
+These paths must not load ONNX Runtime. Their stderr assertions stay empty.
+A synthetic selected Piper module imports ONNX Runtime only after telemetry and cached-file checks.
+Other subprocess tests check missing and broken runtimes, named startup failures, and detector construction failures.
+
+Command: `uv run --locked pytest -q tests/test_main.py -k 'valid_startup or health_failure or bad_configuration or bad_cached_hash'`.
+RED result: `6 failed, 10 deselected` with `AssertionError: assert ['onnxruntime', ...] == []`.
+Command: `uv run --locked pytest -q tests/test_main.py`.
+GREEN result: `22 passed`.
+
+The eager-import mutation gave `6 failed, 16 deselected` in the no-import tests.
+The telemetry-override mutation gave `3 failed, 3 passed, 16 deselected`.
+The eager detector mutation gave `2 failed, 20 deselected` in the construction tests.
+The provider-before-hash-check mutation gave `6 failed, 16 deselected`.
+The last gates use source with no mutations.
