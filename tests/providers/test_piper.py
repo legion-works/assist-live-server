@@ -334,11 +334,16 @@ def _assembly_metrics(mode):
         if mode == "cap":
             return {"characters": 16383, "ms": await collect(16383)}
         if mode == "scaling":
-            samples = {4000: [], 8000: []}
-            for _ in range(3):
+            # The minimum of interleaved repeats is the time with the least
+            # interference from other processes. Sizes near the 16384-character
+            # limit keep each time well above timer and scheduler noise, so the
+            # ratio separates linear (about 2) from quadratic (about 4) growth.
+            await collect(1000)
+            samples = {8000: [], 16000: []}
+            for _ in range(5):
                 for size in samples:
                     samples[size].append(await collect(size))
-            small, large = (statistics.median(values) for values in samples.values())
+            small, large = (min(values) for values in samples.values())
             return {"n_ms": small, "2n_ms": large, "ratio": large / small}
         lags = []
         started, stopped = asyncio.Event(), asyncio.Event()
