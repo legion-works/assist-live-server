@@ -130,7 +130,24 @@ class AssistLiveClient:
             if type(item) is not bool:
                 raise ProtocolError("invalid health capability")
             fields[key] = item
-        return HealthCapabilities(value["healthy"], **fields)
+        local_only = value.get("local_only")
+        if local_only is not None and type(local_only) is not bool:
+            raise ProtocolError("invalid health local only")
+        destinations = value.get("destinations")
+        if destinations is not None and (
+            not isinstance(destinations, dict)
+            or any(
+                not isinstance(item, str) or item not in {"local", "cloud", "unknown"}
+                for item in destinations.values()
+            )
+        ):
+            raise ProtocolError("invalid health destinations")
+        return HealthCapabilities(
+            value["healthy"],
+            **fields,
+            local_only=local_only,
+            destinations=destinations,
+        )
 
     async def open_turn(self, turn: TurnOpen) -> None:
         await self._request("POST", "/v1/turns", data=asdict(turn))

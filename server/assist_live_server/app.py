@@ -243,6 +243,30 @@ def create_app(
 
     async def health(request: web.Request) -> web.Response:
         allowed(request)
+        destinations: dict[str, str] = {}
+        if audio_gateway is not None:
+            destinations["stt"] = audio_gateway.destination
+        elif backend is not None:
+            destinations["stt"] = "unknown"
+        if tts_gateway is not None:
+            destinations["tts"] = (
+                tts_gateway.destination
+                if tts_gateway.provider_factory is not None
+                else "unknown"
+            )
+        speaker = (
+            providers.speaker
+            if providers is not None
+            else audio_gateway.speaker
+            if audio_gateway is not None
+            else None
+        )
+        if speaker is not None or (
+            providers is not None and providers.config.speaker_url is not None
+        ):
+            destinations["speaker"] = (
+                getattr(speaker, "checked_destination", None) or "unknown"
+            )
         return web.json_response(
             {
                 "version": 1,
@@ -253,6 +277,10 @@ def create_app(
                     "text_positions": tts_gateway is not None
                     and tts_gateway.provider_factory is not None,
                 },
+                "local_only": providers.config.local_only
+                if providers is not None
+                else None,
+                "destinations": destinations,
             }
         )
 

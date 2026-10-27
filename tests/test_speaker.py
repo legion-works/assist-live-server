@@ -169,9 +169,11 @@ def test_checked_address_is_pinned_with_original_host_and_no_audio_file(
                 local_only=True,
                 resolver=resolve,
             )
+            assert speaker.checked_destination is None
             assert await speaker.identify(b"\x01\x00") == SpeakerResult(
                 "speaker-a", 0.2
             )
+            assert speaker.checked_destination == "local"
             assert received == [(f"speaker.invalid:{port}", b"\x01\x00")]
             assert resolutions == ["speaker.invalid"]
             assert list(tmp_path.iterdir()) == []
@@ -418,6 +420,7 @@ def test_mixed_dns_answers_report_the_connected_address_class():
             assert result.name == "speaker-a"
             assert getattr(result, "destination", None) == "local"
             assert speaker.destination == "cloud"
+            assert speaker.checked_destination == "cloud"
 
     asyncio.run(run())
 

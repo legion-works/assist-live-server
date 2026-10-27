@@ -2748,3 +2748,30 @@ The telemetry-override mutation gave `3 failed, 3 passed, 16 deselected`.
 The eager detector mutation gave `2 failed, 20 deselected` in the construction tests.
 The provider-before-hash-check mutation gave `6 failed, 16 deselected`.
 The last gates use source with no mutations.
+
+## Health policy and destinations
+
+Date: 2026-10-27 (UTC).
+
+The authenticated health body reports `local_only` and the configured STT, TTS, and speaker destinations.
+Missing fields from older servers give `None`. Servers without configuration report `local_only: null`.
+The speaker field uses the completed address check, not a new DNS request.
+Unauthenticated requests get `401 unauthorized` with no configuration information.
+
+Command: `uv run --locked pytest -q tests/contract/test_health.py`.
+RED result: `23 failed, 1 passed`, with `AttributeError: 'HealthCapabilities' object has no attribute 'local_only'`.
+Command: `uv run --locked pytest -q tests/contract/test_health.py tests/test_speaker.py`.
+GREEN result: `67 passed`.
+
+The health tests check local-only on and off, local and cloud STT, TTS-only operation, and missing or unchecked speaker plug-ins.
+Configuration checks must refuse cloud STT with local-only on before server startup.
+Loaded speaker tests use synthetic local and documentation addresses. Health requests must not resolve those addresses again.
+
+The clients at `8f3d60a`, `eb35c61`, and `b4a9202` accept the new default response without negotiation.
+Their initial health routes also accept the current client. Missing policy and destination fields decode to `None`.
+The first two client decoders read only `stt` and `tts`. The third also reads `text_positions`.
+All three ignore unknown top-level keys and unknown keys in `capabilities`.
+
+Sixteen mutations each gave a test failure.
+They changed policy reporting, provider or speaker destinations, missing parts, authentication, DNS access, defaults, field validation, and completed address checks.
+The last gates use source with no mutations.

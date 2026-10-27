@@ -1,4 +1,5 @@
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Literal, NotRequired, TypedDict
 from uuid import UUID
@@ -69,6 +70,8 @@ class HealthCapabilities:
     stt: bool = False
     tts: bool = False
     text_positions: bool = False
+    local_only: bool | None = None
+    destinations: Mapping[str, str] | None = None
 
 
 @dataclass(frozen=True)

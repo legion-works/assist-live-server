@@ -37,6 +37,21 @@ A provider supplied with `tts_provider` can declare `provider_id`. Without this 
 
 The configured factory is the server path that applies `local_only`.
 
+### Local-only health state
+
+Set `local_only=True` in `ServerConfig`, `ASSIST_LIVE_LOCAL_ONLY=true` for the command, or `local_only: true` in the app options.
+The authenticated [health response](protocol.md#health-functions) reports that flag and the destination of each configured part.
+The client gives these values through `health_capabilities().local_only` and `health_capabilities().destinations`.
+
+With local only on, the integration must use the server only when the reported `local_only` value is `true`.
+An older server without this field gives no policy confirmation. The integration must then use its fallback.
+`false` and `null` also give no local-only policy confirmation.
+Embedding code without `ServerConfig` gets `null`, also when its current providers are local.
+
+The speaker destination uses its checked address class, or `unknown` before its first check.
+The health request does not run a new check. Each speaker request checks all DNS answers before it sends audio.
+No speaker entry means that the server has no configured speaker plug-in.
+
 ### Local-only runtime paths
 
 Startup downloads are explicit model setup, not audio requests. `download_models` controls them.
