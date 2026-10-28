@@ -9,6 +9,7 @@ from .destinations import (
     Destination,
     Resolver,
     checked_addresses,
+    literal_destination,
     require_destination,
     resolve_addresses,
 )
@@ -138,6 +139,7 @@ class ProviderFactory:
                 resolver=resolver,
                 mode=mode,
             )
+            speaker.checked_destination = literal_destination(speaker.url, mode)
         return cls(config, stt, tts, speaker)
 
     def stt(self, provider: str) -> STTSession:

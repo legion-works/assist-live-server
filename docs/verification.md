@@ -2775,3 +2775,33 @@ All three ignore unknown top-level keys and unknown keys in `capabilities`.
 Sixteen mutations each gave a test failure.
 They changed policy reporting, provider or speaker destinations, missing parts, authentication, DNS access, defaults, field validation, and completed address checks.
 The last gates use source with no mutations.
+
+## Current speaker destination state
+
+Date: 2026-10-28 (UTC).
+
+Speaker health reports a completed class only for a literal IP address. A hostname always reports `unknown`.
+Each new request clears the class before resolution. Only the newest request can publish its checked class.
+A policy refusal publishes its class. A resolution failure with no class keeps `unknown`.
+
+The constructor's request-guard `mode` does not supply a completed check.
+The provider factory publishes the checked startup class for a literal address.
+
+STT and TTS sources supplied without a declared destination report `unknown`.
+Their request guards keep their previous defaults. Health does not use those defaults as destination information.
+
+Command: `uv run --locked pytest -q tests/contract/test_health.py -k 'speaker or injected_provider' --tb=line`.
+RED result: `12 failed, 4 passed, 24 deselected`.
+The failures include stale local state after a cloud policy refusal, state during resolution, and out-of-order checks.
+Hostname, constructor-mode, and undeclared-provider checks also gave destination assertion failures.
+
+Command: `uv run --locked pytest -q tests/contract/test_health.py tests/test_speaker.py tests/test_destinations.py tests/test_audio_gateway.py`.
+GREEN result: `106 passed`.
+
+Explicit invalid TTS destination attributes keep their earlier refusal. An attribute with `None` is not a missing attribute.
+
+The out-of-order test uses events, not time intervals. Its result was `PASS` in 20 subprocess runs, one after the other.
+The mutation without the sequence guard gave the same assertion failure in all five subprocess runs.
+
+Ten production-site mutations each gave a named test assertion failure. The unchanged import control gave `PASS`.
+The mutation checks left production files unchanged. The last gates use source with no mutations.

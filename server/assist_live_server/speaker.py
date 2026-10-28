@@ -13,8 +13,10 @@ from .destinations import (
     Destination,
     PinnedResolver,
     Resolver,
-    checked_addresses,
+    classified_addresses,
     classify_address,
+    literal_destination,
+    require_destination,
     resolve_addresses,
     speaker_url,
 )
@@ -60,14 +62,19 @@ class MurdockSpeaker:
         self.local_only = local_only
         self.resolver = resolver
         self.destination: Destination = mode or "local"
-        self.checked_destination = mode
+        self.checked_destination: Destination | None = None
+        self._check_sequence = 0
 
     async def identify(self, audio: bytes) -> SpeakerResult:
+        self._check_sequence += 1
+        sequence = self._check_sequence
+        self.checked_destination = None
         if len(audio) > MAX_AUDIO_BYTES or len(audio) % 2:
             raise ValueError("invalid speaker audio")
-        addresses, self.checked_destination = await checked_addresses(
-            self.url, local_only=self.local_only, resolver=self.resolver
-        )
+        addresses, mode = await classified_addresses(self.url, resolver=self.resolver)
+        if sequence == self._check_sequence:
+            self.checked_destination = literal_destination(self.url, mode)
+        require_destination(mode, self.local_only)
         # One pinned address makes the recorded destination the connection class.
         address = addresses[0]
         destination = classify_address(address)

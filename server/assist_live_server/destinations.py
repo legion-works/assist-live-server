@@ -63,8 +63,16 @@ async def resolve_addresses(host: str, port: int) -> tuple[str, ...]:
     return tuple(dict.fromkeys(str(row[4][0]) for row in rows))
 
 
-async def checked_addresses(
-    url: URL, *, local_only: bool, resolver: Resolver = resolve_addresses
+def literal_destination(url: URL, destination: Destination) -> Destination | None:
+    try:
+        ipaddress.ip_address(url.host or "")
+    except ValueError:
+        return None
+    return destination
+
+
+async def classified_addresses(
+    url: URL, *, resolver: Resolver = resolve_addresses
 ) -> tuple[tuple[str, ...], Destination]:
     assert url.host is not None and url.port is not None
     async with asyncio.timeout(5):
@@ -73,6 +81,13 @@ async def checked_addresses(
         raise ValueError("speaker destination has no addresses")
     destinations = [classify_address(address) for address in addresses]
     destination: Destination = "cloud" if "cloud" in destinations else "local"
+    return addresses, destination
+
+
+async def checked_addresses(
+    url: URL, *, local_only: bool, resolver: Resolver = resolve_addresses
+) -> tuple[tuple[str, ...], Destination]:
+    addresses, destination = await classified_addresses(url, resolver=resolver)
     require_destination(destination, local_only)
     return addresses, destination
 

@@ -18,7 +18,7 @@ def test_three_health_arguments_keep_positions_disabled():
 )
 @pytest.mark.parametrize("ready", [True, False])
 def test_health_capabilities_and_legacy_boolean(
-    tmp_path, store, replay_store, stt, tts, ready
+    tmp_path, store, replay_store, stt, tts, ready, monkeypatch
 ):
     from types import SimpleNamespace
 
@@ -30,6 +30,8 @@ def test_health_capabilities_and_legacy_boolean(
     from assist_live_server.providers.parakeet import ParakeetSession
     from assist_live_server.providers.piper import PiperProvider
 
+    monkeypatch.setattr(PiperProvider, "destination", "local", raising=False)
+
     async def run():
         registry = Registry(replay_store=replay_store)
         registry.bind("satellite-a", "satellite-a", b"test-device-secret")
@@ -38,7 +40,9 @@ def test_health_capabilities_and_legacy_boolean(
             create_app(
                 registry,
                 store if ready else None,
-                audio_gateway=AudioGateway(lambda _: ParakeetSession(lambda _: ""))
+                audio_gateway=AudioGateway(
+                    lambda _: ParakeetSession(lambda _: ""), destination="local"
+                )
                 if stt
                 else None,
                 tts_provider=PiperProvider(
@@ -204,7 +208,7 @@ def test_health_reports_checked_speaker_without_resolving(tmp_path, store, mode)
         async with health_service(tmp_path, app) as (client, _):
             assert (await client.health_capabilities()).destinations == {
                 "stt": "local",
-                "speaker": mode or "unknown",
+                "speaker": "unknown",
             }
 
     asyncio.run(run())
@@ -233,9 +237,17 @@ def test_health_tts_only_and_no_speaker(tmp_path, store):
 
 
 @pytest.mark.parametrize(
-    "address,want", [("127.0.0.1", "local"), ("192.0.2.1", "cloud")]
+    "host,address,want",
+    [
+        ("127.0.0.1", "127.0.0.1", "local"),
+        ("192.0.2.1", "192.0.2.1", "cloud"),
+        ("speaker.invalid", "127.0.0.1", "unknown"),
+        ("speaker.invalid", "192.0.2.1", "unknown"),
+    ],
 )
-def test_health_reports_loaded_speaker_address_class(tmp_path, store, address, want):
+def test_health_reports_loaded_speaker_address_class(
+    tmp_path, store, host, address, want
+):
     from assist_live_server.app import create_app
     from assist_live_server.auth import Registry
     from assist_live_server.config import ProviderFactory, ServerConfig
@@ -254,7 +266,7 @@ def test_health_reports_loaded_speaker_address_class(tmp_path, store, address, w
             stt_provider=None,
             tts_provider=None,
             local_only=False,
-            speaker_url="http://speaker.invalid/identify",
+            speaker_url=f"http://{host}/identify",
         )
         providers = await ProviderFactory.load(config, resolver=resolve)
         checked = len(resolutions)
@@ -265,6 +277,235 @@ def test_health_reports_loaded_speaker_address_class(tmp_path, store, address, w
                 "speaker": want
             }
             assert len(resolutions) == checked
+
+    asyncio.run(run())
+
+
+@pytest.fixture
+def stopped_speaker_connection(monkeypatch):
+    def stopped(*args, **kwargs):
+        raise ConnectionError("synthetic connection stop")
+
+    monkeypatch.setattr("assist_live_server.speaker.aiohttp.TCPConnector", stopped)
+
+
+@asynccontextmanager
+async def speaker_health_service(tmp_path, store, speaker):
+    from assist_live_server.app import create_app
+    from assist_live_server.auth import Registry
+    from assist_live_server.config import ProviderFactory, ServerConfig
+
+    registry = Registry()
+    registry.bind("satellite-a", "satellite-a", b"test-device-secret")
+    registry.add_token("test-token", ["satellite-a"])
+    config = ServerConfig(
+        stt_provider=None,
+        tts_provider=None,
+        local_only=False,
+        speaker_url=str(speaker.url),
+    )
+    app = create_app(
+        registry, store, providers=ProviderFactory(config, speaker=speaker)
+    )
+    async with health_service(tmp_path, app) as (client, _):
+        yield client
+
+
+@pytest.mark.parametrize("mode", ["local", "cloud"])
+def test_speaker_mode_is_not_a_completed_check(mode):
+    from assist_live_server.speaker import MurdockSpeaker
+
+    speaker = MurdockSpeaker("http://127.0.0.1/identify", mode=mode)
+    assert speaker.destination == mode
+    assert speaker.checked_destination is None
+
+
+def test_health_speaker_publishes_refused_literal_class(
+    tmp_path, store, stopped_speaker_connection
+):
+    from assist_live_server.destinations import speaker_url
+    from assist_live_server.speaker import MurdockSpeaker
+
+    async def resolve(host, port):
+        return (host,)
+
+    async def run():
+        speaker = MurdockSpeaker("http://127.0.0.1/identify", resolver=resolve)
+        async with speaker_health_service(tmp_path, store, speaker) as client:
+            with pytest.raises(ConnectionError, match="synthetic connection stop"):
+                await speaker.identify(b"\x00\x00")
+            assert (await client.health_capabilities()).destinations == {
+                "speaker": "local"
+            }
+            speaker.url = speaker_url("http://192.0.2.1/identify")
+            with pytest.raises(
+                ValueError, match="destination refused by local only policy"
+            ):
+                await speaker.identify(b"\x00\x00")
+            assert (await client.health_capabilities()).destinations == {
+                "speaker": "cloud"
+            }
+
+    asyncio.run(run())
+
+
+def test_health_speaker_is_unknown_during_check(
+    tmp_path, store, stopped_speaker_connection
+):
+    from assist_live_server.speaker import MurdockSpeaker
+
+    async def run():
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        calls = 0
+
+        async def resolve(host, port):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                entered.set()
+                await release.wait()
+            return (host,)
+
+        speaker = MurdockSpeaker("http://127.0.0.1/identify", resolver=resolve)
+        async with speaker_health_service(tmp_path, store, speaker) as client:
+            with pytest.raises(ConnectionError, match="synthetic connection stop"):
+                await speaker.identify(b"\x00\x00")
+            assert (await client.health_capabilities()).destinations == {
+                "speaker": "local"
+            }
+            pending = asyncio.create_task(speaker.identify(b"\x00\x00"))
+            try:
+                await entered.wait()
+                assert (await client.health_capabilities()).destinations == {
+                    "speaker": "unknown"
+                }
+            finally:
+                release.set()
+                with pytest.raises(ConnectionError, match="synthetic connection stop"):
+                    await pending
+            assert (await client.health_capabilities()).destinations == {
+                "speaker": "local"
+            }
+            assert calls == 2
+
+    asyncio.run(asyncio.wait_for(run(), 5))
+
+
+def test_health_speaker_newer_check_wins(tmp_path, store, stopped_speaker_connection):
+    from assist_live_server.speaker import MurdockSpeaker
+
+    async def run():
+        older_entered = asyncio.Event()
+        newer_entered = asyncio.Event()
+        older_release = asyncio.Event()
+        newer_release = asyncio.Event()
+        calls = 0
+
+        async def resolve(host, port):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                older_entered.set()
+                await older_release.wait()
+                return ("127.0.0.1",)
+            newer_entered.set()
+            await newer_release.wait()
+            return ("192.0.2.1",)
+
+        speaker = MurdockSpeaker(
+            "http://127.0.0.1/identify",
+            local_only=False,
+            resolver=resolve,
+        )
+        async with speaker_health_service(tmp_path, store, speaker) as client:
+            older = asyncio.create_task(speaker.identify(b"\x00\x00"))
+            newer = None
+            try:
+                await older_entered.wait()
+                newer = asyncio.create_task(speaker.identify(b"\x00\x00"))
+                await newer_entered.wait()
+                newer_release.set()
+                with pytest.raises(ConnectionError, match="synthetic connection stop"):
+                    await newer
+                assert (await client.health_capabilities()).destinations == {
+                    "speaker": "cloud"
+                }
+                older_release.set()
+                with pytest.raises(ConnectionError, match="synthetic connection stop"):
+                    await older
+                assert (await client.health_capabilities()).destinations == {
+                    "speaker": "cloud"
+                }
+                assert calls == 2
+            finally:
+                older_release.set()
+                newer_release.set()
+                await asyncio.gather(
+                    *(task for task in (older, newer) if task is not None),
+                    return_exceptions=True,
+                )
+
+    asyncio.run(asyncio.wait_for(run(), 5))
+
+
+def test_health_speaker_resolve_failure_clears_class(
+    tmp_path, store, stopped_speaker_connection
+):
+    from assist_live_server.speaker import MurdockSpeaker
+
+    async def run():
+        calls = 0
+
+        async def resolve(host, port):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise OSError("synthetic resolution failure")
+            return (host,)
+
+        speaker = MurdockSpeaker("http://127.0.0.1/identify", resolver=resolve)
+        async with speaker_health_service(tmp_path, store, speaker) as client:
+            with pytest.raises(ConnectionError, match="synthetic connection stop"):
+                await speaker.identify(b"\x00\x00")
+            assert (await client.health_capabilities()).destinations == {
+                "speaker": "local"
+            }
+            with pytest.raises(OSError, match="synthetic resolution failure"):
+                await speaker.identify(b"\x00\x00")
+            assert (await client.health_capabilities()).destinations == {
+                "speaker": "unknown"
+            }
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("part", ["stt", "tts"])
+def test_health_injected_provider_without_destination_is_unknown(tmp_path, store, part):
+    from types import SimpleNamespace
+
+    from assist_live_server.app import create_app
+    from assist_live_server.audio_gateway import AudioGateway
+    from assist_live_server.auth import Registry
+
+    async def run():
+        registry = Registry()
+        registry.bind("satellite-a", "satellite-a", b"test-device-secret")
+        registry.add_token("test-token", ["satellite-a"])
+        options = (
+            {"audio_gateway": AudioGateway(lambda _: None)}
+            if part == "stt"
+            else {"tts_provider": SimpleNamespace()}
+        )
+        async with health_service(tmp_path, create_app(registry, store, **options)) as (
+            client,
+            _,
+        ):
+            status = await client.health_capabilities()
+            assert status.local_only is None
+            assert status.destinations == {part: "unknown"}
+            assert status.stt is (part == "stt")
+            assert status.tts is (part == "tts")
 
     asyncio.run(run())
 
@@ -366,3 +607,14 @@ def test_health_client_keeps_unknown_and_future_parts(tmp_path):
             assert status.destinations == {"stt": "unknown", "future": "local"}
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("destination", [None, "remote"])
+def test_injected_tts_declared_invalid_destination_stays_refused(destination):
+    from types import SimpleNamespace
+
+    from assist_live_server.app import create_app
+    from assist_live_server.auth import Registry
+
+    with pytest.raises(ValueError, match="unknown TTS destination"):
+        create_app(Registry(), tts_provider=SimpleNamespace(destination=destination))

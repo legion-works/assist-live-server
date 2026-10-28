@@ -48,7 +48,9 @@ An older server without this field gives no policy confirmation. The integration
 `false` and `null` also give no local-only policy confirmation.
 Embedding code without `ServerConfig` gets `null`, also when its current providers are local.
 
-The speaker destination uses its checked address class, or `unknown` before its first check.
+The speaker destination reports a checked class only for a literal IP address.
+A hostname reports `unknown`, also after a completed check.
+Before or during an address check, or after a resolution failure, the class is `unknown`.
 The health request does not run a new check. Each speaker request checks all DNS answers before it sends audio.
 No speaker entry means that the server has no configured speaker plug-in.
 

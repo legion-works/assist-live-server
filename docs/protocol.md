@@ -44,10 +44,18 @@ A server without `ServerConfig` reports `null`, because embedding code owns its 
 The server includes only configured parts. An empty object means the server has no configured parts.
 Provider destinations come from the selected gateways and their provider registries.
 A legacy backend without destination information reports `unknown`.
+A TTS provider or STT gateway supplied without a declared destination also reports `unknown`.
 
-The speaker destination is the class from its last completed address check.
-It is `unknown` before the first check. The health request does not resolve addresses or contact a provider.
-Mixed local and cloud DNS answers report `cloud`. A turn result reports only its connected address class.
+The speaker destination reports a checked class only when the configured URL uses a literal IP address.
+A hostname always reports `unknown`. The health request does not resolve names or contact a provider.
+The constructor's `mode` is a request guard, not a completed address check.
+
+Each speaker request clears the reported class before its address check starts.
+The class stays `unknown` during that check and after a resolution failure with no class.
+Only the newest request can publish its checked class. An older check cannot replace it.
+
+A policy refusal completes the class check, so a refused literal cloud address reports `cloud`.
+Startup also publishes its completed literal-address check. A turn result reports only its connected address class.
 
 The server always sends these fields after authentication. No request parameter is necessary.
 Without a correct token, the route gives `401 unauthorized`, without configuration or destination information.

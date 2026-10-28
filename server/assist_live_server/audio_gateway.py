@@ -25,14 +25,15 @@ class AudioGateway:
         *,
         provider: str = "parakeet",
         detector_factory: Callable[[], TurnDetector] = TurnDetector,
-        destination: Destination = "local",
+        destination: Destination | None = None,
         local_only: bool = True,
         speaker: SpeakerPlugin | None = None,
     ) -> None:
         self.provider_factory = provider_factory
         self.provider = provider
         self.detector_factory = detector_factory
-        self.destination = destination
+        self.destination: Destination = destination or "local"
+        self.declared_destination = destination
         self.local_only = local_only
         self.speaker = speaker
 
