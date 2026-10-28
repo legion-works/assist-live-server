@@ -2805,3 +2805,25 @@ The mutation without the sequence guard gave the same assertion failure in all f
 
 Ten production-site mutations each gave a named test assertion failure. The unchanged import control gave `PASS`.
 The mutation checks left production files unchanged. The last gates use source with no mutations.
+
+## Declared timing destinations and health keys
+
+STT and TTS timing records do not include the destination when the supplied source has no declared class.
+Health keeps `unknown` for these sources. The request guards keep their earlier defaults.
+The timing destination values stay `local` and `cloud`.
+The packaged Parakeet and Piper paths keep their local destination records.
+
+The client keeps only `stt`, `tts`, and `speaker` destination keys.
+It drops other keys without an error or output of those keys.
+Invalid values for known keys cause a protocol error.
+Missing fields and explicit null values keep their earlier results.
+
+The initial destination tests gave `10 failed, 9 passed`.
+The failures found invented local timing destinations and unknown health keys.
+The packaged paths and the three historical health bodies gave `PASS` as controls before the change.
+The complete health tests then gave `69 passed`.
+
+Four isolated mutations each gave a named test assertion failure.
+Three used the request-guard default in timing metadata.
+One kept unknown destination keys in the decoded health result.
+The mutation checks left production files unchanged. The last gates use source with no mutations.

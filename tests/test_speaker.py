@@ -289,6 +289,7 @@ def test_real_speaker_reaches_client_and_record_without_transcript_change(
             gateway = AudioGateway(
                 lambda _: ParakeetSession(lambda _: "unchanged final"),
                 speaker=speaker,
+                destination="local",
                 detector_factory=lambda: TurnDetector(
                     vad_probability=lambda _: 1, turn_probability=lambda _: 0
                 ),

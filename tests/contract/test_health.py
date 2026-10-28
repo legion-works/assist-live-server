@@ -585,7 +585,7 @@ def test_health_client_accepts_unknown_keys_and_explicit_null(tmp_path):
     asyncio.run(run())
 
 
-def test_health_client_keeps_unknown_and_future_parts(tmp_path):
+def test_health_client_keeps_unknown_destination_but_drops_future_parts(tmp_path):
     from aiohttp import web
 
     async def health(request):
@@ -604,7 +604,7 @@ def test_health_client_keeps_unknown_and_future_parts(tmp_path):
         async with health_service(tmp_path, app) as (client, _):
             status = await client.health_capabilities()
             assert status.local_only is False
-            assert status.destinations == {"stt": "unknown", "future": "local"}
+            assert status.destinations == {"stt": "unknown"}
 
     asyncio.run(run())
 
@@ -618,3 +618,200 @@ def test_injected_tts_declared_invalid_destination_stays_refused(destination):
 
     with pytest.raises(ValueError, match="unknown TTS destination"):
         create_app(Registry(), tts_provider=SimpleNamespace(destination=destination))
+
+
+@pytest.mark.parametrize("part", ["stt", "tts", "speaker"])
+@pytest.mark.parametrize("invalid", ["remote", False, []])
+def test_health_client_rejects_invalid_known_destination(tmp_path, part, invalid):
+    from aiohttp import web
+    from assist_live_client.protocol import ProtocolError
+
+    async def health(request):
+        return web.json_response(
+            {
+                "version": 1,
+                "healthy": True,
+                "destinations": {part: invalid, "synthetic-token-content": "local"},
+            }
+        )
+
+    async def run():
+        app = web.Application()
+        app.router.add_get("/health", health)
+        async with health_service(tmp_path, app) as (client, _):
+            with pytest.raises(ProtocolError, match="^invalid health destinations$"):
+                await client.health_capabilities()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("extra_value", ["cloud", "remote", False, []])
+def test_health_client_drops_hostile_destination_keys(tmp_path, extra_value):
+    from aiohttp import web
+
+    known = {"stt": "local", "tts": "cloud", "speaker": "unknown"}
+
+    async def health(request):
+        return web.json_response(
+            {
+                "version": 1,
+                "healthy": True,
+                "destinations": {
+                    **known,
+                    "synthetic-token-content": extra_value,
+                    "synthetic-transcript-content": "local",
+                    "http://service.invalid": "unknown",
+                },
+            }
+        )
+
+    async def run():
+        app = web.Application()
+        app.router.add_get("/health", health)
+        async with health_service(tmp_path, app) as (client, _):
+            assert (await client.health_capabilities()).destinations == known
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("revision", ["8f3d60a", "eb35c61", "b4a9202"])
+@pytest.mark.parametrize("healthy", [True, False])
+def test_health_client_decodes_historical_bodies(tmp_path, revision, healthy):
+    from aiohttp import web
+    from assist_live_client import HealthCapabilities
+
+    positions = revision == "b4a9202"
+
+    async def health(request):
+        return web.json_response(
+            {
+                "version": 1,
+                "healthy": healthy,
+                "capabilities": {
+                    "stt": True,
+                    "tts": True,
+                    **({"text_positions": True} if positions else {}),
+                },
+            }
+        )
+
+    async def run():
+        app = web.Application()
+        app.router.add_get("/health", health)
+        async with health_service(tmp_path, app) as (client, _):
+            assert await client.health_capabilities() == HealthCapabilities(
+                healthy, True, True, positions, None, None
+            )
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("source", ["injected", "gateway", "legacy", "packaged"])
+@pytest.mark.parametrize("part", ["stt", "tts"])
+def test_timing_destinations_match_declared_sources(tmp_path, store, source, part):
+    from uuid import uuid7
+
+    from assist_live_client import TTSAudio, TTSFormat, TTSSentenceEnd, TurnOpen
+    from assist_live_client.protocol import encode_control
+    from assist_live_server.app import create_app
+    from assist_live_server.audio_gateway import AudioGateway
+    from assist_live_server.auth import Registry
+    from assist_live_server.config import ProviderFactory, ServerConfig
+    from assist_live_server.providers.parakeet import ParakeetSession
+    from assist_live_server.tts_gateway import TTSGateway
+    from assist_live_server.turn.detector import TurnDetector
+
+    class STT:
+        def session(self):
+            return ParakeetSession(lambda _: "synthetic final")
+
+    class TTS:
+        async def stream(self, text, voice):
+            assert [part async for part in text] == ["Synthetic text."]
+            yield TTSFormat("pcm_s16le", 16000, 1, 2)
+            yield TTSAudio(b"\x01\x00")
+            yield TTSSentenceEnd(0)
+
+    class Backend:
+        audio_format = TTSFormat("pcm_s16le", 16000, 1, 2)
+
+        async def stt(self, turn_id, audio):
+            async for _ in audio:
+                pass
+            yield encode_control("final", turn_id, text="synthetic final")
+
+        async def tts(self, turn_id, text, voice):
+            assert [part async for part in text] == ["Synthetic text."]
+            yield b"\x01\x00"
+            yield encode_control("sentence_end", turn_id, sentence=0)
+
+    async def run():
+        registry = Registry()
+        registry.bind("satellite-a", "satellite-a", b"synthetic-device-key")
+        registry.add_token("test-token", ["satellite-a"])
+        if source == "packaged":
+            options = {
+                "providers": ProviderFactory(
+                    ServerConfig(stt_provider="parakeet", tts_provider="piper"),
+                    STT(),
+                    TTS(),
+                )
+            }
+        elif source == "legacy":
+            options = {"backend": Backend()}
+        else:
+            options = {
+                "audio_gateway": AudioGateway(
+                    lambda _: STT().session(),
+                    detector_factory=lambda: TurnDetector(
+                        vad_probability=lambda _: 0, turn_probability=lambda _: 0
+                    ),
+                ),
+                **(
+                    {"tts_provider": TTS()}
+                    if source == "injected"
+                    else {"tts_gateway": TTSGateway(lambda _: TTS())}
+                ),
+            }
+        app = create_app(registry, store, **options)
+        async with health_service(tmp_path, app) as (client, _):
+            want = "local" if source == "packaged" else "unknown"
+            turn_id = str(uuid7())
+            await client.open_turn(
+                TurnOpen(turn_id, "satellite-a", "voice", None, None, False)
+            )
+
+            async def audio():
+                yield b"\x01\x00"
+
+            async def text():
+                yield "Synthetic text."
+
+            if part == "stt":
+                replies = [item async for item in client.stt(turn_id, audio())]
+                assert any(item["type"] == "final" for item in replies)
+            else:
+                assert [item async for item in client.tts(turn_id, text(), "voice")]
+            events = [
+                row["event"] for row in store.rows if row["event"]["turn_id"] == turn_id
+            ]
+            expected = (
+                {"stt_final"} if part == "stt" else {"tts_first_text", "tts_first_byte"}
+            )
+            assert expected <= {event["stage"] for event in events}
+            metadata = [e["data"] for e in events if e["data"].get("part") == part]
+            if source == "packaged":
+                assert metadata
+                assert all(data["destination"] == "local" for data in metadata)
+                assert all(
+                    data["provider"] == ("parakeet" if part == "stt" else "piper")
+                    for data in metadata
+                )
+            else:
+                assert all("destination" not in data for data in metadata)
+            assert (await client.health_capabilities()).destinations == {
+                "stt": want,
+                "tts": want,
+            }
+
+    asyncio.run(asyncio.wait_for(run(), 15))

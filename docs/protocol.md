@@ -60,9 +60,11 @@ Startup also publishes its completed literal-address check. A turn result report
 The server always sends these fields after authentication. No request parameter is necessary.
 Without a correct token, the route gives `401 unauthorized`, without configuration or destination information.
 The client ignores unknown top-level keys and unknown keys in `capabilities`.
+It keeps only `stt`, `tts`, and `speaker` keys in `destinations`.
+It drops other keys without an error for all values.
 
 An older server can have no new fields. The client then gives `None` for each missing field, not `False` or invented destinations.
-An explicit `null` also gives `None`. The client refuses an invalid field type or destination value with `ProtocolError`.
+An explicit `null` also gives `None`. The client refuses an invalid field type or a destination value for a known key with `ProtocolError`.
 See [server configuration](configuration.md) for the local-only option and integration rule.
 
 `capabilities.text_positions` is `true` for a factory TTS provider through the gateway.
@@ -449,6 +451,9 @@ Without a speaker plug-in, the streaming STT gateway sends an empty `name`, dist
 This result does not identify a speaker.
 
 Timing records for STT, TTS, fallback, and speaker ID use `data.part`, `data.provider`, and `data.destination` for the actual used service.
+STT and TTS timing records do not include `data.destination` when the source has no declared destination.
+They do not use the request guard's default as destination information.
+The packaged Parakeet and Piper paths keep `data.destination: local`.
 
 The backend supplies these records.
 The protocol does not select a provider or tune the `safe` and `fast` settings.

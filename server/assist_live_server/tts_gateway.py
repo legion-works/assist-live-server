@@ -19,13 +19,14 @@ class TTSGateway:
         provider_factory: Callable[[str], TTSProvider] | None = None,
         *,
         provider: str = "piper",
-        destination: Destination = "local",
+        destination: Destination | None = None,
         local_only: bool = True,
         backend: AudioBackend | None = None,
     ) -> None:
         self.provider_factory = provider_factory
         self.provider = provider
-        self.destination = destination
+        self.destination: Destination = "local" if destination is None else destination
+        self.declared_destination = destination
         self.local_only = local_only
         self.backend = backend
         if (provider_factory is None) == (backend is None):
@@ -78,8 +79,9 @@ class TTSGateway:
         metadata: dict[str, object] = {
             "part": "tts",
             "provider": self.provider,
-            "destination": self.destination,
         }
+        if self.provider_factory is not None and self.declared_destination is not None:
+            metadata["destination"] = self.declared_destination
         stream: AsyncIterator[TTSItem] | None = None
         first_text = False
         has_text = False

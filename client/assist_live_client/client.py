@@ -134,6 +134,12 @@ class AssistLiveClient:
         if local_only is not None and type(local_only) is not bool:
             raise ProtocolError("invalid health local only")
         destinations = value.get("destinations")
+        if isinstance(destinations, dict):
+            destinations = {
+                key: item
+                for key, item in destinations.items()
+                if key in {"stt", "tts", "speaker"}
+            }
         if destinations is not None and (
             not isinstance(destinations, dict)
             or any(

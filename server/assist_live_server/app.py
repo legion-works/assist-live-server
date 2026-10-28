@@ -65,7 +65,6 @@ def create_app(
     providers: ProviderFactory | None = None,
     tts_gateway: TTSGateway | None = None,
 ) -> web.Application:
-    tts_destination_known = True
     if providers is not None:
         if any(
             value is not None
@@ -92,7 +91,6 @@ def create_app(
     elif tts_provider is not None:
         selected_tts = tts_provider
         mode = getattr(selected_tts, "destination", None)
-        tts_destination_known = mode is not None
         if hasattr(selected_tts, "destination") and mode not in {"local", "cloud"}:
             raise ValueError("unknown TTS destination")
         destination: Destination = "cloud" if mode == "cloud" else "local"
@@ -100,7 +98,7 @@ def create_app(
         tts_gateway = TTSGateway(
             lambda _: selected_tts,
             provider=provider_id,
-            destination=destination,
+            destination=destination if mode is not None else None,
             local_only=False,
         )
     elif backend is not None:
@@ -252,8 +250,9 @@ def create_app(
             destinations["stt"] = "unknown"
         if tts_gateway is not None:
             destinations["tts"] = (
-                tts_gateway.destination
-                if tts_gateway.provider_factory is not None and tts_destination_known
+                tts_gateway.declared_destination
+                if tts_gateway.provider_factory is not None
+                and tts_gateway.declared_destination is not None
                 else "unknown"
             )
         speaker = (
@@ -614,8 +613,11 @@ def create_app(
                                 metadata = {
                                     "part": "stt",
                                     "provider": audio_gateway.provider,
-                                    "destination": audio_gateway.destination,
                                 }
+                                if audio_gateway.declared_destination is not None:
+                                    metadata["destination"] = (
+                                        audio_gateway.declared_destination
+                                    )
                             try:
                                 if kind in {"partial", "final"}:
                                     await record(

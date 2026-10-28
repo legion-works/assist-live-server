@@ -62,7 +62,11 @@ class AudioGateway:
                     {
                         "provider": self.provider,
                         "part": "stt",
-                        "destination": self.destination,
+                        **(
+                            {"destination": self.declared_destination}
+                            if self.declared_destination is not None
+                            else {}
+                        ),
                         **data,
                     },
                 )
