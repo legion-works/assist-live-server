@@ -38,6 +38,17 @@ def unsigned(value: object, bits: int = 64) -> int:
     return value
 
 
+def event_data(stage: str, data: object) -> None:
+    if not isinstance(data, dict):
+        raise ValueError("invalid event data")
+    if "pre_roll_ms" in data and (
+        stage != "mic_open"
+        or type(data["pre_roll_ms"]) is not int
+        or not 0 <= data["pre_roll_ms"] <= 1000
+    ):
+        raise ValueError("invalid event data")
+
+
 @dataclass(frozen=True)
 class TTSFormat:
     """The format of all audio in one TTS stream."""
@@ -175,5 +186,4 @@ class TimingEvent:
         for value in (self.t_device_ms, self.seq):
             if value is not None:
                 unsigned(value)
-        if not isinstance(self.data, dict):
-            raise ValueError("invalid event data")
+        event_data(self.stage, self.data)

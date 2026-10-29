@@ -2977,3 +2977,27 @@ The tests keep the wake-tail pause, open-run deadline, reset-frame, and residual
 Three isolated mutations each gave a named test assertion failure. The unchanged control gave `19 passed`.
 The mutations accepted a wake tail, counted voice only after 400 ms, and counted time without voice before command start.
 The mutation checks left production files unchanged.
+
+## Microphone audio history
+
+Date: 2026-10-29 (UTC).
+
+The optional `mic_open` data field `pre_roll_ms` gives the audio history length in milliseconds.
+The server accepts integers from 0 to 1000 inclusive.
+It refuses booleans, other types, values less than 0 or more than 1000, and use on other `stage` values.
+Events without the field stay correct. Stored events and turn queries keep the value.
+
+Command: `uv run --locked pytest tests/test_pre_roll.py -q --tb=short`.
+The initial result was `24 failed, 2 passed`. The storage assertion gave `stored pre_roll_ms was dropped`.
+The last result was `27 passed`, with an HTTP turn-query check.
+
+The empty-data `mic_open` vector kept its canonical bytes and HMAC tag.
+The archived client from `b3b1e16` decoded server turn and event records with this field.
+The current client also accepted `mic_open` without it.
+
+Command: `uv run --locked python "$MUTATION_PROBE"`.
+Three isolated source mutations each parsed and gave a named assertion failure.
+They accepted 1001 ms, accepted the field on `wake_detected`, or accepted a boolean.
+The production files stayed unchanged during these checks.
+
+The audio control schema stays unchanged because this field belongs to signed device events, not audio control messages.

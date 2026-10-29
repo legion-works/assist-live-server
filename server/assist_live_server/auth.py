@@ -9,7 +9,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Protocol
 
-from assist_live_client.models import identifier, unsigned
+from assist_live_client.models import event_data, identifier, unsigned
 
 DEVICE_FIELDS = {"version", "device", "boot", "seq", "device_ms", "stage", "data"}
 DEVICE_STAGES = {
@@ -53,6 +53,7 @@ def canonical_event(event: dict[str, Any]) -> bytes:
     identifier(event["device"])
     if not isinstance(event["data"], dict):
         raise ValueError("invalid device data")
+    event_data(event["stage"], event["data"])
     data = json.dumps(
         event["data"],
         sort_keys=True,

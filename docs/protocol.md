@@ -193,6 +193,15 @@ If the event has `data.satellite`, it must equal the provisioned satellite.
 The firmware does not supply a turn identifier.
 The timing store then attaches events to the correct satellite.
 
+The optional `data.pre_roll_ms` field gives the length of audio history in the turn, in milliseconds.
+It is correct only on `mic_open`, as an integer from 0 to 1000 inclusive.
+Use `0` for a turn without history. Older firmware can send no field.
+
+The server refuses booleans and all other non-integer types through its event refusal path.
+It also refuses values less than 0 or more than 1000, and this field on other `stage` values.
+The timing store and turn query keep this field in the event data.
+The field is part of the HMAC input in `data`. Events without it keep the same canonical bytes.
+
 The tag signs these fields, in this order:
 
 1. `version`: one unsigned byte.

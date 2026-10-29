@@ -58,6 +58,8 @@ def safe_speaker_name(value: object, stage: str) -> str | None:
 
 def safe_data(event: TimingEvent, transcript: bool = False) -> dict[str, object]:
     data: dict[str, object] = {}
+    if event.stage == "mic_open" and "pre_roll_ms" in event.data:
+        data["pre_roll_ms"] = event.data["pre_roll_ms"]
     for key in ("part", "destination", "provider", "name", "original_stage"):
         value = event.data.get(key)
         if key == "name":
