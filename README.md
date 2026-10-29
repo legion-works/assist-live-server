@@ -10,12 +10,14 @@ The root `repository.yaml` identifies the HA app repository.
 
 This project is experimental. It has no release. Do not give the server a Home Assistant administrator credential.
 
-The packages and app descriptor are bootstrap scaffolding. Their behavior and packaging are not complete.
+The server supplies timing storage, turn detection, STT, and TTS. The client supplies the integration's protocol interface.
+Packaging checks do not prove a live HA app installation.
 
 See [the architecture](ARCHITECTURE.md), [the structure](STRUCTURE.md), and [verification notes](docs/verification.md).
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md).
+Project code uses Apache-2.0. Third-party components keep their own licenses.
+See [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md).
 
 A Legion Works project.

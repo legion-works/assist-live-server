@@ -5,7 +5,7 @@ UDP and WebSocket are the two candidates for device timing.
 The transport selection stays open until a device trial supplies sufficient data.
 The two transports have no preferred status.
 
-The public [design record](https://github.com/legion-works/assist-live/blob/main/docs/design.md) states:
+The public [design record](https://github.com/legion-works/assist-live/blob/92cd8f85cd3f84ca3fe34efee8dc7e2ecde985f2/docs/design.md) states:
 "A new boot ID starts a new sequence and clock window."
 It also states: "The first message selects the protocol version and functions."
 
@@ -135,7 +135,7 @@ Keep that file external to the repository.
 Copy the device secret to external ESPHome `secrets.yaml` through a local procedure with access control.
 The integration receives only its different access token.
 
-Use `Registry.rotate` to revoke the previous device secret before the new secret becomes active.
+Use `await store.rotate(registry, device, secret)` on `SQLiteStore` to revoke the previous device secret before the new secret becomes active.
 Keep replay state until that revocation. Do not copy credentials into logs.
 Use TLS or an isolated network. HMAC authenticates events but does not encrypt them.
 
@@ -178,7 +178,7 @@ Necessary fields:
 | Field | Type |
 |---|---|
 | `version` | Integer `1` |
-| `device` | Anonymous satellite key, 1 to 128 ASCII bytes |
+| `device` | Anonymous firmware device key, 1 to 128 ASCII bytes |
 | `boot` | Random unsigned 64-bit integer |
 | `seq` | Unsigned 64-bit integer, starts at 0 for each boot |
 | `device_ms` | Unsigned 64-bit monotonic milliseconds |
@@ -660,7 +660,8 @@ Do not put audio or transcript text in other timing-data fields or ordinary diag
 
 Access date: 2026-10-25 (UTC).
 
-Server and client use the same runtime pin, `aiohttp==3.14.5`.
+The server pins `aiohttp==3.14.5`. The client declares `aiohttp>=3.14.4,<4`.
+The workspace lock selects `aiohttp==3.14.5` for the two packages.
 [PyPI metadata](https://pypi.org/pypi/aiohttp/3.14.5/json) declares Python `>=3.10`.
 Its file list includes CPython 3.14 manylinux wheels for the two server architectures:
 

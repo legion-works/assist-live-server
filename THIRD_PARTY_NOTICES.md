@@ -71,7 +71,7 @@ Smart Turn v3.2. Copyright (c) 2024–2025, Daily. BSD-2-Clause. Full notice, co
 ```
 
 The repository does not contain the model. The service image downloads it at startup.
-`assets/manifest.json` records a planned startup download with an immutable revision and SHA-256.
+`assets/manifest.json` records the startup download with an immutable revision and SHA-256.
 The startup command checks each downloaded file against its recorded SHA-256.
 See `docs/research/q5-smart-turn.md` for the file-level source records and license scope.
 
@@ -426,7 +426,7 @@ The base image also keeps its `pip` installer, its MIT notice files, and its Pyt
 The server does not use these files. The image does not delete base-image package files.
 
 The image build uses `uv==0.13.1` only in its `build stage`. `uv` uses MIT OR Apache-2.0.
-Source: https://github.com/astral-sh/uv/tree/0.13.1.
+Source: https://github.com/astral-sh/uv/tree/62faed3351cfee2121b3c28b937b1f4b93233a93.
 
 The Debian base keeps package notices in `/usr/share/doc/<package>/copyright`.
 Some package notices use `symbolic links` to the source package notice.

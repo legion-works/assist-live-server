@@ -1,7 +1,7 @@
 # Cloud voice services
 
 The project is experimental and has no release.
-Only an explicit constructor call selects a cloud provider. Credentials alone do not select a cloud provider.
+An explicit provider setting or constructor call selects a cloud provider. Credentials alone do not select a cloud provider.
 No cloud API request or API key use occurred.
 Live checks: `NOT RUN (needs operator credentials and spend approval)`.
 

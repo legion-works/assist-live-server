@@ -31,7 +31,7 @@ The STT helper's explicit `mode="local_compatible"` filter lists local providers
 `DEEPGRAM_API_KEY` and `ELEVENLABS_API_KEY` supply credentials for a selected cloud provider.
 A credential does not select a provider. `local_only=True` refuses cloud selection before construction and at each request selection.
 
-The `backend`, `audio_gateway`, and `tts_provider` arguments stay available for embedding code.
+The `backend`, `audio_gateway`, `tts_gateway`, and `tts_provider` arguments stay available for embedding code.
 They cannot accompany `providers`. That embedding code owns its provider policy.
 A provider supplied with `tts_provider` can declare `provider_id`. Without this field, records use `injected`, not an inferred provider name.
 
@@ -178,6 +178,9 @@ This stops ONNX Runtime from sending its default telemetry data. It also applies
 | `ASSIST_LIVE_DOWNLOAD_MODELS` | `true` | `download_models` | Download missing selected startup files. |
 | `DEEPGRAM_API_KEY` | empty | `deepgram_api_key` | Supply a runtime secret. |
 | `ELEVENLABS_API_KEY` | empty | `elevenlabs_api_key` | Supply a runtime secret. |
+| `ELEVENLABS_VOICE_ID` | empty | `elevenlabs_voice_id` | Set the configured TTS voice. |
+| `ELEVENLABS_VOICE_NAME` | voice identifier | `elevenlabs_voice_name` | Set its display name. |
+| `ELEVENLABS_VOICE_LANGUAGE` | empty | `elevenlabs_voice_language` | Set its language. A nonempty value is necessary with a configured voice. |
 | `ASSIST_LIVE_DATA` | `/data` | none | Set the data directory. |
 | `ASSIST_LIVE_MODEL_CACHE` | data directory plus `cache` | none | Set the local model cache. |
 | `ASSIST_LIVE_HOST` | `0.0.0.0` | none | Set the server address. |
@@ -185,6 +188,10 @@ This stops ONNX Runtime from sending its default telemetry data. It also applies
 | `ASSIST_LIVE_ASSET_MANIFEST` | packaged manifest | none | Set the manifest for `--fetch-models` only. |
 
 Boolean environment values must be `true` or `false`. The data directory must be writable by the service user.
+
+An empty `ELEVENLABS_VOICE_ID` keeps request-selected voices and reports no voice list in health.
+An unset or empty `ELEVENLABS_VOICE_NAME` uses the voice identifier.
+
 The app reads `/data/options.json` and maps only the listed app options.
 It does not put secrets in command arguments or print their values.
 

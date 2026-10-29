@@ -32,7 +32,7 @@ The hard endpoint stays 15 s.
 
 The guard applies to all turns, with follow-up turns and button input.
 A voice run that ends in the first 400 ms does not start the command, so the detector waits for a subsequent command.
-If no command starts, the turn ends at 5 s.
+At 5 s, a turn without command start ends only when no voice run continues.
 Volunteer recordings must supply the measurements for these start values.
 
 The transcript guard is active in each `Profile`. Number endings can be complete.

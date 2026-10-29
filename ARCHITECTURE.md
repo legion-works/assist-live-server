@@ -1,14 +1,14 @@
 # Architecture
 
-This file gives the planned boundaries. The components are not built at this time.
+This file gives the package boundaries. The project is experimental and has no release.
 
 ## Server
 
-The server package will contain gateways, clock conversion, storage, a turn detector, and provider adapters. The server repository owns the protocol schema.
+The server package contains gateways, clock conversion, storage, a turn detector, and provider adapters. The server repository owns the protocol schema.
 
 ## Client
 
-The client package will give the Home Assistant integration its Python client. It will not contain model-runtime dependencies.
+The client package gives the Home Assistant integration its Python client. It has no model-runtime dependencies.
 
 ## Home Assistant app
 

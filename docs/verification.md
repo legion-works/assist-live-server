@@ -3023,3 +3023,36 @@ Command: `uv run --locked python "$MUTATION_PROBE"`.
 Two isolated mutations copied history incorrectly, one at each conversion site.
 Each source parsed before a named expiry assertion gave an unsatisfactory result.
 The production files stayed unchanged during the mutation checks.
+
+## Public documentation check
+
+Date: 2026-10-29 (UTC).
+
+The current documents give the server and client functions, not only the initial packages.
+The configuration table includes the ElevenLabs voice options and their app mappings.
+The protocol document distinguishes device keys from satellite keys and the client's dependency range from the server's version pin.
+To change a device secret, use `SQLiteStore.rotate`, not the refused `Registry.rotate` method.
+The 5 s command wait does not end a continuing voice run.
+
+The app README agrees with its options, build target, user, and network access.
+The client API documentation is in `docs/protocol.md`. The client package has no Markdown file.
+Dated research findings stay unchanged. Current provider contracts are in `docs/providers/`.
+
+Commands from the repository root:
+
+```sh
+export UV_LINK_MODE=copy
+export ASSIST_LIVE_MODEL_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/assist-live/turn"
+PRIVATE_DENYLIST="$PRIVATE_DENYLIST" task check
+UV_PROJECT_ENVIRONMENT="$FLOOR_ENV" uv run --locked --python 3.14.2 pytest -q
+unshare -rn sh -c 'ip link set lo up && UV_OFFLINE=1 uv run --locked pytest -q'
+python3 "$WORKSPACE/assist-live/tools/check_public_tree.py" --root . --private-denylist "$PRIVATE_DENYLIST"
+git diff --check
+```
+
+`FLOOR_ENV` selects an isolated temporary environment. `PRIVATE_DENYLIST` selects an external privacy input.
+The ASD-STE100 checker examines each changed Markdown file.
+The worktree has no sibling privacy checker, so the explicit public-tree command supplies that check.
+
+The complete repository check gave `1089 passed`, with satisfactory formatting, lint, type, package, asset, and secret checks.
+The full gates run again after this record. No code or test behavior changed.
