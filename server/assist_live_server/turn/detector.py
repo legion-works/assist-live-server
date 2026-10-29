@@ -245,7 +245,7 @@ class TurnDetector:
         while self.pending:
             endpoint_samples = (
                 COMMAND_WAIT_MS
-                if self.speech_started_at_ms is None
+                if self.speech_started_at_ms is None and self.voice_run_samples == 0
                 else HARD_ENDPOINT_MS
             ) * 16
             if (
@@ -290,7 +290,10 @@ class TurnDetector:
                 )
                 silence_ms = self.silent_samples / 16
                 if self.speech_started_at_ms is None:
-                    if self.samples >= COMMAND_WAIT_MS * 16:
+                    if (
+                        self.samples >= COMMAND_WAIT_MS * 16
+                        and self.voice_run_samples == 0
+                    ):
                         reason = "max_silence"
                 elif silence_ms >= self.profile.max_silence_ms:
                     reason = "max_silence"

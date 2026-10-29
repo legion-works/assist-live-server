@@ -2920,3 +2920,33 @@ No synthetic audio is part of the repository.
 Four isolated mutations each gave a named test assertion failure.
 They removed the guard, decreased the continuous-voice time, counted time without voice before command start, and removed the 5 s wait.
 The unchanged control gave `10 passed`. The mutation checks left production files unchanged.
+
+### Voice at the wait boundary
+
+Date: 2026-10-29 (UTC).
+
+The 5 s wait does not stop a continuous voice run that starts before the wait boundary.
+The detector continues until that run qualifies or stops.
+After qualification, the usual end rules apply, with the hard endpoint at 15 s.
+If the run stops after 5 s without qualification, the first audio frame without voice ends the turn with `max_silence`.
+The public design record is `assist-live docs/design.md`.
+
+Command: `uv run --locked pytest tests/turn/test_start_guard.py -q -k 'open_voice_run or open_run_residual' --tb=short`.
+RED result: `4 failed, 10 deselected`. Each test ended at 5000 ms while voice continued.
+Command: `uv run --locked pytest tests/turn/test_start_guard.py tests/turn/test_detector.py -q --tb=short`.
+GREEN result: `47 passed`.
+
+The late-command tests start voice at 4900 ms for 1 s and 20 s.
+They check command onset at 4900 ms, the usual `early` endpoint, and the 15 s hard endpoint.
+A 150 ms run that stops at 5050 ms ends at its first 32 ms frame without voice, at 5082 ms.
+A different test keeps 4 ms of audio pending at 4996 ms.
+Its `flush()` consumes the remaining audio at 5000 ms. A second empty `flush()` adds no audio time.
+
+Five isolated mutations each gave a named test assertion failure. The unchanged control gave `14 passed`.
+The new mutation removed the open-run check. The late-command test then gave an assertion failure at 5000 ms.
+The mutation checks left production files unchanged.
+
+Command: `ASSIST_LIVE_MODEL_CACHE="$MODEL_CACHE" uv run --locked pytest "$REPLAY" -q -s --tb=short`.
+`REPLAY` identifies the local synthetic test, not a CI test. `MODEL_CACHE` contains the eight checked model files.
+Result: `1 passed`. The transcript was `What time is it?`, without a wake-tail prefix.
+The detector ended at 2112 ms, after the command audio ended at 1813.625 ms.

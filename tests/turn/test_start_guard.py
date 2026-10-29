@@ -116,3 +116,67 @@ def test_follow_up_first_end_has_at_most_four_hundred_ms_extra_wait():
     assert len(events) == 1
     assert events[0]["reason"] == "early"
     assert 1200 <= events[0]["audio_ms"] <= 1600
+
+
+@pytest.mark.parametrize("voice_ms", [1000, 20000])
+def test_open_voice_run_at_wait_qualifies_instead_of_ending(voice_ms):
+    d = detector()
+    assert feed(d, 4900, False) == []
+    assert feed(d, 100, True) == []
+    assert d.samples == 5000 * 16
+    assert d.speech_started_at_ms is None
+    assert feed(d, 150, True) == []
+    assert d.speech_started_at_ms == 4900
+    events = feed(d, voice_ms - 250, True)
+    if voice_ms == 1000:
+        assert events == []
+        events = feed(d, 400, False)
+        assert events == [
+            {
+                "type": "end_decision",
+                "reason": "early",
+                "audio_ms": 6300,
+                "silence_ms": 400,
+            }
+        ]
+    else:
+        assert events == [
+            {
+                "type": "end_decision",
+                "reason": "hard",
+                "audio_ms": 15000,
+                "silence_ms": 0,
+            }
+        ]
+
+
+def test_open_voice_run_that_resets_after_wait_ends_at_reset_block():
+    d = detector()
+    assert feed(d, 4900, False) == []
+    assert feed(d, 150, True) == []
+    assert d.speech_started_at_ms is None
+    assert d.push(bytes(1024), "Yeah.") == [
+        {
+            "type": "end_decision",
+            "reason": "max_silence",
+            "audio_ms": 5082,
+            "silence_ms": 0,
+        }
+    ]
+    assert d.speech_started_at_ms is None
+
+
+def test_flush_consumes_open_run_residual_at_five_second_deadline():
+    d = detector()
+    assert feed(d, 4900, False) == []
+    assert d.push(np.ones(99 * 16, dtype="<i2").tobytes(), "Yeah.") == []
+    assert d.samples == 4996 * 16
+    assert d.push(np.ones(16, dtype="<i2").tobytes(), "Yeah.") == []
+    assert d.samples == 4996 * 16
+    assert len(d.pending) == 4 * 32
+    assert d.flush("Yeah.") == []
+    assert d.samples == 5000 * 16
+    assert d.pending == b""
+    assert d.speech_started_at_ms is None
+    assert d.flush("Yeah.") == []
+    assert d.samples == 5000 * 16

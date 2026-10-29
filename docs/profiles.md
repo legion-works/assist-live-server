@@ -16,13 +16,16 @@ The `safe` and `fast` settings use the same unmeasured `Profile` defaults:
 The detector ignores the first 400 ms for voice onset and time without voice.
 Silero gets each audio frame, and STT decodes all audio.
 The guard uses audio time, not wall time.
+The public design record is `assist-live docs/design.md`.
 
 The command starts only after 250 ms of continuous voice after the guard.
 Its voice onset is the start of that voice interval.
 Before command start, the detector does not use `early` endpoints or maximum time without voice.
 After command start, the usual rules for time without voice apply.
 
-If no command starts in 5 s of audio, the detector ends the turn with `max_silence`.
+At 5 s of audio, the detector ends the turn with `max_silence` only if no voice run continues.
+An open voice run continues until it qualifies or stops.
+If it stops after 5 s and before command start, the detector ends the turn at that audio frame with `max_silence`.
 STT then sends the transcript of all audio.
 The hard endpoint stays 15 s.
 

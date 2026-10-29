@@ -4,7 +4,7 @@ import math
 from dataclasses import dataclass
 
 HARD_ENDPOINT_MS = 15000
-# The start rules in docs/design.md keep wake-word tails out of end decisions.
+# See assist-live docs/design.md for the rules that keep wake-word tails out.
 START_GUARD_MS = 400
 COMMAND_START_MS = 250
 COMMAND_WAIT_MS = 5000
