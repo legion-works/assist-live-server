@@ -614,6 +614,7 @@ Voice turns also use these necessary values: `wake_detected`, `mic_open`, `speec
 The `stt_partial`, `speaker_result`, and `end_candidate` events are optional.
 The server keeps unattached device events for five seconds from arrival, for the same satellite only.
 Expired events keep their quality and uncertainty, get `stage=unmatched`, and keep `data.original_stage`.
+They do not keep `data.pre_roll_ms`, because an unmatched record has no turn audio.
 
 | Route | Contract |
 |---|---|
@@ -637,6 +638,16 @@ The maintenance task checks retention each minute, not in event-acceptance trans
 
 `GET /metrics` supplies Prometheus text with the integration token's satellite access checks.
 Ordinary diagnostics contain counts only, without audio or transcripts.
+
+Invalid stored rows do not stop maintenance, turn opening, queries, exports, or subscriptions.
+The server deletes invalid pending rows. It skips invalid event and turn rows on read, but does not delete them because of these read errors.
+A query for an invalid turn gives no turn. An invalid closing turn gets `status=incomplete`.
+The server refuses new event writes to an invalid stored turn.
+
+The counters `assist_live_invalid_pending_rows_total`, `assist_live_invalid_event_rows_total`, and `assist_live_invalid_turn_rows_total` count these refusals.
+They count each read that refuses a row, not unique rows. They start at 0 with each store instance and use the token's satellite access checks.
+Each refusal logs only the row type and error class, without row data or error text.
+
 Without a store, record routes give a service-unavailable response.
 Without an audio path, audio gives a service-unavailable response. Store readiness controls `healthy`.
 

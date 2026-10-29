@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import sqlite3
 import time
 import unicodedata
@@ -22,6 +23,9 @@ from assist_live_client.protocol import MAX_CONTROL
 from .auth import Registry
 from .protocol import DeviceEvent, TurnExistsError
 from .replay_store import SQLiteReplayStore, connect
+
+LOGGER = logging.getLogger(__name__)
+ROW_ERRORS = (ValueError, TypeError, KeyError, OverflowError, RecursionError)
 
 SPEAKER_NAME_DROPS: Counter[str] = Counter(
     dict.fromkeys(
@@ -110,6 +114,7 @@ class SQLiteStore:
         self.retention_ns = retention_days * 86_400_000_000_000
         self.now_ns = now_ns
         self.last_retention_ns: int | None = None
+        self.invalid_rows: Counter[tuple[str, str]] = Counter()
         self.changed = asyncio.Event()
         self.loop: asyncio.AbstractEventLoop | None = None
         self.writer = ThreadPoolExecutor(
@@ -253,6 +258,41 @@ class SQLiteStore:
             raise ValueError("stored record too large")
         return row
 
+    def _bad_row(self, satellite: str, kind: str, error: Exception) -> None:
+        self.invalid_rows[satellite, kind] += 1
+        LOGGER.warning(
+            "invalid stored row kind=%s error=%s", kind, type(error).__name__
+        )
+
+    def _decode_event(
+        self, raw: str, satellite: str, kind: str = "event"
+    ) -> TimingEvent | None:
+        try:
+            event = TimingEvent(**json.loads(raw))
+            if event.satellite != satellite:
+                raise ValueError("stored satellite mismatch")
+            self._encode(event)
+            return event
+        except ROW_ERRORS as error:
+            self._bad_row(satellite, kind, error)
+            return None
+
+    def _decode_turn(self, raw: str, satellite: str) -> TurnOpen | None:
+        try:
+            turn = TurnOpen(**json.loads(raw))
+            if turn.satellite != satellite:
+                raise ValueError("stored satellite mismatch")
+            return turn
+        except ROW_ERRORS as error:
+            self._bad_row(satellite, "turn", error)
+            return None
+
+    def _unmatched(self, event: TimingEvent) -> TimingEvent:
+        data = {**event.data, "original_stage": event.stage}
+        data.pop("pre_roll_ms", None)
+        event = replace(event, stage="unmatched", data=data)
+        return replace(event, data=safe_data(event))
+
     def _insert(self, event: TimingEvent) -> None:
         if event.turn_id is not None:
             self.connection.execute(
@@ -292,9 +332,16 @@ class SQLiteStore:
 
     def _refresh_status(self, turn_id: str) -> None:
         row = self.connection.execute(
-            "SELECT payload,status,closed_ns FROM turns WHERE turn_id=?", (turn_id,)
+            "SELECT payload,status,closed_ns,satellite FROM turns WHERE turn_id=?",
+            (turn_id,),
         ).fetchone()
         if row is None or row[1] != "closing":
+            return
+        turn = self._decode_turn(row[0], row[3])
+        if turn is None:
+            self.connection.execute(
+                "UPDATE turns SET status='incomplete' WHERE turn_id=?", (turn_id,)
+            )
             return
         expected = {
             "tts_first_text",
@@ -302,7 +349,7 @@ class SQLiteStore:
             "playback_start",
             "playback_end",
         }
-        if json.loads(row[0])["turn_type"] == "voice":
+        if turn.turn_type == "voice":
             expected |= {
                 "wake_detected",
                 "mic_open",
@@ -311,10 +358,11 @@ class SQLiteStore:
                 "stt_final",
             }
         stages = {
-            json.loads(raw)["stage"]
-            for (raw,) in self.connection.execute(
-                "SELECT payload FROM events WHERE turn_id=?", (turn_id,)
+            event.stage
+            for raw, satellite in self.connection.execute(
+                "SELECT payload,satellite FROM events WHERE turn_id=?", (turn_id,)
             )
+            if (event := self._decode_event(raw, satellite)) is not None
         }
         if expected <= stages:
             self.connection.execute(
@@ -336,19 +384,14 @@ class SQLiteStore:
         ).fetchall():
             self._refresh_status(turn_id)
         expired = self.connection.execute(
-            "SELECT pending_id,payload FROM pending WHERE arrival_ns<=? "
+            "SELECT pending_id,payload,satellite FROM pending WHERE arrival_ns<=? "
             "ORDER BY arrival_ns,pending_id",
             (now - 5_000_000_000,),
         ).fetchall()
-        for pending_id, raw in expired:
-            event = TimingEvent(**json.loads(raw))
-            self._insert(
-                replace(
-                    event,
-                    stage="unmatched",
-                    data={**event.data, "original_stage": event.stage},
-                )
-            )
+        for pending_id, raw, satellite in expired:
+            event = self._decode_event(raw, satellite, "pending")
+            if event is not None:
+                self._insert(self._unmatched(event))
             self.connection.execute(
                 "DELETE FROM pending WHERE pending_id=?", (pending_id,)
             )
@@ -415,9 +458,9 @@ class SQLiteStore:
                 (turn.satellite,),
             ).fetchall()
             for pending_id, raw in pending:
-                self._insert(
-                    replace(TimingEvent(**json.loads(raw)), turn_id=turn.turn_id)
-                )
+                event = self._decode_event(raw, turn.satellite, "pending")
+                if event is not None:
+                    self._insert(replace(event, turn_id=turn.turn_id))
                 self.connection.execute(
                     "DELETE FROM pending WHERE pending_id=?", (pending_id,)
                 )
@@ -431,9 +474,10 @@ class SQLiteStore:
             ).fetchone()
             if row is None or row[0] != event.satellite:
                 raise ValueError("turn satellite mismatch")
-            enabled = (
-                self.record_transcripts and json.loads(row[1])["record_transcripts"]
-            )
+            turn = self._decode_turn(row[1], event.satellite)
+            if turn is None:
+                raise ValueError("invalid stored turn")
+            enabled = self.record_transcripts and turn.record_transcripts
         return replace(event, data=safe_data(event, enabled))
 
     async def append(self, event: TimingEvent) -> None:
@@ -475,13 +519,7 @@ class SQLiteStore:
         if row is not None and row[1] < arrival_ns + 5_000_000_000:
             self._insert(replace(event, turn_id=row[0]))
         elif arrival_ns <= self.now_ns() - 5_000_000_000:
-            self._insert(
-                replace(
-                    event,
-                    stage="unmatched",
-                    data={**event.data, "original_stage": event.stage},
-                )
-            )
+            self._insert(self._unmatched(event))
         else:
             self.connection.execute(
                 "INSERT INTO pending(satellite,arrival_ns,payload) VALUES(?,?,?)",
@@ -494,18 +532,23 @@ class SQLiteStore:
     def _get_turn(self, turn_id: str) -> TurnRecord | None:
         self._maintain_transaction()
         row = self.connection.execute(
-            "SELECT payload,status FROM turns WHERE turn_id=?", (turn_id,)
+            "SELECT payload,status,satellite FROM turns WHERE turn_id=?", (turn_id,)
         ).fetchone()
         if row is None:
+            return None
+        turn = self._decode_turn(row[0], row[2])
+        if turn is None:
             return None
         value: TurnRecord = json.loads(row[0])
         value["status"] = "open" if row[1] == "closing" else row[1]
         value["events"] = [
             json.loads(raw)
-            for (raw,) in self.connection.execute(
-                "SELECT payload FROM events WHERE turn_id=? ORDER BY event_id",
+            for raw, satellite in self.connection.execute(
+                "SELECT payload,satellite FROM events WHERE turn_id=? "
+                "ORDER BY event_id",
                 (turn_id,),
             )
+            if self._decode_event(raw, satellite) is not None
         ]
         return value
 
@@ -539,11 +582,15 @@ class SQLiteStore:
     def _next_event(
         self, satellite: str, cursor: int, since: int
     ) -> tuple[int, str] | None:
-        return self.connection.execute(
+        while row := self.connection.execute(
             "SELECT event_id,payload FROM events WHERE satellite=? AND utc_ns>=? "
             "AND event_id>? ORDER BY event_id LIMIT 1",
             (satellite, since, cursor),
-        ).fetchone()
+        ).fetchone():
+            if (event := self._decode_event(row[1], satellite)) is not None:
+                return row[0], self._encode(event)
+            cursor = row[0]
+        return None
 
     async def diagnostics(
         self, satellites: frozenset[str] | None = None
@@ -558,6 +605,15 @@ class SQLiteStore:
             placeholders = ",".join("?" for _ in parameters)
             clause = f" AND satellite IN ({placeholders})"
         return {
+            **{
+                "invalid_" + kind + "_rows_total": sum(
+                    count
+                    for (satellite, row_kind), count in self.invalid_rows.items()
+                    if row_kind == kind
+                    and (satellites is None or satellite in satellites)
+                )
+                for kind in ("pending", "event", "turn")
+            },
             "events_total": self.connection.execute(
                 "SELECT coalesce(sum(events_total),0) FROM counters WHERE 1=1" + clause,
                 parameters,

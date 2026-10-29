@@ -3001,3 +3001,25 @@ They accepted 1001 ms, accepted the field on `wake_detected`, or accepted a bool
 The production files stayed unchanged during these checks.
 
 The audio control schema stays unchanged because this field belongs to signed device events, not audio control messages.
+
+### Unmatched audio history and invalid stored rows
+
+Date: 2026-10-29 (UTC).
+
+Expired microphone events become `unmatched` records without `pre_roll_ms`.
+The records keep `original_stage=mic_open`, quality, and uncertainty.
+The same rule applies to expired pending events and events with a queue wait of more than five seconds.
+
+Command: `uv run --locked pytest tests/test_pre_roll.py -q --tb=line`.
+The initial result was `18 failed, 27 passed`. The four expiry tests gave `ValueError: invalid event data`.
+Invalid pending, event, and turn rows also stopped store operations or had no refusal counters.
+
+The regression tests check maintenance, turn opening, turn queries, exports, and subscriptions.
+They check pending deletion, the two expiry paths, and store restart.
+Invalid event and turn rows stay in the database. Invalid pending rows do not.
+Each rejected row increments a satellite-scoped counter and logs only its type and error class.
+
+Command: `uv run --locked python "$MUTATION_PROBE"`.
+Two isolated mutations copied history incorrectly, one at each conversion site.
+Each source parsed before a named expiry assertion gave an unsatisfactory result.
+The production files stayed unchanged during the mutation checks.
