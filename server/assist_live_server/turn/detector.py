@@ -272,14 +272,13 @@ class TurnDetector:
                 if not math.isfinite(voice) or not 0 <= voice <= 1:
                     raise ValueError("invalid VAD probability")
                 if self.speech_started_at_ms is None:
-                    eligible = max(
-                        0,
-                        self.samples - max(self.samples - count, START_GUARD_MS * 16),
-                    )
                     self.voice_run_samples = (
-                        self.voice_run_samples + eligible if voice >= 0.5 else 0
+                        self.voice_run_samples + count if voice >= 0.5 else 0
                     )
-                    if self.voice_run_samples >= COMMAND_START_MS * 16:
+                    if (
+                        self.voice_run_samples >= COMMAND_START_MS * 16
+                        and self.samples > START_GUARD_MS * 16
+                    ):
                         self.speech_started_at_ms = (
                             self.samples - self.voice_run_samples
                         ) / 16

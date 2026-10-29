@@ -5,7 +5,7 @@ The `safe` and `fast` settings use the same unmeasured `Profile` defaults:
 
 | Setting | Default |
 |---|---|
-| Start guard | 400 ms |
+| Voice-run end guard | 400 ms |
 | Continuous voice for command start | 250 ms |
 | Maximum wait for command start | 5 s |
 | Minimum time without voice | 400 ms |
@@ -13,13 +13,14 @@ The `safe` and `fast` settings use the same unmeasured `Profile` defaults:
 | Maximum time without voice | 1500 ms |
 | Hard endpoint | 15 s |
 
-The detector ignores the first 400 ms for voice onset and time without voice.
+The detector ignores a voice run that ends at or before 400 ms.
 Silero gets each audio frame, and STT decodes all audio.
 The guard uses audio time, not wall time.
 The public design record is `assist-live docs/design.md`.
 
-The command starts only after 250 ms of continuous voice after the guard.
-Its voice onset is the start of that voice interval.
+The command starts when a voice run lasts 250 ms or more and continues after 400 ms.
+The run length includes voice before 400 ms.
+Its voice onset is the start of the full voice run.
 Before command start, the detector does not use `early` endpoints or maximum time without voice.
 After command start, the usual rules for time without voice apply.
 
@@ -30,7 +31,8 @@ STT then sends the transcript of all audio.
 The hard endpoint stays 15 s.
 
 The guard applies to all turns, with follow-up turns and button input.
-For a qualifying command, the guard adds a maximum of 400 ms before the first end decision.
+A voice run that ends in the first 400 ms does not start the command, so the detector waits for a subsequent command.
+If no command starts, the turn ends at 5 s.
 Volunteer recordings must supply the measurements for these start values.
 
 The transcript guard is active in each `Profile`. Number endings can be complete.

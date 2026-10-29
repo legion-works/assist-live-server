@@ -2950,3 +2950,30 @@ Command: `ASSIST_LIVE_MODEL_CACHE="$MODEL_CACHE" uv run --locked pytest "$REPLAY
 `REPLAY` identifies the local synthetic test, not a CI test. `MODEL_CACHE` contains the eight checked model files.
 Result: `1 passed`. The transcript was `What time is it?`, without a wake-tail prefix.
 The detector ended at 2112 ms, after the command audio ended at 1813.625 ms.
+
+## Continuous voice at turn start
+
+Date: 2026-10-29 (UTC).
+
+Command start uses the first voice run with a minimum length of 250 ms and an end after 400 ms.
+The run length includes voice before 400 ms. Its onset is the first voiced audio frame.
+A run that ends at or before 400 ms does not start a command.
+
+The server keeps all audio for STT. Time without voice starts only after command start.
+The 5 s wait and its open-run rule stay unchanged. The hard endpoint stays 15 s.
+
+Command: `uv run --locked pytest tests/turn/test_start_guard.py -q -k 'initial_continuous or run_crossing_guard or run_ending_at_guard or wake_tail' --tb=short`.
+RED result: `3 failed, 4 passed, 12 deselected`.
+Initial voice for 600 ms gave no onset. Initial voice for 900 ms gave onset 400 ms, not 0 ms.
+A 250 ms run from 200 ms to 450 ms also gave no onset.
+The wake-tail, 200 ms run, and 400 ms end-boundary controls gave satisfactory results before the change.
+
+Command: `uv run --locked pytest tests/turn/ tests/test_audio_gateway.py -q --tb=short`.
+GREEN result: `165 passed`.
+The 600 ms and 900 ms commands start at 0 ms and end with the usual rules.
+The 250 ms run starts at 200 ms. The 200 ms run does not start a command.
+The tests keep the wake-tail pause, open-run deadline, reset-frame, and residual-flush assertions.
+
+Three isolated mutations each gave a named test assertion failure. The unchanged control gave `19 passed`.
+The mutations accepted a wake tail, counted voice only after 400 ms, and counted time without voice before command start.
+The mutation checks left production files unchanged.

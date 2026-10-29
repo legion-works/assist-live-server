@@ -85,14 +85,14 @@ def test_no_command_wait_is_exactly_five_seconds_of_audio(profile, chunk_ms):
     assert calls and set(calls) == {512}
 
 
-def test_command_crossing_guard_starts_at_four_hundred_ms():
+def test_command_crossing_guard_starts_at_first_voiced_frame():
     d = detector()
     assert feed(d, 100, False) == []
-    assert feed(d, 549, True) == []
+    assert feed(d, 300, True) == []
     assert d.speech_started_at_ms is None
     assert feed(d, 1, True) == []
-    assert d.speech_started_at_ms == 400
-    assert feed(d, 250, True) == []
+    assert d.speech_started_at_ms == 100
+    assert feed(d, 499, True) == []
     assert feed(d, 400, False)[0]["audio_ms"] == 1300
 
 
@@ -111,7 +111,7 @@ def test_two_hundred_ms_after_guard_is_not_a_command():
 def test_follow_up_first_end_has_at_most_four_hundred_ms_extra_wait():
     d = detector()
     assert feed(d, 800, True) == []
-    assert d.speech_started_at_ms == 400
+    assert d.speech_started_at_ms == 0
     events = feed(d, 800, False)
     assert len(events) == 1
     assert events[0]["reason"] == "early"
@@ -180,3 +180,45 @@ def test_flush_consumes_open_run_residual_at_five_second_deadline():
     assert d.speech_started_at_ms is None
     assert d.flush("Yeah.") == []
     assert d.samples == 5000 * 16
+
+
+@pytest.mark.parametrize("voice_ms", [600, 900])
+def test_initial_continuous_command_keeps_its_full_run_start(voice_ms):
+    d = detector()
+    assert feed(d, voice_ms, True) == []
+    assert d.speech_started_at_ms == 0
+    assert feed(d, 400, False) == [
+        {
+            "type": "end_decision",
+            "reason": "early",
+            "audio_ms": voice_ms + 400,
+            "silence_ms": 400,
+        }
+    ]
+
+
+def test_two_hundred_fifty_ms_run_crossing_guard_qualifies():
+    d = detector()
+    assert feed(d, 200, False) == []
+    assert feed(d, 249, True) == []
+    assert d.speech_started_at_ms is None
+    assert feed(d, 1, True) == []
+    assert d.speech_started_at_ms == 200
+    assert feed(d, 400, False)[0]["audio_ms"] == 850
+
+
+def test_two_hundred_ms_run_crossing_guard_does_not_qualify():
+    d = detector()
+    assert feed(d, 300, False) == []
+    assert feed(d, 200, True) == []
+    assert d.speech_started_at_ms is None
+    assert feed(d, 4490, False) == []
+    assert feed(d, 10, False)[0]["audio_ms"] == 5000
+
+
+def test_voice_run_ending_at_guard_is_ignored():
+    d = detector()
+    assert feed(d, 400, True) == []
+    assert d.speech_started_at_ms is None
+    assert feed(d, 600, False) == []
+    assert d.speech_started_at_ms is None

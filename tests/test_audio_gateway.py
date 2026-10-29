@@ -298,7 +298,7 @@ def test_second_turn_onset_comes_only_from_its_own_audio():
         ]
         assert onsets == ["first", "second"]
         assert detectors[0] is not detectors[1]
-        assert detectors[0].speech_started_at_ms == 400.0
+        assert detectors[0].speech_started_at_ms == 0.0
         assert detectors[1].speech_started_at_ms == 416.0
 
     asyncio.run(run())
