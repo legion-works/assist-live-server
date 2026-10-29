@@ -14,6 +14,7 @@ from .models import (
     TTSFormat,
     TTSItem,
     TTSSentenceEnd,
+    TTSVoice,
     TurnOpen,
     TurnRecord,
     identifier,
@@ -148,11 +149,31 @@ class AssistLiveClient:
             )
         ):
             raise ProtocolError("invalid health destinations")
+        voices = []
+        default_voice = capabilities.get("tts_default_voice")
+        try:
+            entries = capabilities.get("tts_voices", [])
+            if not isinstance(entries, list):
+                raise ValueError("invalid voice list")
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    raise ValueError("invalid voice entry")
+                voices.append(TTSVoice(entry["id"], entry["name"], entry["language"]))
+            ids = [voice.id for voice in voices]
+            if len(set(ids)) != len(ids) or (
+                default_voice is not None
+                and (not isinstance(default_voice, str) or default_voice not in ids)
+            ):
+                raise ValueError("invalid default voice")
+        except ValueError, TypeError, KeyError:
+            raise ProtocolError("invalid health TTS voices") from None
         return HealthCapabilities(
             value["healthy"],
             **fields,
             local_only=local_only,
             destinations=destinations,
+            tts_voices=tuple(voices),
+            tts_default_voice=default_voice,
         )
 
     async def open_turn(self, turn: TurnOpen) -> None:
@@ -253,7 +274,7 @@ class AssistLiveClient:
         turn_id: str,
         source: AsyncIterator[bytes] | AsyncIterator[str],
         mode: str,
-        voice: str = "",
+        voice: str | None = None,
         text_positions: bool = False,
     ) -> AsyncGenerator[dict[str, Any] | bytes]:
         sender: asyncio.Task[None] | None = None
@@ -273,7 +294,8 @@ class AssistLiveClient:
                     "capabilities": [mode, "speaker_result"],
                 }
                 if mode == "tts":
-                    fields["voice"] = voice
+                    if voice is not None:
+                        fields["voice"] = voice
                     if text_positions:
                         fields["text_positions"] = True
                 await ws.send_json(encode_control("negotiate", turn_id, **fields))
@@ -342,6 +364,8 @@ class AssistLiveClient:
                         if value["type"] == "end":
                             return
                         if value["type"] == "error":
+                            if value["code"] == "unknown_tts_voice":
+                                raise ProtocolError("unknown_tts_voice")
                             raise ProtocolError("audio refused")
                         if value["type"] == "format":
                             got_format = True
@@ -378,7 +402,7 @@ class AssistLiveClient:
         self,
         turn_id: str,
         text: AsyncIterator[str],
-        voice: str,
+        voice: str | None = None,
         *,
         text_positions: bool = False,
     ) -> AsyncIterator[bytes]:
@@ -406,7 +430,7 @@ class AssistLiveClient:
         self,
         turn_id: str,
         text: AsyncIterator[str],
-        voice: str,
+        voice: str | None = None,
         *,
         text_positions: bool = False,
     ) -> AsyncIterator[TTSItem]:

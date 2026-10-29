@@ -4,6 +4,124 @@ from contextlib import asynccontextmanager
 import pytest
 
 
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"tts_voices": {}},
+        {"tts_voices": None},
+        {"tts_voices": [None]},
+        {"tts_voices": [{"id": "voice", "name": "Name"}]},
+        {"tts_voices": [{"id": "", "name": "Name", "language": "en-US"}]},
+        {"tts_voices": [{"id": "voice", "name": False, "language": "en-US"}]},
+        {"tts_voices": [{"id": "voice", "name": "Name", "language": []}]},
+        {"tts_voices": [{"id": "voice", "name": "Name", "language": ""}]},
+        {"tts_voices": [], "tts_default_voice": "missing"},
+        {"tts_default_voice": 1},
+        {"tts_default_voice": "voice"},
+        {"tts_voices": [{"id": "voice", "name": "Name", "language": "en-US"}] * 2},
+    ],
+)
+def test_health_client_rejects_malformed_voice_metadata(tmp_path, fields):
+    from aiohttp import web
+    from assist_live_client.protocol import ProtocolError
+
+    async def health(request):
+        return web.json_response(
+            {"version": 1, "healthy": True, "capabilities": fields}
+        )
+
+    async def run():
+        app = web.Application()
+        app.router.add_get("/health", health)
+        async with health_service(tmp_path, app) as (client, _):
+            with pytest.raises(ProtocolError, match="invalid health TTS voices"):
+                await client.health_capabilities()
+
+    asyncio.run(run())
+
+
+def test_health_decodes_voice_metadata_and_old_boolean_client(tmp_path, store):
+    from types import SimpleNamespace
+
+    from assist_live_server.app import create_app
+    from assist_live_server.auth import Registry
+    from assist_live_server.providers.piper import PiperProvider
+
+    async def run():
+        registry = Registry()
+        registry.bind("satellite-a", "satellite-a", b"synthetic-device-secret")
+        registry.add_token("test-token", ["satellite-a"])
+        provider = PiperProvider(
+            SimpleNamespace(config=SimpleNamespace(sample_rate=22050))
+        )
+        async with health_service(
+            tmp_path, create_app(registry, store, tts_provider=provider)
+        ) as (client, session):
+            async with session.get(
+                "http://service.invalid/health",
+                headers={"Authorization": "Bearer test-token"},
+            ) as response:
+                body = await response.json()
+            assert body["capabilities"]["tts_voices"] == [
+                {
+                    "id": "en_US-lessac-medium",
+                    "name": "Lessac (medium)",
+                    "language": "en-US",
+                }
+            ]
+            assert body["capabilities"]["tts_default_voice"] == "en_US-lessac-medium"
+            assert all(
+                type(body["capabilities"][key]) is bool
+                for key in ("stt", "tts", "text_positions")
+            )
+            status = await client.health_capabilities()
+            assert [(v.id, v.name, v.language) for v in status.tts_voices] == [
+                ("en_US-lessac-medium", "Lessac (medium)", "en-US")
+            ]
+            assert status.tts_default_voice == "en_US-lessac-medium"
+            assert await client.health() is body["healthy"]
+
+    asyncio.run(run())
+
+
+def test_health_decodes_multiple_voices_and_ignores_future_voice_fields(tmp_path):
+    from aiohttp import web
+
+    async def health(request):
+        return web.json_response(
+            {
+                "version": 1,
+                "healthy": True,
+                "capabilities": {
+                    "tts": True,
+                    "tts_voices": [
+                        {
+                            "id": "first",
+                            "name": "First",
+                            "language": "en-US",
+                            "future": True,
+                        },
+                        {"id": "second", "name": "Second", "language": "fr-FR"},
+                    ],
+                    "tts_default_voice": "second",
+                },
+            }
+        )
+
+    async def run():
+        app = web.Application()
+        app.router.add_get("/health", health)
+        async with health_service(tmp_path, app) as (client, _):
+            status = await client.health_capabilities()
+            assert [(v.id, v.name, v.language) for v in status.tts_voices] == [
+                ("first", "First", "en-US"),
+                ("second", "Second", "fr-FR"),
+            ]
+            assert status.tts_default_voice == "second"
+
+    asyncio.run(run())
+
+
 def test_three_health_arguments_keep_positions_disabled():
     from assist_live_client import HealthCapabilities
 
@@ -68,7 +186,25 @@ def test_health_capabilities_and_legacy_boolean(
                     assert await response.json() == {
                         "version": 1,
                         "healthy": ready,
-                        "capabilities": {"stt": stt, "tts": tts, "text_positions": tts},
+                        "capabilities": {
+                            "stt": stt,
+                            "tts": tts,
+                            "text_positions": tts,
+                            **(
+                                {
+                                    "tts_voices": [
+                                        {
+                                            "id": "en_US-lessac-medium",
+                                            "name": "Lessac (medium)",
+                                            "language": "en-US",
+                                        }
+                                    ],
+                                    "tts_default_voice": "en_US-lessac-medium",
+                                }
+                                if tts
+                                else {}
+                            ),
+                        },
                         "local_only": None,
                         "destinations": {
                             **({"stt": "local"} if stt else {}),
@@ -232,6 +368,10 @@ def test_health_tts_only_and_no_speaker(tmp_path, store):
             assert status.destinations == {"tts": "local"}
             assert status.stt is False
             assert status.tts is True
+            assert [(v.id, v.name, v.language) for v in status.tts_voices] == [
+                ("en_US-lessac-medium", "Lessac (medium)", "en-US")
+            ]
+            assert status.tts_default_voice == "en_US-lessac-medium"
 
     asyncio.run(run())
 
@@ -506,6 +646,8 @@ def test_health_injected_provider_without_destination_is_unknown(tmp_path, store
             assert status.destinations == {part: "unknown"}
             assert status.stt is (part == "stt")
             assert status.tts is (part == "tts")
+            assert status.tts_voices == ()
+            assert status.tts_default_voice is None
 
     asyncio.run(run())
 
@@ -522,10 +664,19 @@ def test_health_legacy_backend_does_not_invent_destinations(tmp_path, store):
         registry.add_token("test-token", ["satellite-a"])
         async with health_service(
             tmp_path, create_app(registry, store, backend=SimpleNamespace())
-        ) as (client, _):
+        ) as (client, session):
             status = await client.health_capabilities()
             assert status.local_only is None
             assert status.destinations == {"stt": "unknown", "tts": "unknown"}
+            assert status.tts_voices == ()
+            assert status.tts_default_voice is None
+            async with session.get(
+                "http://service.invalid/health",
+                headers={"Authorization": "Bearer test-token"},
+            ) as response:
+                capabilities = (await response.json())["capabilities"]
+            assert "tts_voices" not in capabilities
+            assert "tts_default_voice" not in capabilities
 
     asyncio.run(run())
 
@@ -674,13 +825,13 @@ def test_health_client_drops_hostile_destination_keys(tmp_path, extra_value):
     asyncio.run(run())
 
 
-@pytest.mark.parametrize("revision", ["8f3d60a", "eb35c61", "b4a9202"])
+@pytest.mark.parametrize("revision", ["8f3d60a", "eb35c61", "b4a9202", "b4fd28b"])
 @pytest.mark.parametrize("healthy", [True, False])
 def test_health_client_decodes_historical_bodies(tmp_path, revision, healthy):
     from aiohttp import web
     from assist_live_client import HealthCapabilities
 
-    positions = revision == "b4a9202"
+    positions = revision in {"b4a9202", "b4fd28b"}
 
     async def health(request):
         return web.json_response(
@@ -692,6 +843,14 @@ def test_health_client_decodes_historical_bodies(tmp_path, revision, healthy):
                     "tts": True,
                     **({"text_positions": True} if positions else {}),
                 },
+                **(
+                    {
+                        "local_only": True,
+                        "destinations": {"stt": "local", "tts": "local"},
+                    }
+                    if revision == "b4fd28b"
+                    else {}
+                ),
             }
         )
 
@@ -700,8 +859,15 @@ def test_health_client_decodes_historical_bodies(tmp_path, revision, healthy):
         app.router.add_get("/health", health)
         async with health_service(tmp_path, app) as (client, _):
             assert await client.health_capabilities() == HealthCapabilities(
-                healthy, True, True, positions, None, None
+                healthy,
+                True,
+                True,
+                positions,
+                True if revision == "b4fd28b" else None,
+                {"stt": "local", "tts": "local"} if revision == "b4fd28b" else None,
             )
+            assert (await client.health_capabilities()).tts_voices == ()
+            assert (await client.health_capabilities()).tts_default_voice is None
 
     asyncio.run(run())
 

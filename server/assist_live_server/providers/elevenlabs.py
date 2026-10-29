@@ -9,7 +9,13 @@ from contextlib import suppress
 from time import monotonic
 
 import aiohttp
-from assist_live_client.models import TTSAudio, TTSFormat, TTSItem, TTSSentenceEnd
+from assist_live_client.models import (
+    TTSAudio,
+    TTSFormat,
+    TTSItem,
+    TTSSentenceEnd,
+    TTSVoice,
+)
 from assist_live_client.protocol import MAX_PCM
 from yarl import URL
 
@@ -37,6 +43,9 @@ class ElevenLabsProvider:
         endpoint: str = "wss://api.elevenlabs.io",
         timeout: float = 15.0,
         enable_logging: bool = True,
+        voice: str | None = None,
+        voice_name: str | None = None,
+        voice_language: str | None = None,
     ) -> None:
         if not api_key or any(c in api_key for c in "\r\n"):
             raise ValueError("invalid ElevenLabs credential")
@@ -63,11 +72,25 @@ class ElevenLabsProvider:
         self._endpoint = url
         self._timeout = timeout
         self._enable_logging = enable_logging
+        self.voices: tuple[TTSVoice, ...] = ()
+        self.default_voice = voice
+        if voice is not None:
+            if (
+                not voice
+                or api_key in voice
+                or not all(c.isascii() and (c.isalnum() or c in "-_") for c in voice)
+            ):
+                raise ValueError("invalid ElevenLabs voice identifier")
+            if voice_language is None:
+                raise ValueError("ElevenLabs voice language required")
+            self.voices = (TTSVoice(voice, voice_name or voice, voice_language),)
         self.audio_format = TTSFormat("pcm_s16le", 16000, 1, 2)
 
     async def stream(
         self, text: AsyncIterator[str], voice: str
     ) -> AsyncGenerator[TTSItem]:
+        if self.voices and voice != self.default_voice:
+            raise ValueError(f"unknown TTS voice: {voice!r}")
         if (
             not voice
             or self._api_key in voice

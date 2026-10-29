@@ -51,6 +51,17 @@ def test_app_has_no_ha_api_access():
     assert config["stage"] == "experimental"
 
 
+def test_app_exposes_configured_cloud_voice_fields():
+    config = yaml.safe_load((ROOT / "assist-live-server/config.yaml").read_text())
+    for field in (
+        "elevenlabs_voice_id",
+        "elevenlabs_voice_name",
+        "elevenlabs_voice_language",
+    ):
+        assert config["options"][field] == ""
+        assert config["schema"][field] == "str"
+
+
 def test_app_repository_layout_has_one_config_and_no_duplicate_dockerfile():
     from tools.check_assets import release_files
 

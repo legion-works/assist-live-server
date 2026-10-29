@@ -14,6 +14,68 @@ from assist_live_server.providers.elevenlabs import ElevenLabsError, ElevenLabsP
 KEY = "cloud-test-credential"
 
 
+def test_configured_voice_is_default_and_refuses_another_before_connection(
+    cloud_ws_server,
+):
+    async def run():
+        requests = []
+
+        async def handler(request):
+            requests.append(request.path)
+            ws = web.WebSocketResponse()
+            await ws.prepare(request)
+            async for message in ws:
+                if message.json() == {"text": ""}:
+                    await ws.send_json(
+                        {"audio": base64.b64encode(b"\x01\0").decode(), "isFinal": True}
+                    )
+                    await ws.close()
+            return ws
+
+        async with cloud_ws_server(handler) as fake:
+            provider = ElevenLabsProvider(
+                KEY,
+                endpoint=fake.url,
+                voice="test-voice",
+                voice_name="Test voice",
+                voice_language="en-US",
+            )
+            assert [(v.id, v.name, v.language) for v in provider.voices] == [
+                ("test-voice", "Test voice", "en-US")
+            ]
+            assert provider.default_voice == "test-voice"
+            items = [
+                item async for item in provider.stream(parts("Hello."), "test-voice")
+            ]
+            assert TTSAudio(b"\x01\0") in items
+            with pytest.raises(ValueError, match="unknown TTS voice"):
+                await anext(provider.stream(parts("Hello."), "another-voice"))
+            assert len(requests) == 1
+
+    asyncio.run(run())
+
+
+def test_factory_loads_configured_voice_from_environment(monkeypatch):
+    from assist_live_server.config import ProviderFactory, ServerConfig
+
+    monkeypatch.setenv("ELEVENLABS_API_KEY", KEY)
+    monkeypatch.setenv("ELEVENLABS_VOICE_ID", "test-voice")
+    monkeypatch.setenv("ELEVENLABS_VOICE_NAME", "Test voice")
+    monkeypatch.setenv("ELEVENLABS_VOICE_LANGUAGE", "en-US")
+
+    async def run():
+        factory = await ProviderFactory.load(
+            ServerConfig(stt_provider=None, tts_provider="elevenlabs", local_only=False)
+        )
+        provider = factory.tts("elevenlabs")
+        assert [(v.id, v.name, v.language) for v in provider.voices] == [
+            ("test-voice", "Test voice", "en-US")
+        ]
+        assert provider.default_voice == "test-voice"
+
+    asyncio.run(run())
+
+
 async def parts(*values):
     for value in values:
         yield value

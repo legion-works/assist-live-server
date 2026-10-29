@@ -17,7 +17,15 @@ Authenticated `GET /health` gives this body:
 {
   "version": 1,
   "healthy": true,
-  "capabilities": {"stt": true, "tts": true, "text_positions": true},
+  "capabilities": {
+    "stt": true,
+    "tts": true,
+    "text_positions": true,
+    "tts_voices": [
+      {"id": "en_US-lessac-medium", "name": "Lessac (medium)", "language": "en-US"}
+    ],
+    "tts_default_voice": "en_US-lessac-medium"
+  },
   "local_only": true,
   "destinations": {"stt": "local", "tts": "local"}
 }
@@ -33,7 +41,7 @@ Audio provider selection does not change `healthy`. A server with no audio funct
 `capabilities.tts` is `true` when a TTS gateway, TTS provider, or legacy backend is available.
 
 The client `health(timeout=0.2)` method keeps its boolean result: protocol version 1 and `healthy=true`.
-`health_capabilities(timeout=0.2)` gives `HealthCapabilities(healthy, stt, tts, text_positions, local_only, destinations)`.
+`health_capabilities(timeout=0.2)` gives `HealthCapabilities`, with the function flags, policy, destinations, and TTS voices.
 Missing function flags default to `false` without an error.
 Three positional constructor arguments keep `text_positions=false`.
 
@@ -63,7 +71,7 @@ The client ignores unknown top-level keys and unknown keys in `capabilities`.
 It keeps only `stt`, `tts`, and `speaker` keys in `destinations`.
 It drops other keys without an error for all values.
 
-An older server can have no new fields. The client then gives `None` for each missing field, not `False` or invented destinations.
+An older server can have no policy or destination fields. The client then gives `None`, not `False` or invented destinations.
 An explicit `null` also gives `None`. The client refuses an invalid field type or a destination value for a known key with `ProtocolError`.
 See [server configuration](configuration.md) for the local-only option and integration rule.
 
@@ -71,6 +79,33 @@ See [server configuration](configuration.md) for the local-only option and integ
 It is `false` for a legacy backend or a server without TTS.
 When this flag is `true`, callers can use `text_positions=True` with the two client TTS methods.
 The default is `False`. Only `True` adds `text_positions: true` to the TTS `negotiate` message.
+
+### TTS voices
+
+`capabilities.tts_voices` gives the configured provider's voices as objects with nonempty `id`, `name`, and `language` strings.
+`capabilities.tts_default_voice` identifies the default voice in that list.
+The `stt`, `tts`, and `text_positions` fields stay booleans.
+
+Piper reports one voice: `en_US-lessac-medium`, with name `Lessac (medium)` and language `en-US`.
+The pinned voice configuration gives language code `en_US`. The health response uses BCP-47 syntax.
+Health does not download models or contact a provider.
+
+ElevenLabs reports its configured voice and uses it as the default.
+Set `ELEVENLABS_VOICE_ID` and `ELEVENLABS_VOICE_LANGUAGE` for the provider factory.
+The optional `ELEVENLABS_VOICE_NAME` supplies a display name. Without it, the identifier is the name.
+The app options are `elevenlabs_voice_id`, `elevenlabs_voice_language`, and `elevenlabs_voice_name`.
+The constructor accepts the same values as `voice`, `voice_language`, and `voice_name`.
+
+Without a configured voice, this adapter keeps its earlier request-selected behavior and reports no list.
+
+A backend without voice metadata does not send the two health fields. Older servers can also have no fields.
+The client then gives `tts_voices=()` and `tts_default_voice=None`.
+Each decoded voice is a `TTSVoice(id, name, language)`.
+Malformed entries, duplicate identifiers, and an unlisted default give `ProtocolError`.
+The client ignores unknown entry fields.
+
+An integration must not copy voices from its fallback engine when the server gives no list.
+It must show no voices and send no voice.
 
 ## Credentials and identity
 
@@ -315,6 +350,9 @@ The `capabilities` functions are `stt`, `tts`, `events`, and `speaker_result`.
 The selected mode must occur in the `capabilities` list.
 
 TTS can also supply `voice`.
+A missing or empty `voice` selects the provider's default voice when one is available.
+The two client TTS methods accept `voice: str | None = None`.
+With `None`, the client sends no field. An explicit string, also `""`, stays unchanged in the request.
 The server replies with `negotiated` before it accepts audio.
 
 ```json
@@ -431,7 +469,10 @@ The receiver gets the complete input text without added or removed characters.
 
 `create_app(..., tts_provider=provider)` connects a sentence-level provider to this route.
 The provider registry selects `PiperProvider.load(cache)` for `piper`. Loading uses the two hash-checked voice files in the external cache.
-An unknown voice gets `error` with `code=tts_failed`, not a default voice.
+
+A nonempty unlisted voice gets `error` with `code=unknown_tts_voice`, not a default voice.
+The client reports this code as `ProtocolError("unknown_tts_voice")`.
+The gateway refuses the voice before the provider consumes text. Piper also keeps its own voice guard.
 
 The legacy `AudioBackend` route stays available for embedding code.
 It uses the same TTS gateway, not a different audio path.

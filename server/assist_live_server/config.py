@@ -5,6 +5,8 @@ from collections import ChainMap
 from dataclasses import dataclass
 from pathlib import Path
 
+from assist_live_client.models import TTSVoice
+
 from .destinations import (
     Destination,
     Resolver,
@@ -94,6 +96,26 @@ class ProviderFactory:
         self._stt = stt
         self._tts = tts
         self.speaker = speaker
+
+    @property
+    def tts_voices(self) -> tuple[TTSVoice, ...]:
+        if self._tts is not None:
+            return getattr(self._tts, "voices", ())
+        if self.config.tts_provider == "piper":
+            from .providers.piper import PiperProvider
+
+            return PiperProvider.voices
+        return ()
+
+    @property
+    def tts_default_voice(self) -> str | None:
+        if self._tts is not None:
+            return getattr(self._tts, "default_voice", None)
+        if self.config.tts_provider == "piper":
+            from .providers.piper import PiperProvider
+
+            return PiperProvider.default_voice
+        return None
 
     @classmethod
     async def load(

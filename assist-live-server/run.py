@@ -11,6 +11,9 @@ OPTIONS = {
     "download_models": "ASSIST_LIVE_DOWNLOAD_MODELS",
     "deepgram_api_key": "DEEPGRAM_API_KEY",
     "elevenlabs_api_key": "ELEVENLABS_API_KEY",
+    "elevenlabs_voice_id": "ELEVENLABS_VOICE_ID",
+    "elevenlabs_voice_name": "ELEVENLABS_VOICE_NAME",
+    "elevenlabs_voice_language": "ELEVENLABS_VOICE_LANGUAGE",
 }
 
 

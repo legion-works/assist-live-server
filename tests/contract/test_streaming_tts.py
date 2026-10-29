@@ -175,8 +175,9 @@ def test_cloud_gateway_refuses_before_provider_or_text():
     "response", ["aligned", "unaligned", "silent", "empty", "whitespace"]
 )
 @pytest.mark.parametrize("text_positions", [False, True])
+@pytest.mark.parametrize("voice", [None, "", "test-voice"])
 def test_configured_cloud_tts_factory_keeps_wire_contract(
-    monkeypatch, tmp_path, turn_id, store, replay_store, response, text_positions
+    monkeypatch, tmp_path, turn_id, store, replay_store, response, text_positions, voice
 ):
     import base64
 
@@ -225,11 +226,14 @@ def test_configured_cloud_tts_factory_keeps_wire_contract(
         await site.start()
         port = site._server.sockets[0].getsockname()[1]
 
-        def construct(self, key):
-            original(self, key, endpoint=f"http://127.0.0.1:{port}")
+        def construct(self, key, **kwargs):
+            original(self, key, endpoint=f"http://127.0.0.1:{port}", **kwargs)
 
         monkeypatch.setattr(ElevenLabsProvider, "__init__", construct)
         monkeypatch.setenv("ELEVENLABS_API_KEY", "synthetic-key")
+        monkeypatch.setenv("ELEVENLABS_VOICE_ID", "test-voice")
+        monkeypatch.setenv("ELEVENLABS_VOICE_NAME", "Test voice")
+        monkeypatch.setenv("ELEVENLABS_VOICE_LANGUAGE", "en-US")
         config = await ServerConfig.load(
             stt_provider=None, tts_provider="elevenlabs", local_only=False
         )
@@ -248,6 +252,11 @@ def test_configured_cloud_tts_factory_keeps_wire_contract(
                 client = AssistLiveClient(
                     "http://service.invalid", "synthetic-token", session=session
                 )
+                health = await client.health_capabilities()
+                assert [(v.id, v.name, v.language) for v in health.tts_voices] == [
+                    ("test-voice", "Test voice", "en-US")
+                ]
+                assert health.tts_default_voice == "test-voice"
                 await client.open_turn(
                     TurnOpen(turn_id, "satellite-a", "tts_only", None, None)
                 )
@@ -256,7 +265,7 @@ def test_configured_cloud_tts_factory_keeps_wire_contract(
                     yield {"empty": "", "whitespace": " \n "}.get(response, "Test. ")
 
                 stream = client.tts_stream(
-                    turn_id, text(), "test-voice", text_positions=text_positions
+                    turn_id, text(), voice, text_positions=text_positions
                 )
                 if response == "silent":
                     from assist_live_client.protocol import ProtocolError

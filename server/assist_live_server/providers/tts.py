@@ -1,6 +1,7 @@
 """Sentence-level TTS with a separate, bounded CPU executor."""
 
 import asyncio
+import os
 import threading
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -149,7 +150,15 @@ def provider_destination(name: str) -> Destination:
 async def _load_elevenlabs(api_key: str) -> TTSProvider:
     from .elevenlabs import ElevenLabsProvider
 
-    return ElevenLabsProvider(api_key)
+    voice = os.environ.get("ELEVENLABS_VOICE_ID")
+    if not voice:
+        return ElevenLabsProvider(api_key)
+    return ElevenLabsProvider(
+        api_key,
+        voice=voice,
+        voice_name=os.environ.get("ELEVENLABS_VOICE_NAME"),
+        voice_language=os.environ.get("ELEVENLABS_VOICE_LANGUAGE"),
+    )
 
 
 def provider_factory(name: str = "piper") -> ProviderFactory:

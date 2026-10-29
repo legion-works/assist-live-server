@@ -2827,3 +2827,61 @@ Four isolated mutations each gave a named test assertion failure.
 Three used the request-guard default in timing metadata.
 One kept unknown destination keys in the decoded health result.
 The mutation checks left production files unchanged. The last gates use source with no mutations.
+
+## TTS voice lists and defaults
+
+Date: 2026-10-29 (UTC).
+
+The health response adds `capabilities.tts_voices` and `capabilities.tts_default_voice` without changes to the earlier boolean flags.
+Piper reports `en_US-lessac-medium`, name `Lessac (medium)`, and language `en-US`.
+The pinned voice configuration gives `language.code=en_US`, `dataset=lessac`, and `audio.quality=medium`.
+The response uses BCP-47 syntax for the language.
+
+ElevenLabs reports its configured voice. Its app options and environment settings supply the identifier, name, and language.
+Backends without a list do not add voice fields. The client gives an empty tuple and no default for these fields.
+
+Missing and empty request voices use the provider default. A nonempty unlisted voice gives `unknown_tts_voice` before synthesis.
+Piper keeps its provider guard. The client keeps this named error.
+The two client methods send no voice field for `None` and keep an explicit string unchanged.
+
+Command: `uv run --locked pytest tests/contract/test_health.py tests/contract/test_tts_voices.py -q`.
+Initial RED result: `37 failed, 61 passed`.
+Failures included missing metadata checks, missing default selection, and an unwanted voice field.
+The last tests in an isolated baseline tree gave `72 failed, 228 passed`.
+The configured cloud voice and app option tests also found missing metadata and mappings.
+
+Command: `ASSIST_LIVE_MODEL_CACHE="$MODEL_CACHE" uv run --locked pytest -q`.
+GREEN result: `1024 passed`.
+The tests include Piper requests through the client and raw WebSocket messages, configured ElevenLabs default requests, malformed metadata, and earlier bodies.
+Clients from `8f3d60a`, `eb35c61`, `b4a9202`, and `b4fd28b` each decoded the new body with health `true` and `false`.
+The current client also decodes the four earlier body shapes without voice metadata.
+
+Eight isolated mutations each gave a behavior test failure after a satisfactory Python syntax check:
+
+1. No default voice selection: `4 failed, 10 passed`.
+2. No voice list in health: `2 failed, 13 passed, 70 deselected`.
+3. An empty voice field for client `None`: `2 failed, 4 passed, 8 deselected`.
+4. Acceptance of an unlisted Piper voice: `2 failed, 6 passed, 6 deselected`.
+5. No configured ElevenLabs voice guard: `1 failed, 54 deselected`.
+6. No voice field validation: `4 failed, 8 passed, 73 deselected`.
+7. Acceptance of duplicate identifiers: `1 failed, 11 passed, 73 deselected`.
+8. Acceptance of an unlisted default: `3 failed, 9 passed, 73 deselected`.
+
+The fourth mutation disables the gateway and Piper guards together to test actual acceptance.
+All mutation changes stay in disposable copies. No cloud service, paid API, or device was necessary.
+
+Last commands from the repository root:
+
+```sh
+RUFF_CACHE_DIR="$RUFF_CACHE" uv run --locked ruff format --check .
+RUFF_CACHE_DIR="$RUFF_CACHE" uv run --locked ruff check .
+PRIVATE_DENYLIST="$PRIVATE_DENYLIST" task check
+UV_PROJECT_ENVIRONMENT="$FLOOR_ENV" uv run --locked --python 3.14.2 pytest -q
+unshare -rn sh -c 'ip link set lo up && UV_OFFLINE=1 uv run --locked pytest -q'
+uv run --project "$WORKSPACE/assist-live" python "$WORKSPACE/assist-live/tools/check_public_tree.py" --history --root . --private-denylist "$PRIVATE_DENYLIST"
+git diff --check
+```
+
+The Ruff cache starts empty. The ASD-STE100 checker examines the two changed Markdown files.
+The worktree has no sibling privacy checker, so the explicit public-tree command supplies that check.
+The last gates run after this record, with source that has no mutations.

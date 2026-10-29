@@ -4,7 +4,13 @@ import json
 from collections.abc import AsyncIterator, Callable
 from typing import Any
 
-from assist_live_client.models import TTSAudio, TTSFormat, TTSItem, TTSSentenceEnd
+from assist_live_client.models import (
+    TTSAudio,
+    TTSFormat,
+    TTSItem,
+    TTSSentenceEnd,
+    TTSVoice,
+)
 from assist_live_client.protocol import MAX_PCM, decode_control, encode_control
 
 from .audio_gateway import Recorder
@@ -22,6 +28,8 @@ class TTSGateway:
         destination: Destination | None = None,
         local_only: bool = True,
         backend: AudioBackend | None = None,
+        voices: tuple[TTSVoice, ...] = (),
+        default_voice: str | None = None,
     ) -> None:
         self.provider_factory = provider_factory
         self.provider = provider
@@ -29,6 +37,8 @@ class TTSGateway:
         self.declared_destination = destination
         self.local_only = local_only
         self.backend = backend
+        self.voices = voices
+        self.default_voice = default_voice
         if (provider_factory is None) == (backend is None):
             raise ValueError("select one TTS source")
 
@@ -89,6 +99,7 @@ class TTSGateway:
         pending_audio = False
         sentence = 0
         received = 0
+        failure_code = "tts_failed"
 
         async def input_text() -> AsyncIterator[str]:
             nonlocal first_text, has_text, received
@@ -103,12 +114,26 @@ class TTSGateway:
 
         try:
             require_destination(self.destination, self.local_only)
+            selected_provider = (
+                self.provider_factory(self.provider)
+                if self.provider_factory is not None
+                else None
+            )
+            selected = (
+                selected_provider if selected_provider is not None else self.backend
+            )
+            voices = getattr(selected, "voices", self.voices)
+            voice = (
+                voice or getattr(selected, "default_voice", self.default_voice) or ""
+            )
+            if voices and voice not in {item.id for item in voices}:
+                failure_code = "unknown_tts_voice"
+                raise ValueError("unknown TTS voice")
             if self.backend is not None:
                 stream = self._backend_items(turn_id, input_text(), voice)
             else:
-                assert self.provider_factory is not None
-                selected = self.provider_factory(self.provider)
-                stream = selected.stream(input_text(), voice)
+                assert selected_provider is not None
+                stream = selected_provider.stream(input_text(), voice)
             async for item in stream:
                 if isinstance(item, TTSFormat):
                     yield encode_control(
@@ -148,7 +173,7 @@ class TTSGateway:
         except ValueError, RuntimeError:
             if record is not None:
                 await record("tts_failed", metadata)
-            yield encode_control("error", turn_id, code="tts_failed")
+            yield encode_control("error", turn_id, code=failure_code)
         finally:
             if stream is not None and hasattr(stream, "aclose"):
                 await stream.aclose()

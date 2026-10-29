@@ -8,6 +8,7 @@ from .models import (
     TTSFormat,
     TTSItem,
     TTSSentenceEnd,
+    TTSVoice,
     TurnOpen,
 )
 
@@ -18,6 +19,7 @@ __all__ = [
     "TTSFormat",
     "TTSItem",
     "TTSSentenceEnd",
+    "TTSVoice",
     "TimingEvent",
     "TurnOpen",
 ]

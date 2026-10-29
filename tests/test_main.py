@@ -404,6 +404,9 @@ def test_app_option_mapping_keeps_password_out_of_output(tmp_path, monkeypatch, 
                 "stt_provider": "deepgram",
                 "local_only": False,
                 "deepgram_api_key": "synthetic-password-value",
+                "elevenlabs_voice_id": "test-voice",
+                "elevenlabs_voice_name": "Test voice",
+                "elevenlabs_voice_language": "en-US",
             }
         )
     )
@@ -415,6 +418,9 @@ def test_app_option_mapping_keeps_password_out_of_output(tmp_path, monkeypatch, 
     assert env["DEEPGRAM_API_KEY"] == "synthetic-password-value"
     assert env["ASSIST_LIVE_STT_PROVIDER"] == "deepgram"
     assert env["ASSIST_LIVE_LOCAL_ONLY"] == "false"
+    assert env["ELEVENLABS_VOICE_ID"] == "test-voice"
+    assert env["ELEVENLABS_VOICE_NAME"] == "Test voice"
+    assert env["ELEVENLABS_VOICE_LANGUAGE"] == "en-US"
     assert "synthetic-password-value" not in capsys.readouterr().out
 
 

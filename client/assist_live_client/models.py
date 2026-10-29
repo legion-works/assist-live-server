@@ -65,6 +65,20 @@ type TTSItem = TTSFormat | TTSAudio | TTSSentenceEnd
 
 
 @dataclass(frozen=True)
+class TTSVoice:
+    id: str
+    name: str
+    language: str
+
+    def __post_init__(self) -> None:
+        if any(
+            not isinstance(value, str) or not value.strip()
+            for value in (self.id, self.name, self.language)
+        ):
+            raise ValueError("invalid TTS voice")
+
+
+@dataclass(frozen=True)
 class HealthCapabilities:
     healthy: bool
     stt: bool = False
@@ -72,6 +86,8 @@ class HealthCapabilities:
     text_positions: bool = False
     local_only: bool | None = None
     destinations: Mapping[str, str] | None = None
+    tts_voices: tuple[TTSVoice, ...] = ()
+    tts_default_voice: str | None = None
 
 
 @dataclass(frozen=True)

@@ -7,7 +7,13 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from assist_live_client.models import TTSAudio, TTSFormat, TTSItem, TTSSentenceEnd
+from assist_live_client.models import (
+    TTSAudio,
+    TTSFormat,
+    TTSItem,
+    TTSSentenceEnd,
+    TTSVoice,
+)
 from assist_live_client.protocol import MAX_PCM
 
 from ..assets import load_asset_manifest
@@ -68,6 +74,8 @@ def _load_model(cache: Path, manifest: Path | str | None) -> Any:
 
 class PiperProvider:
     provider_id = "piper"
+    voices = (TTSVoice(VOICE, "Lessac (medium)", "en-US"),)
+    default_voice = VOICE
 
     def __init__(self, model: Any) -> None:
         if model.config.sample_rate != 22050:

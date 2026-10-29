@@ -5,7 +5,7 @@ import json
 import logging
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import replace
+from dataclasses import asdict, replace
 from typing import Any
 
 from aiohttp import WSMsgType, web
@@ -87,6 +87,8 @@ def create_app(
                 provider=config.tts_provider,
                 destination=provider_destination(config.tts_provider),
                 local_only=config.local_only,
+                voices=providers.tts_voices,
+                default_voice=providers.tts_default_voice,
             )
     elif tts_provider is not None:
         selected_tts = tts_provider
@@ -100,9 +102,17 @@ def create_app(
             provider=provider_id,
             destination=destination if mode is not None else None,
             local_only=False,
+            voices=getattr(selected_tts, "voices", ()),
+            default_voice=getattr(selected_tts, "default_voice", None),
         )
     elif backend is not None:
-        tts_gateway = TTSGateway(backend=backend, provider="legacy", local_only=False)
+        tts_gateway = TTSGateway(
+            backend=backend,
+            provider="legacy",
+            local_only=False,
+            voices=getattr(backend, "voices", ()),
+            default_voice=getattr(backend, "default_voice", None),
+        )
     if isinstance(store, SQLiteStore):
         store.record_transcripts = record_transcripts
     active_auth = 0
@@ -277,6 +287,16 @@ def create_app(
                     "tts": backend is not None or tts_gateway is not None,
                     "text_positions": tts_gateway is not None
                     and tts_gateway.provider_factory is not None,
+                    **(
+                        {
+                            "tts_voices": [
+                                asdict(voice) for voice in tts_gateway.voices
+                            ],
+                            "tts_default_voice": tts_gateway.default_voice,
+                        }
+                        if tts_gateway is not None and tts_gateway.voices
+                        else {}
+                    ),
                 },
                 "local_only": providers.config.local_only
                 if providers is not None
