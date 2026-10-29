@@ -133,7 +133,7 @@ def test_store_has_detection_partial_and_complete_with_transcript_policy(tmp_pat
         async with service(tmp_path, policy=True) as (client, session, turn, store):
             ws = await connect(session, turn)
             await ws.send_bytes(
-                encode_audio(turn.turn_id, 0, np.ones(6400, dtype="<i2").tobytes())
+                encode_audio(turn.turn_id, 0, np.ones(12800, dtype="<i2").tobytes())
             )
             async with asyncio.timeout(3):
                 while (await ws.receive_json())["type"] != "partial":

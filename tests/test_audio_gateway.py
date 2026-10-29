@@ -73,7 +73,7 @@ def test_oversized_local_partial_is_one_terminal_error():
         gateway = AudioGateway(lambda _: session, detector_factory=detector)
 
         async def audio():
-            yield np.ones(6400, dtype="<i2").tobytes()
+            yield np.ones(12800, dtype="<i2").tobytes()
             await asyncio.Event().wait()
 
         replies = [r async for r in gateway.stt(TURN, audio())]
@@ -104,7 +104,7 @@ def test_selected_provider_onset_partial_endpoint_and_unchanged_final():
 
         async def audio():
             assert selected == ["configured"]
-            yield np.ones(6400, dtype="<i2").tobytes()
+            yield np.ones(12800, dtype="<i2").tobytes()
             await asyncio.wait_for(partial_seen.wait(), 2)
             yield bytes(32000)
             raise AssertionError("input continued after endpoint")
@@ -203,11 +203,11 @@ def test_stall_flushes_without_advancing_audio_clock():
                 onset.set()
 
         async def audio():
-            yield b"\x01\x00" * 16
+            yield b"\x01\x00" * 10400
             await asyncio.wait_for(onset.wait(), 1)
 
         replies = [r async for r in gateway.stt(TURN, audio(), record=record)]
-        assert d.samples == 16
+        assert d.samples == 10400
         assert next(r["text"] for r in replies if r["type"] == "final") == "first"
 
     asyncio.run(run())
@@ -224,7 +224,7 @@ def test_decoding_runs_while_detector_is_busy():
         def vad(samples):
             nonlocal count
             count += 1
-            if count == 13:
+            if count == 22:
                 loop.call_soon_threadsafe(detection_entered.set)
                 assert release.wait(3)
             return 1.0
@@ -239,7 +239,7 @@ def test_decoding_runs_while_detector_is_busy():
         )
 
         async def audio():
-            yield b"\x01\x00" * 7000
+            yield b"\x01\x00" * 12000
 
         async def consume():
             return [r async for r in gateway.stt(TURN, audio())]
@@ -272,7 +272,7 @@ def test_second_turn_onset_comes_only_from_its_own_audio():
         )
 
         async def first():
-            yield b"\x01\x00" * 512
+            yield b"\x01\x00" * 10752
 
         async def record_first(stage, data):
             if stage == "speech_start":
@@ -282,9 +282,9 @@ def test_second_turn_onset_comes_only_from_its_own_audio():
         assert onsets == ["first"]
 
         async def second():
-            yield bytes(1024)
+            yield bytes(13312)
             assert onsets == ["first"]
-            yield b"\x01\x00" * 512
+            yield b"\x01\x00" * 4096
 
         async def record_second(stage, data):
             if stage == "speech_start":
@@ -298,8 +298,8 @@ def test_second_turn_onset_comes_only_from_its_own_audio():
         ]
         assert onsets == ["first", "second"]
         assert detectors[0] is not detectors[1]
-        assert detectors[0].speech_started_at_ms == 0.0
-        assert detectors[1].speech_started_at_ms == 32.0
+        assert detectors[0].speech_started_at_ms == 400.0
+        assert detectors[1].speech_started_at_ms == 416.0
 
     asyncio.run(run())
 

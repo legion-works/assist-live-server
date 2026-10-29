@@ -15,7 +15,14 @@ from numpy.typing import NDArray
 from ..assets import load_asset_manifest
 from ..assets import model_path as model_path
 from ..assets import verified_model as verified_model
-from .profiles import HARD_ENDPOINT_MS, PROFILES, Profile
+from .profiles import (
+    COMMAND_START_MS,
+    COMMAND_WAIT_MS,
+    HARD_ENDPOINT_MS,
+    PROFILES,
+    START_GUARD_MS,
+    Profile,
+)
 from .transcript_guard import complete_partial
 
 Samples = NDArray[np.float32]
@@ -204,6 +211,7 @@ class TurnDetector:
         self.audio = bytearray()
         self.samples = 0
         self.silent_samples = 0
+        self.voice_run_samples = 0
         self.done = False
         self.speech_started_at_ms: float | None = None
         self.last_turn_samples = -SMART_TURN_INTERVAL_SAMPLES
@@ -234,14 +242,19 @@ class TurnDetector:
         return self._process(partial, flush=True)
 
     def _process(self, partial: str, *, flush: bool = False) -> list[dict[str, Any]]:
-        while (
-            len(self.pending) >= 1024
-            or (flush and self.pending)
-            or self.samples + len(self.pending) // 2 >= HARD_ENDPOINT_MS * 16
-        ):
-            count = min(
-                512, len(self.pending) // 2, HARD_ENDPOINT_MS * 16 - self.samples
-            )
+        while self.pending:
+            endpoint_samples = (
+                COMMAND_WAIT_MS
+                if self.speech_started_at_ms is None
+                else HARD_ENDPOINT_MS
+            ) * 16
+            if (
+                len(self.pending) < 1024
+                and not flush
+                and self.samples + len(self.pending) // 2 < endpoint_samples
+            ):
+                break
+            count = min(512, len(self.pending) // 2, endpoint_samples - self.samples)
             block = self.pending[: count * 2]
             del self.pending[: count * 2]
             self.samples += count
@@ -258,11 +271,28 @@ class TurnDetector:
                 voice = self.vad_probability(np.pad(samples, (0, 512 - len(samples))))
                 if not math.isfinite(voice) or not 0 <= voice <= 1:
                     raise ValueError("invalid VAD probability")
-                if voice >= 0.5 and self.speech_started_at_ms is None:
-                    self.speech_started_at_ms = (self.samples - count) / 16
-                self.silent_samples = self.silent_samples + count if voice < 0.5 else 0
+                if self.speech_started_at_ms is None:
+                    eligible = max(
+                        0,
+                        self.samples - max(self.samples - count, START_GUARD_MS * 16),
+                    )
+                    self.voice_run_samples = (
+                        self.voice_run_samples + eligible if voice >= 0.5 else 0
+                    )
+                    if self.voice_run_samples >= COMMAND_START_MS * 16:
+                        self.speech_started_at_ms = (
+                            self.samples - self.voice_run_samples
+                        ) / 16
+                self.silent_samples = (
+                    self.silent_samples + count
+                    if self.speech_started_at_ms is not None and voice < 0.5
+                    else 0
+                )
                 silence_ms = self.silent_samples / 16
-                if silence_ms >= self.profile.max_silence_ms:
+                if self.speech_started_at_ms is None:
+                    if self.samples >= COMMAND_WAIT_MS * 16:
+                        reason = "max_silence"
+                elif silence_ms >= self.profile.max_silence_ms:
                     reason = "max_silence"
                 elif (
                     self.profile.early_enabled

@@ -28,14 +28,14 @@ def test_speech_onset_property_is_once_per_turn_and_uses_existing_vad():
 
     d = TurnDetector(vad_probability=vad, turn_probability=lambda _: 0)
     assert d.speech_started_at_ms is None
-    d.push(pcm(32), "")
+    d.push(pcm(416), "")
     assert d.speech_started_at_ms is None
-    d.push(np.ones(512, dtype="<i2").tobytes(), "")
-    assert d.speech_started_at_ms == 32.0
+    d.push(np.ones(4096, dtype="<i2").tobytes(), "")
+    assert d.speech_started_at_ms == 416.0
     d.push(pcm(32), "")
     d.push(np.ones(512, dtype="<i2").tobytes(), "")
-    assert d.speech_started_at_ms == 32.0
-    assert len(calls) == 4
+    assert d.speech_started_at_ms == 416.0
+    assert len(calls) == 23
 
 
 def test_incomplete_transcript_blocks_early_end(detector):
@@ -68,7 +68,7 @@ def test_early_event_is_terminal_and_chunk_independent():
         assert d.push(pcm(2000), "turn on lights") == []
         return events
 
-    data = (np.ones(512, dtype="<i2").tobytes()) + pcm(1000)
+    data = np.ones(12800, dtype="<i2").tobytes() + pcm(1000)
     result = run([data])
     assert result == run([data[i : i + 74] for i in range(0, len(data), 74)])
     assert len(result) == 1
@@ -78,7 +78,12 @@ def test_early_event_is_terminal_and_chunk_independent():
 
 @pytest.mark.parametrize("profile", ["safe", "fast"])
 def test_maximum_silence_ends_incomplete_partial(profile):
-    d = TurnDetector(profile, vad_probability=lambda _: 0, turn_probability=lambda _: 1)
+    d = TurnDetector(
+        profile,
+        vad_probability=lambda a: float(np.any(a)),
+        turn_probability=lambda _: 1,
+    )
+    assert d.push(np.ones(12800, dtype="<i2").tobytes(), "turn on the") == []
     assert d.push(pcm(1499), "turn on the") == []
     events = d.push(pcm(100), "turn on the")
     assert len(events) == 1 and events[0]["reason"] == "max_silence"
@@ -104,7 +109,7 @@ def test_speech_resets_silence_and_invalid_pcm_is_rejected():
         vad_probability=lambda a: float(np.any(a)), turn_probability=lambda _: 1
     )
     assert not d.push(pcm(384), "lights")
-    assert not d.push(np.ones(512, dtype="<i2").tobytes(), "lights")
+    assert not d.push(np.ones(5120, dtype="<i2").tobytes(), "lights")
     assert not d.push(pcm(384), "lights")
     assert d.push(pcm(32), "lights")[0]["reason"] == "early"
     with pytest.raises(ValueError, match="PCM"):
@@ -189,7 +194,7 @@ def test_real_models_from_required_cache():
     assert 0 <= runtime.vad_probability(silence) < 0.5
     assert 0 <= runtime.turn_probability(np.zeros(16000, dtype=np.float32)) <= 1
     detector = TurnDetector(models=runtime)
-    assert detector.push(pcm(1600), "turn on the")[0]["reason"] == "max_silence"
+    assert detector.push(pcm(5000), "turn on the")[0]["reason"] == "max_silence"
 
 
 def test_server_ignores_tool_manifest_environment(monkeypatch):
@@ -253,26 +258,28 @@ def test_cache_symlink_cannot_escape(tmp_path):
 def test_unchanged_partial_limits_full_smart_turn_inferences():
     calls = []
     d = TurnDetector(
-        vad_probability=lambda _: 0,
+        vad_probability=lambda audio: float(np.any(audio)),
         turn_probability=lambda audio: calls.append(len(audio)) or 0,
     )
+    assert d.push(np.ones(12800, dtype="<i2").tobytes(), "set volume to 50") == []
     assert d.push(pcm(1472), "set volume to 50") == []
-    assert calls == [ms * 16 for ms in (416, 576, 736, 896, 1056, 1216, 1376)]
+    assert calls == [ms * 16 for ms in (1216, 1376, 1536, 1696, 1856, 2016, 2176)]
 
 
 def test_changed_partial_bypasses_audio_growth_throttle():
     calls = []
     d = TurnDetector(
-        vad_probability=lambda _: 0,
+        vad_probability=lambda audio: float(np.any(audio)),
         turn_probability=lambda audio: calls.append(len(audio)) or 0,
     )
+    assert d.push(np.ones(12800, dtype="<i2").tobytes(), "turn on lights") == []
     assert d.push(pcm(416), "turn on lights") == []
     assert d.push(pcm(32), "stop") == []
-    assert calls == [416 * 16, 448 * 16]
+    assert calls == [1216 * 16, 1248 * 16]
     assert d.push(pcm(128), "stop") == []
     assert len(calls) == 2
     assert d.push(pcm(32), "stop") == []
-    assert calls[-1] == 608 * 16
+    assert calls[-1] == 1408 * 16
 
 
 def test_unknown_profile_raises_value_error():
@@ -285,16 +292,17 @@ def test_unknown_profile_raises_value_error():
 def test_flush_handles_residual_silence_without_adding_audio():
     sizes = []
     d = TurnDetector(
-        vad_probability=lambda audio: sizes.append(len(audio)) or 0,
+        vad_probability=lambda audio: sizes.append(len(audio)) or float(np.any(audio)),
         turn_probability=lambda _: 0,
     )
+    assert d.push(np.ones(12800, dtype="<i2").tobytes(), "turn on the") == []
     assert d.push(pcm(1500), "turn on the") == []
     events = d.flush("turn on the")
     assert events == [
         {
             "type": "end_decision",
             "reason": "max_silence",
-            "audio_ms": 1500.0,
+            "audio_ms": 2300.0,
             "silence_ms": 1500.0,
         }
     ]
@@ -304,13 +312,13 @@ def test_flush_handles_residual_silence_without_adding_audio():
 
 def test_empty_flush_does_not_invent_silence():
     d = TurnDetector(vad_probability=lambda _: 0, turn_probability=lambda _: 0)
-    assert d.push(pcm(1499), "the") == []
+    assert d.push(pcm(4999), "the") == []
     assert d.flush("the") == []
-    assert d.samples == 1499 * 16
+    assert d.samples == 4999 * 16
     assert d.flush("the") == []
-    assert d.samples == 1499 * 16
-    assert d.push(pcm(1), "the") == []
-    assert d.flush("the")[0]["audio_ms"] == 1500
+    assert d.samples == 4999 * 16
+    assert d.push(pcm(1), "the")[0]["audio_ms"] == 5000
+    assert d.flush("the") == []
 
 
 def test_sequential_turns_reset_shared_real_vad_runtime():
@@ -318,7 +326,7 @@ def test_sequential_turns_reset_shared_real_vad_runtime():
     assert cache, "FAIL model cache: set ASSIST_LIVE_MODEL_CACHE"
     shared = ModelRuntime(cache)
     rng = np.random.default_rng(123)
-    audio = [rng.integers(-12000, 12000, 512, dtype=np.int16).tobytes(), pcm(1600)]
+    audio = [rng.integers(-12000, 12000, 512, dtype=np.int16).tobytes(), pcm(5000)]
 
     def run(runtime):
         d = TurnDetector(models=runtime)

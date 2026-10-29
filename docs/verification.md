@@ -2885,3 +2885,38 @@ git diff --check
 The Ruff cache starts empty. The ASD-STE100 checker examines the two changed Markdown files.
 The worktree has no sibling privacy checker, so the explicit public-tree command supplies that check.
 The last gates run after this record, with source that has no mutations.
+
+## Turn start guard
+
+Date: 2026-10-29 (UTC).
+
+The detector ignores the first 400 ms for voice onset and time without voice.
+It must then have 250 ms of continuous voice before command start.
+Before command start, `early` and maximum-silence endpoints stay off.
+A turn without command start ends at 5000 ms of received audio.
+The end value stays `max_silence`: the control message has no `reason` field, and the store drops `reason` metadata.
+No client or protocol schema changed.
+
+Command: `uv run --locked pytest tests/turn/test_start_guard.py -q --tb=short`.
+RED result: `10 failed`. The wake tail caused an `early` end at 700 ms.
+Time without voice at the turn start caused an end at 1500 ms.
+GREEN result: `10 passed`.
+The tests include the two `Profile` settings, continuous voice, the wait boundary, and a follow-up turn.
+
+Command: `uv run --locked pytest tests/contract/ -q --tb=short`.
+Result: `272 passed`. The protocol assertions stay unchanged.
+
+A local synthetic replay used the pinned Piper voice, Parakeet provider, Silero VAD, and Smart Turn.
+All eight model files gave satisfactory SHA-256 checks before use.
+The input used the last 250 ms of "Okay Nabu", 600 ms without voice, and "What time is it?".
+The replay resampled Piper audio to 16 kHz and kept all audio for STT.
+Before the change, the transcript was `you`, and the detector ended at 576 ms before the command.
+After the change, the transcript was `What time is it?`, and the detector ended at 2112 ms after the command.
+
+No wake-tail prefix occurred in that transcript.
+This replay is a local check, not a CI test. CI runs the 10 deterministic guard tests.
+No synthetic audio is part of the repository.
+
+Four isolated mutations each gave a named test assertion failure.
+They removed the guard, decreased the continuous-voice time, counted time without voice before command start, and removed the 5 s wait.
+The unchanged control gave `10 passed`. The mutation checks left production files unchanged.

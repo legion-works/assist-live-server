@@ -563,12 +563,12 @@ def test_replay_flushes_received_final_silence():
     root = Path(__file__).resolve().parents[2]
     cache = os.environ.get("ASSIST_LIVE_MODEL_CACHE")
     assert cache, "FAIL model cache: set ASSIST_LIVE_MODEL_CACHE"
-    row = {"pcm": bytes(1500 * 32), "partials": [{"audio_ms": 0, "text": "the"}]}
+    row = {"pcm": bytes(5000 * 32), "partials": [{"audio_ms": 0, "text": "the"}]}
     assert (
         replay(row, Profile(), Path(cache), root / "assets/manifest.json")[0][
             "audio_ms"
         ]
-        == 1500
+        == 5000
     )
 
 
