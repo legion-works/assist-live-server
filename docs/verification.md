@@ -3056,3 +3056,43 @@ The worktree has no sibling privacy checker, so the explicit public-tree command
 
 The complete repository check gave `1089 passed`, with satisfactory formatting, lint, type, package, asset, and secret checks.
 The full gates run again after this record. No code or test behavior changed.
+
+## Pre-roll authentication vectors
+
+Date: 2026-10-30 (UTC).
+
+The shared device vectors include `mic_open` events with `pre_roll_ms: 500` and `pre_roll_ms: 0`.
+The server's `canonical_event` and `sign_event` functions supplied the new bytes and tags with the public test key.
+The two previous vectors keep their initial bytes.
+The SHA-256 in `docs/protocol.md` identifies the updated file.
+
+Command: `uv run --locked pytest tests/contract/test_auth.py -q -k pre_roll_vectors`.
+Initial result: `4 failed, 32 deselected`, with `missing mic_open vector with pre_roll_ms=0` and `missing mic_open vector with pre_roll_ms=500`.
+The tests check canonical bytes, signatures, and acceptance through the two device transports.
+
+Commands from the repository root:
+
+```sh
+export UV_LINK_MODE=copy
+export ASSIST_LIVE_MODEL_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/assist-live/turn"
+uv run --locked ruff format --check .
+uv run --locked ruff check .
+PRIVATE_DENYLIST="$PRIVATE_DENYLIST" task check
+UV_PROJECT_ENVIRONMENT="$FLOOR_ENV" uv run --locked --python 3.14.2 pytest -q
+unshare -rn sh -c 'ip link set lo up && UV_OFFLINE=1 uv run --locked pytest -q'
+python3 "$WORKSPACE/assist-live/tools/check_public_tree.py" --history --root . --private-denylist "$PRIVATE_DENYLIST"
+git diff --check
+```
+
+`FLOOR_ENV` selects an isolated temporary environment. `PRIVATE_DENYLIST` selects an external privacy input.
+The explicit public-tree command supplies the privacy check when there is no sibling checker.
+The ASD-STE100 checker examines the two changed Markdown files.
+
+The complete repository check gave `1093 passed`, with satisfactory formatting, lint, type, package, asset, and secret checks.
+The Python 3.14.2 suite gave `1093 passed`.
+The network-isolated suite gave `1093 passed`.
+
+Four isolated fixture mutations removed each new field or changed canonical bytes or a tag.
+Each mutation caused an assertion failure through each transport. The unchanged fixture gave a satisfactory result.
+
+The full suites run again after this record.

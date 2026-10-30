@@ -51,6 +51,48 @@ def test_all_signed_fields_and_vectors():
             assert not verify_event({**value, field: changed}, vector["tag"], key)
 
 
+@pytest.mark.parametrize("pre_roll_ms", [0, 500])
+@pytest.mark.parametrize("adapter", ["udp", "websocket"])
+def test_pre_roll_vectors_are_signed_and_accepted(pre_roll_ms, adapter):
+    from pathlib import Path
+
+    from assist_live_server.auth import (
+        Registry,
+        canonical_event,
+        sign_event,
+        verify_event,
+    )
+    from assist_live_server.protocol import (
+        TimingIngress,
+        UDPTransport,
+        WebSocketTransport,
+    )
+
+    root = Path(__file__).resolve().parents[2]
+    vectors = json.loads((root / "protocol/device-vectors.json").read_text())["vectors"]
+    matches = [
+        vector
+        for vector in vectors
+        if vector["event"]["stage"] == "mic_open"
+        and vector["event"]["data"].get("pre_roll_ms") == pre_roll_ms
+    ]
+    assert matches, f"missing mic_open vector with pre_roll_ms={pre_roll_ms}"
+    for vector in matches:
+        value = vector["event"]
+        key = bytes.fromhex(vector["key_hex"])
+        assert canonical_event(value).hex() == vector["canonical_hex"]
+        assert sign_event(value, key) == vector["tag"]
+        assert verify_event(value, vector["tag"], key)
+        registry = Registry()
+        registry.bind(value["device"], value["device"], key)
+        ingress = TimingIngress(registry)
+        receiver = (
+            UDPTransport(ingress) if adapter == "udp" else WebSocketTransport(ingress)
+        )
+        assert receiver.accept(json.dumps({**value, "tag": vector["tag"]}).encode())
+        assert ingress.queue.get_nowait().event == value
+
+
 @pytest.mark.parametrize("adapter", ["udp", "websocket"])
 def test_shared_timing_contract(adapter, tmp_path, replay_store):
     from assist_live_server.auth import Registry, sign_event

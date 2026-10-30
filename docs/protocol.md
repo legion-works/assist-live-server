@@ -333,11 +333,12 @@ An in-memory replay store is for isolated tests only.
 `protocol/device-vectors.json` has SHA-256:
 
 ```text
-b74cf28042f22e9bd85520a864f335e0f61fddbd99559ce458f78cd5b540bc89
+c75ff4fee73ce8e2f5528583b6e1ebd2699c31cedf42eb77d470c2dfbbbe0487
 ```
 
 The firmware copy must have this same digest.
 The keys in this file are public test values, not usable credentials.
+The `mic_open` vectors include data without `pre_roll_ms`, with `pre_roll_ms: 0`, and with `pre_roll_ms: 500`.
 
 ## Control and audio
 
