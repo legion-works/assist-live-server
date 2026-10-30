@@ -527,7 +527,23 @@ It calls `finish()` one time after input stops.
 The server sends `end_decision`, one `final`, then `speaker_result` before `end` and stream close.
 A provider failure sends one terminal `error` with code `stt_failed`, not a `final`.
 The server does not retry or use fallback after a `final`.
-The `final.text` value stays unchanged. Text from `partial` is not a complete result.
+
+For a session with `final_redecodes=True`, the gateway compares the `final` with the last `partial` sent in that turn.
+Parakeet declares this function because `finish()` decodes all accepted audio again.
+Deepgram puts `final` stream segments together. Its `final` stays unchanged.
+Sessions without this optional attribute also keep their `final` unchanged.
+
+The gateway uses the same word tokenizer as the transcript guard.
+It applies Unicode `casefold`, removes punctuation separators, and keeps internal straight or curly apostrophes.
+Thus `don't` counts as one word. The count includes each word occurrence.
+The gateway uses the last `partial` only when it has two or more words and the two conditions below agree:
+
+- The `final` has fewer words than that `partial`. An empty `final` has 0 words. A `final` with only punctuation also has 0 words.
+- No word occurs in the `final` and the `partial`.
+
+In all other conditions, the `final` stays unchanged. A shorter `final` that removes `not` but keeps other words stays unchanged.
+The replacement adds no decode or audio wait. The gateway does not use a `partial` from a different turn or an unsent decode.
+The transcript control fields stay unchanged.
 
 The transcript limit is 16000 JSON-escaped bytes, without the two outer quotation marks.
 This budget fits the two control envelopes in the 16384-byte limit.
@@ -541,6 +557,11 @@ A candidate starts when the received time without voice is at the detector profi
 New voice starts a new candidate interval.
 
 The store keeps `stt_partial` timing events without transcript text. The two transcript settings control `stt_final` text only.
+
+Only a replaced `final` adds `data.replaced: true` to `stt_final`.
+This boolean does not store text. Transcript-storage permission is not necessary for this field.
+Other timing events and other values do not keep this field. Older clients can read it without negotiation.
+
 Disconnect cancels the session and awaits the gateway tasks.
 CPU work can finish in its `thread` after cancellation, but it cannot write a socket or store event.
 
@@ -639,6 +660,10 @@ The maintenance task checks retention each minute, not in event-acceptance trans
 
 `GET /metrics` supplies Prometheus text with the integration token's satellite access checks.
 Ordinary diagnostics contain counts only, without audio or transcripts.
+
+The counter `assist_live_stt_final_replaced_total` counts `final` replacements for the audio gateway instance.
+Its initial value is 0. It has no `labels` and contains no transcript text or turn identifiers.
+Unchanged `final` results do not increase this counter.
 
 Invalid stored rows do not stop maintenance, turn opening, queries, exports, or subscriptions.
 The server deletes invalid pending rows. It skips invalid event and turn rows on read, but does not delete them because of these read errors.

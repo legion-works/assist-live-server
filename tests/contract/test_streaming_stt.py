@@ -71,6 +71,154 @@ async def connect(session, turn):
     return ws
 
 
+@pytest.mark.parametrize(
+    ("partial", "final", "expected", "replaced"),
+    [
+        pytest.param("two words", "", "two words", True, id="empty-final"),
+        pytest.param(
+            "what time is it", "Yeah.", "what time is it", True, id="collapse"
+        ),
+        pytest.param("what time is it", "Time.", "Time.", False, id="shared-word"),
+        pytest.param(
+            "do not turn on lights",
+            "turn on lights",
+            "turn on lights",
+            False,
+            id="negation-correction",
+        ),
+        pytest.param(
+            "two words",
+            "a longer final result",
+            "a longer final result",
+            False,
+            id="longer-final",
+        ),
+        pytest.param("two words", "other text", "other text", False, id="equal-count"),
+        pytest.param("hello", "", "", False, id="one-word"),
+        pytest.param("", "", "", False, id="no-partial"),
+        pytest.param(
+            "", "final words", "final words", False, id="no-partial-nonempty-final"
+        ),
+        pytest.param(
+            "what time is it", "  \t", "what time is it", True, id="whitespace-final"
+        ),
+        pytest.param(
+            "TURN, on lights!", "(turn).", "(turn).", False, id="punctuation-case"
+        ),
+        pytest.param(
+            "don't turn lights", "DON'T!", "DON'T!", False, id="apostrophe-shared"
+        ),
+        pytest.param("don't", "", "", False, id="apostrophe-one-word"),
+        pytest.param(
+            "don’t turn lights", "DON’T!", "DON’T!", False, id="curly-apostrophe"
+        ),
+        pytest.param("one-two", "", "one-two", True, id="punctuation-separator"),
+        pytest.param("go go", "", "go go", True, id="repeated-word-count"),
+        pytest.param("!!!", "", "", False, id="no-word-partial"),
+        pytest.param(
+            "STRASSE lights", "Straße!", "Straße!", False, id="unicode-casefold"
+        ),
+        pytest.param(
+            "two words", "!!!", "two words", True, id="punctuation-only-final"
+        ),
+    ],
+)
+def test_final_redecode_replacement_contract(
+    tmp_path, partial, final, expected, replaced
+):
+    async def run():
+        outputs = iter([partial, final] if partial else [final])
+        gateway = AudioGateway(
+            lambda _: ParakeetSession(lambda _: next(outputs)),
+            provider="configured-local",
+            detector_factory=lambda: TurnDetector(
+                vad_probability=lambda _: 1, turn_probability=lambda _: 0
+            ),
+        )
+        async with service(tmp_path, gateway=gateway) as (_, session, turn, store):
+            ws = await connect(session, turn)
+            if partial:
+                await ws.send_bytes(encode_audio(turn.turn_id, 0, bytes(25600)))
+                async with asyncio.timeout(3):
+                    while (await ws.receive_json())["type"] != "partial":
+                        pass
+                await ws.send_bytes(encode_audio(turn.turn_id, 1, bytes(2)))
+            else:
+                await ws.send_bytes(encode_audio(turn.turn_id, 0, bytes(2)))
+            await ws.send_json(encode_control("end", turn.turn_id))
+            replies = [m.json() async for m in ws]
+            result = next(r for r in replies if r["type"] == "final")
+            assert result["text"] == expected, (
+                "final selection violated replacement guard"
+            )
+            assert set(result) == {"type", "version", "turn_id", "text"}
+            event = next(
+                e
+                for e in (await store.get_turn(turn.turn_id))["events"]
+                if e["stage"] == "stt_final"
+            )
+            assert event["data"].get("replaced") is (True if replaced else None), (
+                "replacement timing marker differs"
+            )
+            assert "transcript" not in event["data"]
+            response = await session.get(
+                "http://service.invalid/metrics",
+                headers={"Authorization": "Bearer synthetic-token"},
+            )
+            metrics = await response.text()
+            assert (
+                f"assist_live_stt_final_replaced_total {int(replaced)}\n" in metrics
+            ), "replacement counter differs"
+            assert "# TYPE assist_live_stt_final_replaced_total counter\n" in metrics
+
+    asyncio.run(run())
+
+
+def test_final_replacement_never_uses_previous_turn_partial(tmp_path):
+    async def run():
+        outputs = iter(["previous turn words", "Yeah.", ""])
+        gateway = AudioGateway(
+            lambda _: ParakeetSession(lambda _: next(outputs)),
+            detector_factory=lambda: TurnDetector(
+                vad_probability=lambda _: 1, turn_probability=lambda _: 0
+            ),
+        )
+        async with service(tmp_path, gateway=gateway) as (client, session, turn, store):
+            ws = await connect(session, turn)
+            await ws.send_bytes(encode_audio(turn.turn_id, 0, bytes(25600)))
+            async with asyncio.timeout(3):
+                while (await ws.receive_json())["type"] != "partial":
+                    pass
+            await ws.send_json(encode_control("end", turn.turn_id))
+            replies = [m.json() async for m in ws]
+            assert (
+                next(r["text"] for r in replies if r["type"] == "final")
+                == "previous turn words"
+            )
+            later = TurnOpen(str(uuid7()), "satellite-a", "voice", None, None)
+            await client.open_turn(later)
+            ws = await connect(session, later)
+            await ws.send_bytes(encode_audio(later.turn_id, 0, bytes(2)))
+            await ws.send_json(encode_control("end", later.turn_id))
+            replies = [m.json() async for m in ws]
+            assert next(r["text"] for r in replies if r["type"] == "final") == "", (
+                "previous turn partial leaked"
+            )
+            event = next(
+                e
+                for e in (await store.get_turn(later.turn_id))["events"]
+                if e["stage"] == "stt_final"
+            )
+            assert "replaced" not in event["data"], (
+                "previous turn replacement marker leaked"
+            )
+            assert gateway.stt_final_replaced_total == 1, (
+                "unchanged turn incremented replacement counter"
+            )
+
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("character", ["x", '"', "\x01", "\U0001f642"])
 @pytest.mark.parametrize("extra", [0, 1])
 def test_local_final_deliverable_bound(tmp_path, character, extra):

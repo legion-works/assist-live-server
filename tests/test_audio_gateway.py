@@ -2,8 +2,10 @@ import asyncio
 import subprocess
 import sys
 import threading
+from types import SimpleNamespace
 
 import numpy as np
+import pytest
 from assist_live_server.audio_gateway import AudioGateway
 from assist_live_server.providers.parakeet import ParakeetSession
 from assist_live_server.turn.detector import TurnDetector
@@ -61,6 +63,116 @@ def detector():
     return TurnDetector(
         vad_probability=lambda a: float(np.any(a)), turn_probability=lambda _: 1
     )
+
+
+@pytest.mark.parametrize("capability", [None, False, "true", 1])
+def test_session_without_explicit_redecode_capability_keeps_final(capability):
+    async def run():
+        emitted = asyncio.Event()
+        outputs = iter(["two words", ""])
+        inner = ParakeetSession(lambda _: next(outputs))
+        session = SimpleNamespace(
+            push=inner.push,
+            partial=inner.partial,
+            finish=inner.finish,
+            speech_started=inner.speech_started,
+            cancel=inner.cancel,
+        )
+        if capability is not None:
+            session.final_redecodes = capability
+        gateway = AudioGateway(lambda _: session, detector_factory=detector)
+
+        async def audio():
+            yield np.ones(12800, dtype="<i2").tobytes()
+            await emitted.wait()
+
+        replies = []
+        async for reply in gateway.stt(TURN, audio()):
+            replies.append(reply)
+            if reply["type"] == "partial":
+                emitted.set()
+        assert next(r["text"] for r in replies if r["type"] == "final") == "", (
+            "non-redecode final changed"
+        )
+        assert gateway.stt_final_replaced_total == 0
+
+    asyncio.run(asyncio.wait_for(run(), 3))
+
+
+def test_final_replacement_uses_emitted_partial_not_inflight_partial():
+    async def run():
+        emitted = asyncio.Event()
+        inflight = asyncio.Event()
+        release = asyncio.Event()
+
+        class Session(ParakeetSession):
+            calls = 0
+
+            async def partial(self):
+                self.calls += 1
+                if self.calls == 1:
+                    return "emitted partial words"
+                inflight.set()
+                await release.wait()
+                self._partial = "unseen later words"
+                return self._partial
+
+            async def finish(self):
+                release.set()
+                return "Yeah."
+
+        gateway = AudioGateway(
+            lambda _: Session(lambda _: ""), detector_factory=detector
+        )
+
+        async def audio():
+            yield np.ones(12800, dtype="<i2").tobytes()
+            await emitted.wait()
+            yield b"\x01\x00"
+            await inflight.wait()
+
+        replies = []
+        async for reply in gateway.stt(TURN, audio()):
+            replies.append(reply)
+            if reply["type"] == "partial":
+                emitted.set()
+        assert [r["text"] for r in replies if r["type"] == "partial"] == [
+            "emitted partial words"
+        ]
+        assert (
+            next(r["text"] for r in replies if r["type"] == "final")
+            == "emitted partial words"
+        ), "unemitted partial selected"
+
+    asyncio.run(asyncio.wait_for(run(), 3))
+
+
+def test_final_replacement_uses_last_of_multiple_emitted_partials():
+    async def run():
+        emitted = asyncio.Queue()
+        outputs = iter(["first partial words", "last partial words", "Yeah."])
+        gateway = AudioGateway(
+            lambda _: ParakeetSession(lambda _: next(outputs)),
+            detector_factory=detector,
+        )
+
+        async def audio():
+            yield np.ones(12800, dtype="<i2").tobytes()
+            assert await emitted.get() == "first partial words"
+            yield np.ones(6400, dtype="<i2").tobytes()
+            assert await emitted.get() == "last partial words"
+
+        replies = []
+        async for reply in gateway.stt(TURN, audio()):
+            replies.append(reply)
+            if reply["type"] == "partial":
+                await emitted.put(reply["text"])
+        assert (
+            next(r["text"] for r in replies if r["type"] == "final")
+            == "last partial words"
+        ), "last emitted partial not selected"
+
+    asyncio.run(asyncio.wait_for(run(), 3))
 
 
 def test_oversized_local_partial_is_one_terminal_error():

@@ -24,7 +24,11 @@ class STTBusyError(RuntimeError):
 
 
 class STTSession(Protocol):
-    """Accept ordered mono 16 kHz little-endian int16 PCM."""
+    """Accept ordered mono 16 kHz little-endian int16 PCM.
+
+    Sessions can set final_redecodes=True when finish decodes all audio again.
+    Without this optional attribute, the gateway keeps the final unchanged.
+    """
 
     async def push(self, pcm: bytes) -> None: ...
     async def partial(self) -> str: ...

@@ -7,6 +7,25 @@ import pytest
 from assist_live_client import TimingEvent, TurnOpen
 
 
+@pytest.mark.parametrize("stage", ["stt_final", "stt_partial", "speech_start"])
+@pytest.mark.parametrize("value", [True, False, 1, "transcript text", None])
+def test_safe_data_keeps_only_true_final_replacement_marker(stage, value):
+    from assist_live_server.store import safe_data
+
+    event = TimingEvent(
+        None,
+        "satellite-a",
+        "server",
+        stage,
+        1,
+        "measured",
+        None,
+        data={"replaced": value, "transcript": "discarded text"},
+    )
+    expected = {"replaced": True} if stage == "stt_final" and value is True else {}
+    assert safe_data(event) == expected
+
+
 def test_duplicate_turn_uses_typed_error(tmp_path):
     from assist_live_server.protocol import TurnExistsError
     from assist_live_server.store import SQLiteStore

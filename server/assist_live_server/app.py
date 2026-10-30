@@ -331,6 +331,11 @@ def create_app(
                     "device_worker_errors_total": timing.worker_errors,
                     "authenticated_connections": active_auth,
                     "audio_store_errors_total": audio_store_errors_total,
+                    "stt_final_replaced_total": (
+                        audio_gateway.stt_final_replaced_total
+                        if audio_gateway is not None
+                        else 0
+                    ),
                     **{
                         "speaker_name_dropped_" + reason + "_total": count
                         for reason, count in SPEAKER_NAME_DROPS.items()
@@ -624,6 +629,7 @@ def create_app(
                     speaker = False
                     try:
                         async for reply in replies:
+                            replaced = reply.pop("_final_replaced", False) is True
                             reply = decode_control(json.dumps(reply), turn_id)
                             kind = reply["type"]
                             if terminal and kind != "speaker_result":
@@ -644,7 +650,15 @@ def create_app(
                                         "stt_final"
                                         if kind == "final"
                                         else "stt_partial",
-                                        {**metadata, "transcript": reply["text"]},
+                                        {
+                                            **metadata,
+                                            "transcript": reply["text"],
+                                            **(
+                                                {"replaced": True}
+                                                if kind == "final" and replaced
+                                                else {}
+                                            ),
+                                        },
                                     )
                                 elif kind == "speaker_result":
                                     if speaker or not terminal:

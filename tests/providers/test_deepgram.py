@@ -40,6 +40,62 @@ def result(text, final=False):
     }
 
 
+def test_deepgram_gateway_keeps_short_disjoint_final(cloud_ws_server):
+    from assist_live_server.audio_gateway import AudioGateway
+    from assist_live_server.turn.detector import TurnDetector
+
+    async def run():
+        emitted = asyncio.Event()
+
+        async def handler(request):
+            ws = web.WebSocketResponse()
+            await ws.prepare(request)
+            async for message in ws:
+                if message.type == WSMsgType.BINARY:
+                    await ws.send_json(result("what time is it"))
+                elif message.json() == {"type": "CloseStream"}:
+                    await ws.send_json(result("Yeah.", True))
+                    await ws.send_json({"type": "Metadata"})
+                    await ws.close()
+            return ws
+
+        async with cloud_ws_server(handler) as fake:
+            session = DeepgramProvider(KEY, endpoint=fake.url).session()
+            gateway = AudioGateway(
+                lambda _: session,
+                provider="deepgram",
+                local_only=False,
+                destination="cloud",
+                detector_factory=lambda: TurnDetector(
+                    vad_probability=lambda _: 1, turn_probability=lambda _: 0
+                ),
+            )
+
+            async def audio():
+                while not emitted.is_set():
+                    yield bytes(25600)
+                    await asyncio.wait_for(session._changed.wait(), 2)
+                    session._changed.clear()
+
+            replies = []
+            try:
+                async for reply in gateway.stt(
+                    "01900000-0000-7000-8000-000000000001", audio()
+                ):
+                    replies.append(reply)
+                    if reply["type"] == "partial":
+                        emitted.set()
+                assert emitted.is_set()
+                assert (
+                    next(r["text"] for r in replies if r["type"] == "final") == "Yeah."
+                ), "cloud final changed"
+                assert gateway.stt_final_replaced_total == 0
+            finally:
+                await session.aclose()
+
+    asyncio.run(asyncio.wait_for(run(), 3))
+
+
 @pytest.mark.parametrize("extra", [0, 1])
 @pytest.mark.parametrize("character", ["x", '"', "\x01", "\U0001f642"])
 def test_cloud_transcript_encoded_budget(cloud_ws_server, extra, character):

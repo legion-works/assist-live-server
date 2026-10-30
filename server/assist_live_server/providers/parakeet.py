@@ -91,6 +91,8 @@ class ParakeetProvider:
 
 
 class ParakeetSession:
+    final_redecodes = True
+
     def __init__(self, decode: Callable[[bytes], str]) -> None:
         self._decode = decode
         self._audio = bytearray()

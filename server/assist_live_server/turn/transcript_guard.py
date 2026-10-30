@@ -14,8 +14,12 @@ INCOMPLETE_ENDINGS = frozenset(
 )
 
 
+def transcript_words(text: str) -> list[str]:
+    return re.findall(r"[^\W_]+(?:['’][^\W_]+)*", text.casefold())
+
+
 def complete_partial(partial: str, *, language: str = "en") -> bool:
     if language != "en":
         return False
-    words = re.findall(r"[^\W_]+(?:['’][^\W_]+)*", partial.casefold())
+    words = transcript_words(partial)
     return bool(words) and words[-1] not in INCOMPLETE_ENDINGS

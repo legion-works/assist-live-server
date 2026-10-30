@@ -11,6 +11,7 @@ from .providers.parakeet import MAX_AUDIO_BYTES
 from .providers.stt import STTSession
 from .speaker import SpeakerPlugin
 from .turn.detector import TurnDetector
+from .turn.transcript_guard import transcript_words
 
 TURN_TIMEOUT = 15.0
 STALL_INTERVAL = 0.1
@@ -36,6 +37,7 @@ class AudioGateway:
         self.declared_destination = destination
         self.local_only = local_only
         self.speaker = speaker
+        self.stt_final_replaced_total = 0
 
     async def stt(
         self,
@@ -182,7 +184,23 @@ class AudioGateway:
                     task.result()
                 await collector
                 text = await active_session.finish()
-                await output.put(encode_transcript("final", turn_id, text))
+                replaced = False
+                if getattr(active_session, "final_redecodes", False) is True:
+                    partial_words = transcript_words(partial)
+                    final_words = transcript_words(text)
+                    if (
+                        len(partial_words) >= 2
+                        and len(final_words) < len(partial_words)
+                        and not set(final_words).intersection(partial_words)
+                    ):
+                        text = partial
+                        replaced = True
+                reply = encode_transcript("final", turn_id, text)
+                if replaced:
+                    self.stt_final_replaced_total += 1
+                    # The route removes this internal marker before wire validation.
+                    reply["_final_replaced"] = True
+                await output.put(reply)
                 if self.speaker is not None:
                     try:
                         require_destination(self.speaker.destination, self.local_only)

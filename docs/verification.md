@@ -3096,3 +3096,74 @@ Four isolated fixture mutations removed each new field or changed canonical byte
 Each mutation caused an assertion failure through each transport. The unchanged fixture gave a satisfactory result.
 
 The full suites run again after this record.
+
+## Transcript replacement
+
+Date: 2026-10-30 (UTC).
+
+The gateway compares a new `final` with the last `partial` sent in the same turn.
+Only sessions with `final_redecodes=True` use this rule. Parakeet declares this function. Deepgram does not.
+
+The shared transcript-guard tokenizer supplies the words. It keeps apostrophes and uses Unicode `casefold`.
+The last `partial` must have two or more words. The `final` must have fewer words and no word from that `partial`.
+All other `final` results stay unchanged. Shorter corrections that remove `not` but keep other words stay unchanged.
+
+Command: `uv run --locked pytest tests/contract/test_streaming_stt.py -k 'redecode_replacement or previous_turn_partial' -q --tb=short`.
+Initial result: `15 failed, 32 deselected`.
+The assertions found missing replacement text and a missing metric counter.
+
+Command: `uv run --locked pytest tests/contract/test_streaming_stt.py tests/test_audio_gateway.py tests/test_store.py tests/providers/test_deepgram.py -q --tb=short`.
+Result: `160 passed`.
+The tests include word counts, shared words, punctuation, apostrophes, Unicode `casefold`, corrections, and different turns.
+They also check missing provider functions, Deepgram, an unsent decode, stored data, and the counter.
+
+Seven isolated mutations each parsed and caused a named assertion failure.
+They removed the shared-word guard, minimum word count, `final` word count, provider-function check, event marker, or counter.
+One mutation copied a `partial` from a previous turn. The separate-turn assertion found that error.
+The mutation checks left production files unchanged.
+
+The `stt_final` event keeps only `replaced: true` for a replacement, without transcript text by default.
+The metric `assist_live_stt_final_replaced_total` counts replacements without `labels` or transcript text.
+The archived client at `b3b1e16` accepted the audio result, turn query, event subscription, and `TimingEvent` data.
+The audio control fields did not change.
+
+A local check replayed 25 device turns through the client and WebSocket with 10 ms frames and history at 2× speed.
+The command checks gave 22/25 before the change and 25/25 after the change, with 3 replacements.
+The other 22 turns stayed correct. Each turn used one `final` decode.
+This local check is not a general command-safety result.
+
+All six cached model files agreed with the manifest download plan. The check downloaded no model or audio file.
+
+The licensed replay corpus supplied 250 recordings: 50 tuning and 200 held-out recordings.
+The check used complete audio, 400 ms interval decode, and input-end finalization through the production gateway and provider.
+It did not change or measure detector endpoints. The benchmark helpers checked audio hashes and counted word errors.
+
+One replacement changed the pooled word-error count from 111/1945 to 104/1945.
+That recording changed from 8/8 to 1/8 word errors. The other 249 transcripts stayed unchanged.
+
+Commands for the external local checks:
+
+```sh
+uv run --locked python "$FINAL_CLIENT_CHECK"
+uv run --locked python "$FINAL_REPLAY" device
+uv run --locked python "$FINAL_REPLAY" corpus
+```
+
+The external scripts keep audio external to the repository and limit each displayed transcript to five words.
+The full gates run after this record, in this order:
+
+```sh
+export UV_LINK_MODE=copy
+export ASSIST_LIVE_MODEL_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/assist-live/turn"
+uv run --locked ruff format --check .
+uv run --locked ruff check --no-cache .
+PRIVATE_DENYLIST="$PRIVATE_DENYLIST" task check
+UV_PROJECT_ENVIRONMENT="$FLOOR_ENV" uv run --locked --python 3.14.2 pytest tests/ -q
+UV_OFFLINE=1 unshare -rn sh -c 'ip link set lo up && uv run --locked pytest tests/ -q'
+python3 "$STE_CHECKER" docs/protocol.md docs/verification.md
+python3 "$WORKSPACE/assist-live/tools/check_public_tree.py" --root . --private-denylist "$PRIVATE_DENYLIST"
+git diff --check
+```
+
+The explicit public-tree command supplies the privacy check when there is no sibling checker.
+No dependency, runtime setting, deployment, or publication changed.
