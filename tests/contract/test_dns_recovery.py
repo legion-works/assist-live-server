@@ -52,7 +52,14 @@ def system_address(monkeypatch, address="127.0.0.1", *, delay=0):
 
 
 @asynccontextmanager
-async def service(turn_id, *, address="127.0.0.1", ssl_context=None, delivery_delay=0):
+async def service(
+    turn_id,
+    *,
+    address="127.0.0.1",
+    ssl_context=None,
+    delivery_delay=0,
+    body_release=None,
+):
     requests = []
     envelope = {
         "version": 1,
@@ -69,10 +76,10 @@ async def service(turn_id, *, address="127.0.0.1", ssl_context=None, delivery_de
             (request.path, request.host, request.headers.get("Authorization"))
         )
         if request.path == "/health":
-            if delivery_delay:
+            if body_release is not None:
                 response = web.StreamResponse()
                 await response.prepare(request)
-                await asyncio.sleep(delivery_delay)
+                await body_release.wait()
                 try:
                     await response.write(b'{"version":1,"healthy":true}')
                 except aiohttp.ClientConnectionResetError:
@@ -304,24 +311,63 @@ def connector_connections(session):
 
 def test_retry_body_consumes_original_deadline(monkeypatch, turn_id):
     async def run():
-        async with service(turn_id, delivery_delay=0.12) as (server, requests):
-            calls, _, _ = system_address(monkeypatch, delay=0.05)
+        body_release = asyncio.Event()
+        read_started = asyncio.Event()
+        async with service(turn_id, body_release=body_release) as (server, requests):
+            loop = asyncio.get_running_loop()
+            real_time = loop.time
+            clock_offset = 0
+            calls, _, _ = system_address(monkeypatch)
+            system_resolve = loop.getaddrinfo
+
+            async def resolve(*args, **kwargs):
+                nonlocal clock_offset
+                addresses = await system_resolve(*args, **kwargs)
+                clock_offset += 40
+                return addresses
+
+            monkeypatch.setattr(loop, "getaddrinfo", resolve)
+            monkeypatch.setattr(loop, "time", lambda: real_time() + clock_offset)
             async with aiohttp.ClientSession(
                 connector=aiohttp.TCPConnector(resolver=CachedNXDomain())
             ) as session:
+                original_request = session.request
+
+                @asynccontextmanager
+                async def request(*args, **kwargs):
+                    async with original_request(*args, **kwargs) as response:
+                        reader_type = type(response.content)
+                        original_chunks = reader_type.iter_chunked
+
+                        def chunks(reader, size):
+                            if reader is response.content:
+                                read_started.set()
+                            return original_chunks(reader, size)
+
+                        monkeypatch.setattr(reader_type, "iter_chunked", chunks)
+                        yield response
+
+                monkeypatch.setattr(session, "request", request)
                 client = AssistLiveClient(
                     f"http://service.invalid:{server.port}",
                     "test-token",
                     session=session,
                 )
-                start = asyncio.get_running_loop().time()
-                assert not await client.health(timeout=0.08), (
-                    "BODY_MUST_USE_REMAINING_TIME"
-                )
-                assert asyncio.get_running_loop().time() - start < 0.13, (
-                    "BODY_DEADLINE_REQUIRED"
-                )
-                assert calls and requests
+                task = asyncio.create_task(client.health(timeout=60))
+                try:
+                    await asyncio.wait_for(read_started.wait(), 45)
+                    assert calls and requests, "BODY_READ_MUST_START_AFTER_RETRY"
+                    # Advance past the initial deadline only after the body read starts.
+                    clock_offset += 21
+                    try:
+                        healthy = await asyncio.wait_for(task, 5)
+                    except TimeoutError:
+                        pytest.fail("BODY_DEADLINE_REQUIRED")
+                    assert not healthy, "BODY_MUST_USE_REMAINING_TIME"
+                finally:
+                    body_release.set()
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
 
     asyncio.run(run())
 
@@ -430,8 +476,9 @@ def test_ipv6_family_and_literal_url(monkeypatch, turn_id, numeric):
 
 @pytest.mark.parametrize("entry", ["health", "events"])
 @pytest.mark.parametrize("certificate_name", ["service.invalid", "wrong.invalid"])
+@pytest.mark.parametrize("verify_tls", [True, False], ids=["verified", "ssl-false"])
 def test_tls_checks_original_name_and_sends_sni(
-    monkeypatch, tmp_path, turn_id, entry, certificate_name
+    monkeypatch, tmp_path, turn_id, entry, certificate_name, verify_tls
 ):
     executable = shutil.which("openssl")
     assert executable, "OPENSSL_REQUIRED_FOR_TLS_TEST"
@@ -473,7 +520,8 @@ def test_tls_checks_original_name_and_sends_sni(
             calls, _, _ = system_address(monkeypatch)
             async with aiohttp.ClientSession(
                 connector=aiohttp.TCPConnector(
-                    resolver=CachedNXDomain(), ssl=client_context
+                    resolver=CachedNXDomain(),
+                    ssl=client_context if verify_tls else False,
                 )
             ) as session:
                 client = AssistLiveClient(
@@ -494,9 +542,9 @@ def test_tls_checks_original_name_and_sends_sni(
                         await stream.aclose()
                 assert calls, "TLS_DNS_RETRY_REQUIRED"
                 assert names == ["service.invalid"], "TLS_SNI_REQUIRED"
-                assert healthy is (certificate_name == "service.invalid"), (
-                    "TLS_ORIGINAL_NAME_VERIFICATION_REQUIRED"
-                )
+                assert healthy is (
+                    not verify_tls or certificate_name == "service.invalid"
+                ), "TLS_VERIFICATION_MODE_REQUIRED"
                 if healthy:
                     assert requests[0][1] == f"service.invalid:{server.port}", (
                         "TLS_HOST_REQUIRED"
