@@ -86,15 +86,26 @@ class ParakeetProvider:
         samples = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768
         return str(self._model.recognize(samples, sample_rate=16000)).strip()
 
+    def _decode_final(self, pcm: bytes) -> str:
+        from .parakeet_beam import recognize
+
+        samples = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / np.float32(32768)
+        return recognize(self._model, samples)
+
     def session(self) -> ParakeetSession:
-        return ParakeetSession(self._decode)
+        return ParakeetSession(self._decode, self._decode_final)
 
 
 class ParakeetSession:
     final_redecodes = True
 
-    def __init__(self, decode: Callable[[bytes], str]) -> None:
+    def __init__(
+        self,
+        decode: Callable[[bytes], str],
+        decode_final: Callable[[bytes], str] | None = None,
+    ) -> None:
         self._decode = decode
+        self._decode_final = decode_final if decode_final is not None else decode
         self._audio = bytearray()
         self._onset = False
         self._cancelled = False
@@ -180,7 +191,7 @@ class ParakeetSession:
                         await asyncio.shield(self._partial_task)
                     pcm = bytes(self._audio)
                     text = (
-                        await run_decode(lambda: self._decode(pcm), final=True)
+                        await run_decode(lambda: self._decode_final(pcm), final=True)
                         if pcm
                         else ""
                     )

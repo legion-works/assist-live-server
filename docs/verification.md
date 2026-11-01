@@ -3226,3 +3226,89 @@ git diff --check
 
 The explicit public-tree command supplies the privacy check when there is no sibling checker.
 No dependency, deployment, or publication changed.
+
+## TDT beam search for `final` transcripts (2026-11-01)
+
+The Parakeet `final` decoder uses NeMo `default_beam_search` with width 16 and NeMo score normalization.
+The `partial` decoder keeps greedy search. The `final_redecodes` replacement rule stays unchanged.
+No model, audio, language model, word list, client, protocol, or store changes.
+
+The [public design record](https://github.com/legion-works/assist-live/blob/main/docs/design.md) gives this `final` decoder's contract.
+The [STT documentation](providers/stt.md#decode-search-for-the-final-transcript) gives its rules and pinned runtime interface.
+The [third-party notices](../THIRD_PARTY_NOTICES.md#nemo-derived-tdt-beam-search) give the NeMo source commit and license.
+
+The first test used a fake NumPy decoder and joint through the provider session.
+The `partial` assertion gave a satisfactory result with `filler`.
+The `final` assertion gave an unsatisfactory result: `filler`, not `command`.
+The unchanged provider gave `1 failed` before implementation.
+The last provider tests give `22 passed`, with the real-model contract enabled.
+
+The unit tests check duplicate score sums, frame skips, zero-duration tokens, and predictor state after `blank` tokens.
+They also check `final` score normalization, raw-score pruning, and width-one agreement with greedy on the same fake.
+The runtime contract checks private signatures, tensor shapes, and the same greedy tokens and text on synthetic noise.
+All 65536 int16 values give the same float32 samples in the `partial` and `final` paths.
+Four valid-Python mutations each gave an unsatisfactory result at a named assertion:
+
+| Mutation | Assertion |
+|---|---|
+| No duplicate merge | `merge must use log-add-exp` |
+| No normalization | `final ranking must normalize by tokens plus blank` |
+| `final` width one | `final must use beam width 16` |
+| Beam for `partial` | `partials must remain greedy` |
+
+The private replay used 70 selected device cuts from 36 recordings.
+The beam corrected all 17 complete-command errors and introduced no new error on those cuts.
+The corpus of 250 recordings used the benchmark's normalization, edit distance, and audio SHA-256 checks.
+New greedy inference gave 111/1945 word errors (5.707%). Beam gave 96/1945 (4.936%).
+No corpus recording was worse than greedy.
+
+All 70 device transcripts and 250 corpus transcripts were the same as the earlier NumPy probe at width 16.
+
+The replay also reproduced a known command error on one more 1500 ms prefix not in the selected cuts.
+Thus these results do not show command safety on all prefixes.
+The test did not run native NeMo parity. The initial checkpoint was not available, and model downloads had no approval.
+The replay made no private audio copy. Private audio, transcripts, model files, and result JSON stay external to the repository.
+
+### Paired `final` decode cost
+
+The test used four ONNX `threads`, one executor worker, warm models, and 30 pairs with opposite order for each second pair.
+The 1.5 s input was a private device cut. Its ten repetitions supplied the 15 s input in memory.
+Times include the provider's finish call and executor admission. Percentiles use NumPy linear interpolation.
+The p99 estimate has only 30 observations for each mode and audio length.
+
+| Audio | Greedy p50, ms | Greedy p99, ms | Beam p50, ms | Beam p99, ms |
+|---|---:|---:|---:|---:|
+| 1.5 s | 42.85 | 48.11 | 62.13 | 73.82 |
+| 15 s | 222.70 | 277.11 | 433.00 | 543.07 |
+
+### Four-session cost
+
+Each run reproduced the earlier 15 s workload: 100 sessions, four concurrent sessions, and a 100 ms heartbeat.
+Each session decoded one complete 15 s `partial` buffer and then the same buffer at finish.
+The test kept finish-first scheduling and the source recording documented in [local voice recognition](providers/stt.md#cost-at-the-15-s-limit).
+The run order was greedy, beam, beam, greedy. Each mode used the same loaded model and four ONNX `threads`.
+
+| Run | Partial p50/p99, ms | Final p50/p99, ms | Worker final p50/p99, ms | Heartbeat lag p99, ms | One-minute load, start/end |
+|---|---:|---:|---:|---:|---:|
+| Greedy 1 | 1366.34/1508.35 | 450.63/542.84 | 224.41/277.94 | 1.91 | 6.76/7.61 |
+| Beam 1 | 1902.87/3325.70 | 789.71/1368.50 | 415.08/791.36 | 1.98 | 7.61/10.76 |
+| Beam 2 | 2204.87/3408.76 | 876.74/1593.02 | 458.57/886.04 | 1.70 | 10.76/12.48 |
+| Greedy 2 | 1475.58/2718.17 | 498.41/1144.49 | 242.51/598.46 | 1.93 | 12.48/10.32 |
+
+The `partial` and `final` times include queue time. Worker times do not.
+Host load changed during the tests. These are local compute-cost results, not target-device acceptance or sustained-capacity results.
+
+The acceptance commands run after all code and documentation edits:
+
+```sh
+uv run --locked ruff format --check .
+uv run --locked ruff check --no-cache .
+PRIVATE_DENYLIST="$PRIVATE_DENYLIST" task check
+UV_PROJECT_ENVIRONMENT="$FLOOR_ENV" uv run --locked --python 3.14.2 pytest tests/ -q
+UV_OFFLINE=1 unshare -rn sh -c 'ip link set lo up && uv run --locked pytest tests/ -q'
+python3 "$WORKSPACE/assist-live/tools/check_public_tree.py" --history --root . --private-denylist "$PRIVATE_DENYLIST"
+git diff --check
+```
+
+The model cache points to the hash-checked external copy. `PARAKEET_MODEL_CACHE` enables the real-model contract test.
+The STE checker examines each changed Markdown file. No commit, publication, deployment, or live hardware change is part of this work.

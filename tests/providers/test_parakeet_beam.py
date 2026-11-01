@@ -1,0 +1,266 @@
+import asyncio
+import importlib.metadata
+import inspect
+import os
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
+from assist_live_server.providers import parakeet_beam
+from assist_live_server.providers.parakeet import ParakeetProvider
+from onnx_asr.models.nemo import NemoConformerTdt
+
+
+class Joint:
+    def get_inputs(self):
+        return [
+            SimpleNamespace(name=name, shape=[1, 1, 1])
+            for name in ("input_states_1", "input_states_2")
+        ]
+
+    def run(self, outputs, inputs):
+        frame = int(inputs["encoder_outputs"].flat[0])
+        previous = int(inputs["targets"][0][0])
+        if frame == 0:
+            probabilities = [0.44, 0.01, 0.55]
+        elif previous == 0:
+            probabilities = [0.001, 0.001, 0.998]
+        else:
+            probabilities = [0.01, 0.59, 0.40]
+        logits = np.log(np.array(probabilities + [0.001, 0.999], np.float32))
+        return (
+            logits[None, None, None],
+            inputs["input_states_1"],
+            inputs["input_states_2"],
+        )
+
+
+def fake_model(joint=None):
+    asr = object.__new__(NemoConformerTdt)
+    asr.config = {}
+    asr.use_low_precision = False
+    asr._vocab = {0: " command", 1: " filler", 2: "<blk>"}
+    asr._vocab_size = 3
+    asr._blank_idx = 2
+    asr._decoder_joint = joint or Joint()
+    asr._preprocessor = lambda audio, lengths: (audio, lengths)
+    asr._encoder = SimpleNamespace(
+        run=lambda outputs, inputs: (
+            np.array([[[0, 1]]], np.float32),
+            np.array([2], np.int64),
+        )
+    )
+
+    def recognize(samples, sample_rate):
+        assert sample_rate == 16000
+        return next(
+            asr.recognize_batch(samples[None], np.array([len(samples)], np.int64))
+        ).text
+
+    return SimpleNamespace(asr=asr, recognize=recognize)
+
+
+def test_public_final_keeps_command_that_greedy_discards():
+    async def run():
+        session = ParakeetProvider(fake_model()).session()
+        session.speech_started()
+        await session.push(bytes(12800))
+        assert await session.partial() == "filler", "partials must remain greedy"
+        assert await session.finish() == "command", "final must use beam width 16"
+        assert await session.finish() == "command"
+        assert session.final_redecodes is True
+
+    asyncio.run(run())
+
+
+def test_duplicate_paths_sum_probabilities_only_at_the_same_frame():
+    hypothesis = parakeet_beam.Hypothesis
+    merged = parakeet_beam.merge_duplicates(
+        [
+            hypothesis(float(np.log(0.2)), (0,), "best state", 2),
+            hypothesis(float(np.log(0.1)), (0,), "other state", 2),
+            hypothesis(-4.0, (0,), "later", 3),
+            hypothesis(-5.0, (1,), "other token", 2),
+        ]
+    )
+    assert len(merged) == 3, "duplicate paths must merge"
+    assert merged[0].score == pytest.approx(np.log(0.3)), "merge must use log-add-exp"
+    assert merged[0].state == "best state"
+    assert {(h.tokens, h.frame) for h in merged} == {((0,), 2), ((0,), 3), ((1,), 2)}
+
+
+def test_partial_and_final_receive_identical_float32_samples(monkeypatch):
+    seen = []
+
+    def recognize(samples, sample_rate):
+        assert sample_rate == 16000
+        seen.append(samples.copy())
+        return "greedy"
+
+    def beam(model, samples):
+        seen.append(samples.copy())
+        return "beam"
+
+    monkeypatch.setattr(parakeet_beam, "recognize", beam)
+
+    async def run():
+        session = ParakeetProvider(SimpleNamespace(recognize=recognize)).session()
+        session.speech_started()
+        await session.push(np.arange(-32768, 32768, dtype="<i2").tobytes())
+        assert await session.partial() == "greedy"
+        assert await session.finish() == "beam"
+        assert all(x.dtype == np.float32 for x in seen)
+        np.testing.assert_array_equal(seen[0], seen[1])
+
+    asyncio.run(run())
+
+
+def test_normalization_counts_initial_blank_and_runs_after_raw_pruning():
+    hypothesis = parakeet_beam.Hypothesis
+    short = hypothesis(-1.0, (), None, 2)
+    long = hypothesis(-1.5, (0, 1), None, 2)
+    middle = hypothesis(-1.1, (0,), None, 2)
+    ranked = parakeet_beam.sort_nbest([short, middle, long])
+    assert ranked == [long, middle, short], (
+        "final ranking must normalize by tokens plus blank"
+    )
+    assert [h.score for h in ranked] == [-1.5, -1.1, -1.0]
+    asr = fake_model().asr
+    encoded = np.array([[0], [1]], np.float32)
+    assert parakeet_beam.search(asr, encoded, 2, width=1)[0].tokens == (1,)
+    assert parakeet_beam.search(asr, encoded, 2, width=16)[0].tokens == (0,)
+
+
+class DurationJoint(Joint):
+    def __init__(self, duration):
+        self.duration = duration
+        self.frames = []
+
+    def run(self, outputs, inputs):
+        frame = int(inputs["encoder_outputs"].flat[0])
+        self.frames.append(frame)
+        previous = int(inputs["targets"][0][0])
+        token = [0.999, 0.0005, 0.0005] if previous == 2 else [0.0005, 0.0005, 0.999]
+        logits = np.log(np.array(token + self.duration, np.float32))
+        return logits, inputs["input_states_1"], inputs["input_states_2"]
+
+
+def test_duration_skips_encoder_frames_and_width_one_matches_greedy():
+    joint = DurationJoint([0.0001, 0.0001, 0.9998])
+    model = fake_model(joint)
+    model.asr._encoder = SimpleNamespace(
+        run=lambda outputs, inputs: (
+            np.array([[[0, 1, 2]]], np.float32),
+            np.array([3], np.int64),
+        )
+    )
+    samples = np.zeros(6400, np.float32)
+    asr, encoded, lengths = parakeet_beam.encode(model, samples)
+    best = parakeet_beam.search(asr, encoded[0], int(lengths[0]), width=1)[0]
+    assert best.tokens == (0,)
+    assert best.frame == 4, "duration must skip frames rather than clamp at input end"
+    assert joint.frames == [0, 2], "duration two must not decode frame one"
+    greedy_tokens, _, _ = next(asr._decoding(encoded, lengths))
+    assert best.tokens == tuple(greedy_tokens)
+    assert model.recognize(samples, sample_rate=16000) == "command"
+
+
+def test_blank_paths_keep_the_previous_predictor_state():
+    seen = []
+
+    class BlankThenTokenJoint(Joint):
+        def run(self, outputs, inputs):
+            frame = int(inputs["encoder_outputs"].flat[0])
+            state = inputs["input_states_1"]
+            seen.append((frame, int(state.flat[0])))
+            tokens = [0.999, 0.0005, 0.0005] if frame == 1 else [0.0005, 0.0005, 0.999]
+            return (
+                np.log(np.array(tokens + [0.001, 0.999], np.float32)),
+                state + 1,
+                state + 1,
+            )
+
+    model = fake_model(BlankThenTokenJoint())
+    best = parakeet_beam.search(
+        model.asr, np.array([[0], [1], [2]], np.float32), 3, width=1
+    )[0]
+    assert best.tokens == (0,)
+    assert seen == [(0, 0), (1, 0), (2, 1)], (
+        "only nonblank paths update predictor state"
+    )
+
+
+def test_zero_duration_emits_token_without_advancing_or_updating_blank_state():
+    joint = DurationJoint([0.999, 0.001])
+    model = fake_model(joint)
+    best = parakeet_beam.search(model.asr, np.array([[0]], np.float32), 1, width=1)[0]
+    assert best.tokens == (0,), "zero-duration token must stay at the same frame"
+    assert best.frame == 1, "zero-duration blank must use the next positive duration"
+    assert joint.frames == [0, 0]
+
+
+def test_pinned_private_api_contract():
+    assert importlib.metadata.version("onnx-asr") == "0.12.0"
+    expected = {
+        "_create_state": ["self"],
+        "_encode": ["self", "features", "features_lens"],
+        "_decode_tokens": ["self", "ids", "indices", "logprobs"],
+        "_decode": ["self", "prev_tokens", "prev_state", "encoder_out"],
+    }
+    for name, parameters in expected.items():
+        assert (
+            list(inspect.signature(getattr(NemoConformerTdt, name)).parameters)
+            == parameters
+        )
+    assert (
+        list(inspect.signature(parakeet_beam.NemoConformerRnnt._decode).parameters)
+        == expected["_decode"]
+    )
+    assert list(inspect.signature(NemoConformerTdt._decoding).parameters) == [
+        "self",
+        "encoder_out",
+        "encoder_out_lens",
+        "kwargs",
+    ]
+
+
+def test_real_pinned_adapter_matches_public_greedy_on_synthetic_audio():
+    cache = os.environ.get("PARAKEET_MODEL_CACHE")
+    if cache is None:
+        pytest.skip("set PARAKEET_MODEL_CACHE for the pinned model contract")
+
+    async def run():
+        provider = await ParakeetProvider.load(cache)
+        samples = np.random.default_rng(42).normal(0, 0.01, 24000).astype(np.float32)
+        asr, encoded, lengths = parakeet_beam.encode(provider._model, samples)
+        assert callable(asr._preprocessor)
+        assert isinstance(asr._vocab_size, int)
+        assert asr._blank_idx == asr._vocab_size - 1
+        state = asr._create_state()
+        assert len(state) == 2 and all(x.dtype == np.float32 for x in state)
+        logits, _, next_state = parakeet_beam.NemoConformerRnnt._decode(
+            asr, [], state, encoded[0, 0]
+        )
+        assert logits.shape == (asr._vocab_size + 5,)
+        assert [x.shape for x in state] == [x.shape for x in next_state]
+        tokens, _, _ = next(asr._decoding(encoded, lengths))
+        public = provider._model.recognize(samples, sample_rate=16000)
+        assert asr._decode_tokens(tokens, None, None).text == public
+        original = asr._decode_tokens
+        observed = []
+
+        def capture(ids, indices, logprobs):
+            ids = list(ids)
+            observed.append(ids)
+            return original(ids, indices, logprobs)
+
+        asr._decode_tokens = capture
+        try:
+            assert provider._model.recognize(samples, sample_rate=16000) == public
+            assert observed == [list(tokens)], (
+                "adapter and public greedy tokens must agree"
+            )
+        finally:
+            asr._decode_tokens = original
+
+    asyncio.run(run())

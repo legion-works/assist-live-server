@@ -174,7 +174,7 @@ def test_executor_admission_is_bounded_and_cancel_does_not_free_running_slot():
 
 
 def test_provider_verifies_every_file_before_runtime_load(tmp_path, monkeypatch):
-    from assist_live_server.providers import parakeet
+    from assist_live_server.providers import parakeet, parakeet_beam
 
     root = Path(__file__).resolve().parents[2]
     manifest = json.loads((root / "assets/manifest.json").read_text())
@@ -201,6 +201,11 @@ def test_provider_verifies_every_file_before_runtime_load(tmp_path, monkeypatch)
         return Model()
 
     monkeypatch.setattr(parakeet, "_load_onnx", load)
+    monkeypatch.setattr(
+        parakeet_beam,
+        "recognize",
+        lambda model, samples: model.recognize(samples, sample_rate=16000),
+    )
 
     async def run():
         provider = await ParakeetProvider.load(tmp_path, manifest_path)

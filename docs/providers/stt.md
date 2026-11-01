@@ -24,6 +24,24 @@ The selection record is not a target-device or live-microphone result.
 It does not use only the last interval. Subsequent finish calls give the same result without one more decode.
 An empty session finishes with an empty string.
 
+### Decode search for the `final` transcript
+
+`partial` transcripts use the pinned runtime's greedy TDT search.
+`finish()` uses NeMo `default_beam_search` with beam width 16 and NeMo score normalization.
+The search keeps alternative paths for tokens and frame counts on the same encoder output.
+It sums duplicate path scores with `log-add-exp` only when the tokens and the next frame agree.
+It divides the `final` path score by the token count, with the initial `blank` in that count.
+It uses no language model, word list, or audio change.
+
+The adapter uses private encoder and decoder methods from `onnx-asr==0.12.0`.
+That version has no public encoder or joint interface.
+Contract tests check the private method signatures and compare greedy tokens and text on synthetic audio.
+Do not update the runtime pin without those checks.
+
+The gateway's `final_redecodes` replacement rule stays unchanged as a second guard.
+See the [public design record](https://github.com/legion-works/assist-live/blob/main/docs/design.md),
+the [transcript replacement rule](../protocol.md), and the [verification record](../verification.md).
+
 ## Voice onset
 
 `partial()` gives an empty string until the caller calls `speech_started()`.

@@ -46,6 +46,34 @@ Keep the copyright line and the MIT license text when you supply this package.
 The `sherpa-onnx==2.0.0` package is a benchmark development dependency only.
 It is not a server runtime or client dependency.
 
+## NeMo-derived TDT beam search
+
+`server/assist_live_server/providers/parakeet_beam.py` is a NumPy translation of NeMo code with changes.
+The source file is `nemo/collections/asr/parts/submodules/tdt_beam_decoding.py`.
+The source functions are `default_beam_search`, `merge_duplicate_hypotheses`, and `sort_nbest`.
+The source commit is `e5d79d5a49cbec49d79440b0070aac0c32a8dbb8`.
+This code uses Apache-2.0. The full license text is in `LICENSE`.
+
+The source header contains these copyright notices:
+
+```text
+Copyright (c) 2025, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+Copyright 2017 Johns Hopkins University (Shinji Watanabe)
+```
+
+NeMo has no root `NOTICE` file at this commit.
+Its `THIRD-PARTY-NOTICES` file gives this applicable attribution:
+
+```text
+Component: ESPnet transducer and attention code
+Copyright: Copyright 2017 Johns Hopkins University (Shinji Watanabe)
+License: Apache-2.0
+Source: https://github.com/espnet/espnet
+```
+
+- Source: https://github.com/NVIDIA/NeMo/blob/e5d79d5a49cbec49d79440b0070aac0c32a8dbb8/nemo/collections/asr/parts/submodules/tdt_beam_decoding.py
+- Notices: https://github.com/NVIDIA/NeMo/blob/e5d79d5a49cbec49d79440b0070aac0c32a8dbb8/THIRD-PARTY-NOTICES
+
 ## Bootstrap
 
 This repository does not include a third-party model, voice, or copied runtime source at this time.
