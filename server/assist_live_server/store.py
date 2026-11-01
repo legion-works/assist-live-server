@@ -117,6 +117,7 @@ class SQLiteStore:
         self.now_ns = now_ns
         self.last_retention_ns: int | None = None
         self.invalid_rows: Counter[tuple[str, str]] = Counter()
+        self.removed_parents: Counter[str] = Counter()
         self.changed = asyncio.Event()
         self.loop: asyncio.AbstractEventLoop | None = None
         self.writer = ThreadPoolExecutor(
@@ -431,6 +432,7 @@ class SQLiteStore:
         await self._call(self._open_turn, turn)
 
     def _open_turn(self, turn: TurnOpen) -> None:
+        removal = None
         with self.connection:
             self.connection.execute("BEGIN IMMEDIATE")
             self._maintain()
@@ -444,7 +446,8 @@ class SQLiteStore:
                     (turn.parent_turn_id,),
                 ).fetchone()
                 if parent is None or parent[0] != turn.satellite:
-                    raise ValueError("parent satellite mismatch")
+                    removal = "absent" if parent is None else "other_satellite"
+                    turn = replace(turn, parent_turn_id=None)
             self.connection.execute(
                 "UPDATE turns SET status='incomplete' "
                 "WHERE satellite=? AND status IN ('open','closing')",
@@ -466,6 +469,9 @@ class SQLiteStore:
                 self.connection.execute(
                     "DELETE FROM pending WHERE pending_id=?", (pending_id,)
                 )
+        if removal is not None:
+            self.removed_parents[turn.satellite] += 1
+            LOGGER.info("turn parent removed: %s", removal)
         self._notify()
 
     def _sanitize(self, event: TimingEvent) -> TimingEvent:
@@ -607,6 +613,11 @@ class SQLiteStore:
             placeholders = ",".join("?" for _ in parameters)
             clause = f" AND satellite IN ({placeholders})"
         return {
+            "parent_turn_id_removed_total": sum(
+                count
+                for satellite, count in self.removed_parents.items()
+                if satellites is None or satellite in satellites
+            ),
             **{
                 "invalid_" + kind + "_rows_total": sum(
                     count

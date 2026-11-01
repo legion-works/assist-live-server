@@ -2,7 +2,7 @@ import json
 import math
 import struct
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from .models import turn_uuid, unsigned
@@ -19,7 +19,13 @@ CAPABILITIES = frozenset({"stt", "tts", "speaker_result", "events"})
 
 
 class ProtocolError(Exception):
-    pass
+    def __init__(
+        self,
+        *args: object,
+        kind: Literal["refused", "closed", "timeout", "malformed"] | None = None,
+    ) -> None:
+        super().__init__(*args)
+        self.kind = kind
 
 
 def _pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:

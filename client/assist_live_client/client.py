@@ -152,7 +152,7 @@ class AssistLiveClient:
     ) -> Any:
         raw = json.dumps(data, allow_nan=False).encode() if data is not None else None
         if raw is not None and len(raw) > MAX_CONTROL:
-            raise ProtocolError("request too large")
+            raise ProtocolError("request too large", kind="malformed")
         try:
             async with self._connect(
                 self._connection().request,
@@ -163,11 +163,11 @@ class AssistLiveClient:
                 allow_redirects=False,
             ) as response:
                 if response.status != 200:
-                    raise ProtocolError("request refused")
+                    raise ProtocolError("request refused", kind="refused")
                 value = bytearray()
                 async for chunk in response.content.iter_chunked(1024):
                     if len(value) + len(chunk) > MAX_CONTROL:
-                        raise ProtocolError("response too large")
+                        raise ProtocolError("response too large", kind="malformed")
                     value.extend(chunk)
                 if path.startswith("/v1/bindings"):
                     bindings = json.loads(value)
@@ -175,13 +175,17 @@ class AssistLiveClient:
                         not isinstance(row, dict) or row.keys() != {"satellite"}
                         for row in bindings
                     ):
-                        raise ProtocolError("invalid bindings")
+                        raise ProtocolError("invalid bindings", kind="malformed")
                     for row in bindings:
                         identifier(row["satellite"])
                     return bindings
                 return parse_json(bytes(value), MAX_CONTROL)
-        except aiohttp.ClientError, TimeoutError, ValueError:
-            raise ProtocolError("request failed") from None
+        except TimeoutError:
+            raise ProtocolError("request failed", kind="timeout") from None
+        except aiohttp.ClientError:
+            raise ProtocolError("request failed", kind="closed") from None
+        except ValueError:
+            raise ProtocolError("request failed", kind="malformed") from None
 
     async def health(self, timeout: float = 0.2) -> bool:
         try:
@@ -193,19 +197,19 @@ class AssistLiveClient:
     async def health_capabilities(self, timeout: float = 0.2) -> HealthCapabilities:
         value = await self._request("GET", "/health", timeout=timeout)
         if value.get("version") != 1 or type(value.get("healthy")) is not bool:
-            raise ProtocolError("invalid health response")
+            raise ProtocolError("invalid health response", kind="malformed")
         capabilities = value.get("capabilities", {})
         if not isinstance(capabilities, dict):
-            raise ProtocolError("invalid health capabilities")
+            raise ProtocolError("invalid health capabilities", kind="malformed")
         fields = {}
         for key in ("stt", "tts", "text_positions"):
             item = capabilities.get(key, False)
             if type(item) is not bool:
-                raise ProtocolError("invalid health capability")
+                raise ProtocolError("invalid health capability", kind="malformed")
             fields[key] = item
         local_only = value.get("local_only")
         if local_only is not None and type(local_only) is not bool:
-            raise ProtocolError("invalid health local only")
+            raise ProtocolError("invalid health local only", kind="malformed")
         destinations = value.get("destinations")
         if isinstance(destinations, dict):
             destinations = {
@@ -220,7 +224,7 @@ class AssistLiveClient:
                 for item in destinations.values()
             )
         ):
-            raise ProtocolError("invalid health destinations")
+            raise ProtocolError("invalid health destinations", kind="malformed")
         voices = []
         default_voice = capabilities.get("tts_default_voice")
         try:
@@ -238,7 +242,7 @@ class AssistLiveClient:
             ):
                 raise ValueError("invalid default voice")
         except ValueError, TypeError, KeyError:
-            raise ProtocolError("invalid health TTS voices") from None
+            raise ProtocolError("invalid health TTS voices", kind="malformed") from None
         return HealthCapabilities(
             value["healthy"],
             **fields,
@@ -267,11 +271,11 @@ class AssistLiveClient:
         self, value: dict[str, Any], satellite: str, cursor: int
     ) -> dict[str, Any]:
         if value.keys() != {"version", "event_id", "event"} or value["version"] != 1:
-            raise ProtocolError("invalid event envelope")
+            raise ProtocolError("invalid event envelope", kind="malformed")
         unsigned(value["event_id"])
         event = TimingEvent(**value["event"])
         if event.satellite != satellite or value["event_id"] <= cursor:
-            raise ProtocolError("event isolation or cursor mismatch")
+            raise ProtocolError("event isolation or cursor mismatch", kind="malformed")
         return value
 
     async def events(
@@ -296,14 +300,18 @@ class AssistLiveClient:
                 )
                 async for message in ws:
                     if message.type != aiohttp.WSMsgType.TEXT:
-                        raise ProtocolError("event stream stopped")
+                        raise ProtocolError("event stream stopped", kind="closed")
                     value = self._envelope(
                         parse_json(message.data, MAX_CONTROL), satellite, after_event_id
                     )
                     after_event_id = value["event_id"]
                     yield value
-        except aiohttp.ClientError, TimeoutError, ValueError, TypeError, KeyError:
-            raise ProtocolError("event stream failed") from None
+        except TimeoutError:
+            raise ProtocolError("event stream failed", kind="timeout") from None
+        except aiohttp.ClientError:
+            raise ProtocolError("event stream failed", kind="closed") from None
+        except ValueError, TypeError, KeyError:
+            raise ProtocolError("event stream failed", kind="malformed") from None
 
     async def export(
         self, satellite: str, since_utc_ns: int
@@ -319,7 +327,7 @@ class AssistLiveClient:
                 allow_redirects=False,
             ) as response:
                 if response.status != 200:
-                    raise ProtocolError("export refused")
+                    raise ProtocolError("export refused", kind="refused")
                 line = bytearray()
                 cursor = 0
                 async for chunk in response.content.iter_chunked(1024):
@@ -329,18 +337,26 @@ class AssistLiveClient:
                                 parse_json(bytes(line), MAX_CONTROL), satellite, cursor
                             )
                             if value["event"]["t_utc_ns"] < since_utc_ns:
-                                raise ProtocolError("export time mismatch")
+                                raise ProtocolError(
+                                    "export time mismatch", kind="malformed"
+                                )
                             cursor = value["event_id"]
                             yield value
                             line.clear()
                         else:
                             if len(line) >= MAX_CONTROL:
-                                raise ProtocolError("export line too large")
+                                raise ProtocolError(
+                                    "export line too large", kind="malformed"
+                                )
                             line.append(byte)
                 if line:
-                    raise ProtocolError("incomplete export line")
-        except aiohttp.ClientError, TimeoutError, ValueError, TypeError, KeyError:
-            raise ProtocolError("export failed") from None
+                    raise ProtocolError("incomplete export line", kind="malformed")
+        except TimeoutError:
+            raise ProtocolError("export failed", kind="timeout") from None
+        except aiohttp.ClientError:
+            raise ProtocolError("export failed", kind="closed") from None
+        except ValueError, TypeError, KeyError:
+            raise ProtocolError("export failed", kind="malformed") from None
 
     async def _audio(
         self,
@@ -374,13 +390,13 @@ class AssistLiveClient:
                 await ws.send_json(encode_control("negotiate", turn_id, **fields))
                 reply = await ws.receive(timeout=MESSAGE_DEADLINE)
                 if reply.type != aiohttp.WSMsgType.TEXT:
-                    raise ProtocolError("negotiation refused")
+                    raise ProtocolError("negotiation refused", kind="closed")
                 negotiated = decode_control(reply.data, turn_id)
                 if (
                     negotiated["type"] != "negotiated"
                     or mode not in negotiated["capabilities"]
                 ):
-                    raise ProtocolError("negotiation refused")
+                    raise ProtocolError("negotiation refused", kind="refused")
 
                 async def send() -> None:
                     nonlocal sent_characters
@@ -394,7 +410,7 @@ class AssistLiveClient:
                                 sent_characters += len(decode_control(message)["text"])
                                 await ws.send_str(message)
                         else:
-                            raise ProtocolError("invalid audio input")
+                            raise ProtocolError("invalid audio input", kind="malformed")
                     await ws.send_json(encode_control("end", turn_id))
 
                 sender = asyncio.create_task(send(), name="assist-live-client-send")
@@ -411,7 +427,9 @@ class AssistLiveClient:
                     ):
                         seq, pcm = decode_audio(reply.data, turn_id)
                         if seq != expected_seq:
-                            raise ProtocolError("audio sequence mismatch")
+                            raise ProtocolError(
+                                "audio sequence mismatch", kind="malformed"
+                            )
                         expected_seq += 1
                         yield pcm
                     elif reply.type == aiohttp.WSMsgType.TEXT:
@@ -427,7 +445,9 @@ class AssistLiveClient:
                         ):
                             text_end = value["text_end"]
                             if not previous_text_end <= text_end <= sent_characters:
-                                raise ProtocolError("TTS text position out of range")
+                                raise ProtocolError(
+                                    "TTS text position out of range", kind="malformed"
+                                )
                             previous_text_end = text_end
                         if value["type"] in {"end", "error"} or (
                             mode == "stt" and value["type"] == "final"
@@ -438,17 +458,19 @@ class AssistLiveClient:
                             return
                         if value["type"] == "error":
                             if value["code"] == "unknown_tts_voice":
-                                raise ProtocolError("unknown_tts_voice")
-                            raise ProtocolError("audio refused")
+                                raise ProtocolError("unknown_tts_voice", kind="refused")
+                            raise ProtocolError("audio refused", kind="refused")
                         if value["type"] == "format":
                             got_format = True
                         yield value
                     else:
-                        raise ProtocolError("audio stream stopped")
+                        raise ProtocolError("audio stream stopped", kind="closed")
         except TimeoutError:
-            raise ProtocolError("message deadline exceeded") from None
-        except aiohttp.ClientError, ValueError, TypeError, KeyError:
-            raise ProtocolError("audio stream failed") from None
+            raise ProtocolError("message deadline exceeded", kind="timeout") from None
+        except aiohttp.ClientError:
+            raise ProtocolError("audio stream failed", kind="closed") from None
+        except ValueError, TypeError, KeyError:
+            raise ProtocolError("audio stream failed", kind="malformed") from None
         finally:
             if sender is not None:
                 sender.cancel()
@@ -466,7 +488,7 @@ class AssistLiveClient:
         try:
             async for value in stream:
                 if not isinstance(value, dict):
-                    raise ProtocolError("unexpected PCM")
+                    raise ProtocolError("unexpected PCM", kind="malformed")
                 yield value
         finally:
             await stream.aclose()
@@ -493,7 +515,9 @@ class AssistLiveClient:
                     )
                     != ("pcm_s16le", 16000, 1, 2)
                 ):
-                    raise ProtocolError("audio format needs the typed TTS stream")
+                    raise ProtocolError(
+                        "audio format needs the typed TTS stream", kind="malformed"
+                    )
                 if isinstance(value, bytes):
                     yield value
         finally:
@@ -516,23 +540,27 @@ class AssistLiveClient:
             async for value in stream:
                 if isinstance(value, bytes):
                     if not got_format:
-                        raise ProtocolError("TTS format required before audio")
+                        raise ProtocolError(
+                            "TTS format required before audio", kind="malformed"
+                        )
                     pending_audio = True
                     yield TTSAudio(value)
                 elif value["type"] == "format":
                     if got_format:
-                        raise ProtocolError("duplicate TTS format")
+                        raise ProtocolError("duplicate TTS format", kind="malformed")
                     got_format = True
                     yield TTSFormat(
                         value["codec"], value["rate"], value["channels"], value["width"]
                     )
                 elif value["type"] == "sentence_end":
                     if not got_format or value["sentence"] != sentence:
-                        raise ProtocolError("TTS sentence sequence mismatch")
+                        raise ProtocolError(
+                            "TTS sentence sequence mismatch", kind="malformed"
+                        )
                     sentence += 1
                     pending_audio = False
                     yield TTSSentenceEnd(value["sentence"], value.get("text_end"))
             if not got_format or pending_audio:
-                raise ProtocolError("incomplete TTS sentence stream")
+                raise ProtocolError("incomplete TTS sentence stream", kind="malformed")
         finally:
             await stream.aclose()

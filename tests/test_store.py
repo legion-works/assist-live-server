@@ -26,6 +26,82 @@ def test_safe_data_keeps_only_true_final_replacement_marker(stage, value):
     assert safe_data(event) == expected
 
 
+@pytest.mark.parametrize(
+    "parent_kind", ["absent", "other_satellite", "valid", "retained", "none"]
+)
+def test_open_turn_removes_only_unusable_parent(tmp_path, caplog, parent_kind):
+    from assist_live_server.store import SQLiteStore
+
+    async def run():
+        now = [100_000_000_000]
+        store = SQLiteStore(
+            tmp_path / "turns.db", retention_days=1, now_ns=lambda: now[0]
+        )
+        parent = TurnOpen(
+            str(uuid7()),
+            "satellite-b" if parent_kind == "other_satellite" else "satellite-a",
+            "voice",
+            None,
+            None,
+        )
+        try:
+            if parent_kind in {"other_satellite", "valid", "retained"}:
+                await store.open_turn(parent)
+            if parent_kind == "retained":
+                now[0] += 86_400_000_000_001
+                await store.maintain()
+                assert await store.get_turn(parent.turn_id) is None
+            turn = TurnOpen(
+                str(uuid7()),
+                "satellite-a",
+                "voice",
+                None if parent_kind == "none" else parent.turn_id,
+                None,
+            )
+            with caplog.at_level("INFO", logger="assist_live_server.store"):
+                await store.open_turn(turn)
+            expected_parent = parent.turn_id if parent_kind == "valid" else None
+            record = await store.get_turn(turn.turn_id)
+            assert record["parent_turn_id"] == expected_parent
+            assert record["status"] == "open"
+            removed = int(parent_kind in {"absent", "other_satellite", "retained"})
+            assert (await store.diagnostics())[
+                "parent_turn_id_removed_total"
+            ] == removed
+            assert (await store.diagnostics(frozenset({"satellite-a"})))[
+                "parent_turn_id_removed_total"
+            ] == removed
+            assert (await store.diagnostics(frozenset({"satellite-b"})))[
+                "parent_turn_id_removed_total"
+            ] == 0
+            await store.append(
+                TimingEvent(
+                    turn.turn_id,
+                    turn.satellite,
+                    "integration",
+                    "mic_open",
+                    now[0],
+                    "measured",
+                    None,
+                    data={"parent_turn_id": parent.turn_id},
+                )
+            )
+            event = (await store.get_turn(turn.turn_id))["events"][0]
+            assert "parent_turn_id" not in event
+            assert "parent_turn_id" not in event["data"]
+            if removed:
+                reason = (
+                    "other_satellite" if parent_kind == "other_satellite" else "absent"
+                )
+                assert caplog.messages == [f"turn parent removed: {reason}"]
+            else:
+                assert caplog.messages == []
+        finally:
+            store.close()
+
+    asyncio.run(run())
+
+
 def test_duplicate_turn_uses_typed_error(tmp_path):
     from assist_live_server.protocol import TurnExistsError
     from assist_live_server.store import SQLiteStore

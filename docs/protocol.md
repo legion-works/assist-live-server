@@ -629,8 +629,30 @@ Socket writes wait for flow control. No route makes an unbounded queue.
 
 ## Records and read routes
 
+### Client errors
+
+`ProtocolError.kind` gives the error class without a message-text check:
+
+- `refused`: the server refuses an HTTP request, negotiation, or audio request.
+- `closed`: a transport error or a closed stream stops the operation.
+- `timeout`: an operation does not complete before its deadline.
+- `malformed`: a request, response, or stream has invalid data.
+
+The `ProtocolError` class and message strings stay unchanged.
+`ProtocolError(*args)` keeps its arguments and defaults to `kind=None`.
+For callers, `None` means an unclassified error. All client error sites set `kind`.
+
+### Turn records
+
 `TurnOpen` contains `turn_id`, `satellite`, `turn_type`, `parent_turn_id`, `conversation_id`, and `record_transcripts`.
 The last field defaults to `false`.
+
+The server does not refuse a turn because its parent is missing or belongs to a different satellite.
+It opens that turn with `parent_turn_id=null`. The stored turn and its events keep no parent identifier.
+A missing parent can follow a fallback-only turn, store retention, or a new store.
+The server keeps a parent only when the store contains the parent with the same satellite.
+All other turn-open checks stay unchanged.
+
 `TimingEvent` contains `turn_id`, `satellite`, `source`, `stage`, `t_utc_ns`, `quality`, and `uncertainty_ms`.
 Optional fields are `t_device_ms`, `seq`, and `data`.
 Quality stays `measured`, `proxy`, or `estimate`. Estimates must have a non-negative uncertainty.
@@ -680,6 +702,11 @@ The maintenance task checks retention each minute, not in event-acceptance trans
 
 `GET /metrics` supplies Prometheus text with the integration token's satellite access checks.
 Ordinary diagnostics contain counts only, without audio or transcripts.
+
+The counter `assist_live_parent_turn_id_removed_total` counts parent values that the store removes when it opens turns.
+It starts at 0 with each store instance and uses the token's satellite access checks.
+A correct parent or no parent does not increase this counter.
+Each removal logs only `absent` or `other_satellite`, without event data or parent identifiers.
 
 The counter `assist_live_stt_final_replaced_total` counts `final` replacements for the audio gateway instance.
 Its initial value is 0. It has no `labels` and contains no transcript text or turn identifiers.

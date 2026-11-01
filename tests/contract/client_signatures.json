@@ -1,0 +1,17 @@
+{
+  "__init__": "(self, url: str, token: str, *, session: aiohttp.client.ClientSession | None = None) -> None",
+  "__aenter__": "(self) -> assist_live_client.client.AssistLiveClient",
+  "__aexit__": "(self, *args: object) -> None",
+  "close": "(self) -> None",
+  "health": "(self, timeout: float = 0.2) -> bool",
+  "health_capabilities": "(self, timeout: float = 0.2) -> assist_live_client.models.HealthCapabilities",
+  "open_turn": "(self, turn: assist_live_client.models.TurnOpen) -> None",
+  "event": "(self, event: assist_live_client.models.TimingEvent) -> None",
+  "turn": "(self, turn_id: str) -> assist_live_client.models.TurnRecord",
+  "bindings": "(self) -> list[dict[str, str]]",
+  "events": "(self, satellite: str, after_event_id: int = 0) -> collections.abc.AsyncIterator[dict[str, typing.Any]]",
+  "export": "(self, satellite: str, since_utc_ns: int) -> collections.abc.AsyncIterator[dict[str, typing.Any]]",
+  "stt": "(self, turn_id: str, audio: collections.abc.AsyncIterator[bytes]) -> collections.abc.AsyncIterator[dict[str, typing.Any]]",
+  "tts": "(self, turn_id: str, text: collections.abc.AsyncIterator[str], voice: str | None = None, *, text_positions: bool = False) -> collections.abc.AsyncIterator[bytes]",
+  "tts_stream": "(self, turn_id: str, text: collections.abc.AsyncIterator[str], voice: str | None = None, *, text_positions: bool = False) -> collections.abc.AsyncIterator[TTSItem]"
+}

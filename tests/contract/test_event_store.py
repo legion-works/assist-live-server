@@ -82,6 +82,56 @@ def packet(seq, stage="wake_detected", satellite="satellite-a"):
     ).encode()
 
 
+@pytest.mark.parametrize("parent_kind", ["absent", "other_satellite", "valid", "none"])
+def test_http_open_turn_accepts_parent_and_exposes_removal_counter(
+    tmp_path, parent_kind
+):
+    from dataclasses import asdict
+
+    async def run():
+        async with service(tmp_path) as (client, session, store, _, _):
+            parent = TurnOpen(
+                str(uuid7()),
+                "satellite-b" if parent_kind == "other_satellite" else "satellite-a",
+                "voice",
+                None,
+                None,
+            )
+            if parent_kind in {"other_satellite", "valid"}:
+                await store.open_turn(parent)
+            turn = TurnOpen(
+                str(uuid7()),
+                "satellite-a",
+                "voice",
+                None if parent_kind == "none" else parent.turn_id,
+                None,
+            )
+            async with session.post(
+                "http://service.invalid/v1/turns",
+                headers=client._headers,
+                json=asdict(turn),
+            ) as response:
+                assert response.status == 200
+                assert await response.json() == {"version": 1}
+            record = await client.turn(turn.turn_id)
+            assert record["parent_turn_id"] == (
+                parent.turn_id if parent_kind == "valid" else None
+            )
+            removed = int(parent_kind in {"absent", "other_satellite"})
+            async with session.get(
+                "http://service.invalid/metrics",
+                headers=client._headers,
+            ) as response:
+                assert response.status == 200
+                lines = (await response.text()).splitlines()
+                assert (
+                    "# TYPE assist_live_parent_turn_id_removed_total counter" in lines
+                )
+                assert f"assist_live_parent_turn_id_removed_total {removed}" in lines
+
+    asyncio.run(run())
+
+
 def test_worker_store_error_resolves_result_and_accepts_next_event(
     tmp_path, monkeypatch, caplog
 ):
