@@ -310,6 +310,193 @@ def test_encode_validates_duration_layout_once_per_model(width, expected_calls):
     )
 
 
+def reference_search(asr, encoded, length, width):
+    """Keep Python tuple selection as the reference for candidate order."""
+    hypothesis = parakeet_beam.Hypothesis
+    beam = min(width, asr._vocab_size - 1)
+    token_count = min(beam, asr._vocab_size - 2)
+    kept = [hypothesis(0.0, (), asr._create_state(), 0)]
+    cache = {}
+    for frame in range(length):
+        current = [h for h in kept if h.frame == frame]
+        kept = [h for h in kept if h.frame > frame]
+        for _ in range(beam * 11):
+            if not current:
+                break
+            best = max(current, key=lambda h: h.score)
+            current.remove(best)
+            key = best.tokens, frame
+            if key not in cache:
+                logits, _, state = parakeet_beam.NemoConformerRnnt._decode(
+                    asr, list(best.tokens), best.state, encoded[frame]
+                )
+                cache[key] = (
+                    parakeet_beam._log_softmax(logits[: asr._vocab_size]),
+                    parakeet_beam._log_softmax(logits[asr._vocab_size :]),
+                    state,
+                )
+            token_scores, duration_scores, state = cache[key]
+            tokens = np.argsort(token_scores[:-1])[-token_count:][::-1]
+            durations = np.argsort(duration_scores)[-beam:][::-1]
+            token_durations = durations
+            if best.zero_duration_tokens >= 10:
+                token_durations = np.argsort(duration_scores[1:])[-beam:][::-1] + 1
+            pairs = sorted(
+                (
+                    (float(token_scores[t] + duration_scores[d]), int(t), int(d))
+                    for t in tokens
+                    for d in token_durations
+                ),
+                reverse=True,
+            )[:token_count]
+            for score, token, duration in pairs:
+                item = hypothesis(
+                    float(np.float32(best.score) + np.float32(score)),
+                    best.tokens + (token,),
+                    state,
+                    frame + duration,
+                    best.zero_duration_tokens + 1 if duration == 0 else 0,
+                )
+                (current if duration == 0 else kept).append(item)
+            for duration in durations:
+                step = int(duration)
+                if step == 0:
+                    if len(durations) != 1:
+                        continue
+                    step = 1
+                kept.append(
+                    hypothesis(
+                        float(
+                            np.float32(best.score)
+                            + token_scores[asr._blank_idx]
+                            + duration_scores[step]
+                        ),
+                        best.tokens,
+                        best.state,
+                        frame + step,
+                    )
+                )
+            kept = parakeet_beam.merge_duplicates(kept)
+            if current:
+                threshold = max(h.score for h in current)
+                superior = sorted(
+                    (h for h in kept if h.score > threshold), key=lambda h: h.score
+                )
+                if len(superior) >= beam:
+                    kept = superior
+                    break
+            else:
+                kept = sorted(kept, key=lambda h: h.score, reverse=True)[:beam]
+        else:
+            kept = sorted(kept, key=lambda h: h.score, reverse=True)[:beam]
+    return parakeet_beam.sort_nbest(kept)
+
+
+class RandomJoint(Joint):
+    def __init__(self, seed):
+        self.seed = seed
+        self.trace = []
+
+    def run(self, outputs, inputs):
+        frame = int(inputs["encoder_outputs"].flat[0])
+        previous = int(inputs["targets"][0][0])
+        state = int(inputs["input_states_1"].flat[0])
+        self.trace.append((frame, previous, state))
+        rng = np.random.default_rng([self.seed, frame, previous, state])
+        logits = rng.normal(0, 2, 24).astype(np.float32)
+        if self.seed % 3 == 0:
+            logits[19] += 12
+        if self.seed % 3 == 1:
+            logits = np.round(logits)
+        next_state = np.full_like(
+            inputs["input_states_1"], (state * 19 + previous + 1) % 10007
+        )
+        return logits, next_state, next_state
+
+
+@pytest.mark.parametrize("width", [1, 4, 16])
+@pytest.mark.parametrize("seed", range(200))
+def test_random_joint_preserves_baseline_tokens_frames_scores_and_pop_order(
+    seed, width
+):
+    joint = RandomJoint(seed)
+    asr = fake_model(joint).asr
+    asr._vocab_size = 19
+    asr._blank_idx = 18
+    length = 1 + seed % 4
+    encoded = np.arange(length, dtype=np.float32)[:, None]
+    expected = reference_search(asr, encoded, length, width)
+    expected_trace = joint.trace.copy()
+    joint.trace.clear()
+    actual = parakeet_beam.search(asr, encoded, length, width)
+    assert joint.trace == expected_trace, "joint calls must keep baseline pop order"
+    assert [(h.tokens, h.frame, h.zero_duration_tokens) for h in actual] == [
+        (h.tokens, h.frame, h.zero_duration_tokens) for h in expected
+    ]
+    np.testing.assert_allclose(
+        [h.score for h in actual], [h.score for h in expected], atol=1e-5, rtol=0
+    )
+    for left, right in zip(actual, expected, strict=True):
+        for state, expected_state in zip(left.state, right.state, strict=True):
+            np.testing.assert_array_equal(state, expected_state)
+
+
+def test_zero_duration_child_precedes_queued_hypotheses():
+    class ChildFirstJoint(Joint):
+        def __init__(self):
+            self.previous = []
+
+        def run(self, outputs, inputs):
+            previous = int(inputs["targets"][0][0])
+            self.previous.append(previous)
+            logits = np.array([0, -4, -5, -6, -7, -20, 0, -30], np.float32)
+            return logits, inputs["input_states_1"], inputs["input_states_2"]
+
+    joint = ChildFirstJoint()
+    asr = fake_model(joint).asr
+    asr._vocab_size = 6
+    asr._blank_idx = 5
+    parakeet_beam.search(asr, np.array([[0]], np.float32), 1, width=4)
+    assert joint.previous[:3] == [5, 0, 0], (
+        "a new zero-duration child must precede the queued lower-score paths"
+    )
+
+
+def test_equal_pair_scores_keep_descending_token_then_duration_order():
+    class TiedJoint(Joint):
+        def run(self, outputs, inputs):
+            logits = np.array([0, 0, 0, 0, 0, -100, -100, 0, 0, 0, 0], np.float32)
+            return logits, inputs["input_states_1"], inputs["input_states_2"]
+
+    asr = fake_model(TiedJoint()).asr
+    asr._vocab_size = 6
+    asr._blank_idx = 5
+    result = parakeet_beam.search(asr, np.array([[0]], np.float32), 1, width=4)
+    assert [(h.tokens, h.frame) for h in result] == [
+        ((4,), 4),
+        ((4,), 3),
+        ((4,), 2),
+        ((4,), 1),
+    ], "equal scores must select the larger token, then the larger duration"
+
+
+def test_zero_token_candidates_preserve_blank_only_baseline():
+    class BlankOnlyJoint(Joint):
+        def run(self, outputs, inputs):
+            logits = np.array([0, 0, -100, 0, -100, -100, -100], np.float32)
+            return logits, inputs["input_states_1"], inputs["input_states_2"]
+
+    asr = fake_model(BlankOnlyJoint()).asr
+    asr._vocab_size = 2
+    asr._blank_idx = 1
+    encoded = np.array([[0]], np.float32)
+    expected = reference_search(asr, encoded, 1, width=1)
+    actual = parakeet_beam.search(asr, encoded, 1, width=1)
+    assert [(h.tokens, h.frame, h.score) for h in actual] == [
+        (h.tokens, h.frame, h.score) for h in expected
+    ], "zero token candidates must not select any token pair"
+
+
 def test_pinned_private_api_contract():
     assert importlib.metadata.version("onnx-asr") == "0.12.0"
     expected = {

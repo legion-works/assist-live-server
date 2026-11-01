@@ -108,15 +108,19 @@ def search(
             token_durations = durations
             if best.zero_duration_tokens >= MAX_ZERO_DURATION_TOKENS:
                 token_durations = np.argsort(duration_scores[1:])[-beam:][::-1] + 1
-            pairs = sorted(
-                (
-                    (float(token_scores[t] + duration_scores[d]), int(t), int(d))
-                    for t in tokens
-                    for d in token_durations
-                ),
-                reverse=True,
-            )[:token_count]
-            for score, token, duration in pairs:
+            pair_scores = (
+                token_scores[tokens, None] + duration_scores[token_durations]
+            ).ravel()
+            pair_tokens = np.repeat(tokens, len(token_durations))
+            pair_durations = np.tile(token_durations, len(tokens))
+            # Equal scores must keep Python's reverse (score, token, duration) order.
+            order = np.lexsort((pair_durations, pair_tokens, pair_scores))[::-1][
+                :token_count
+            ]
+            for index in order:
+                score = pair_scores[index]
+                token = int(pair_tokens[index])
+                duration = int(pair_durations[index])
                 hypothesis = Hypothesis(
                     float(np.float32(best.score) + np.float32(score)),
                     best.tokens + (token,),

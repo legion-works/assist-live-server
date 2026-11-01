@@ -51,6 +51,12 @@ For a symbolic width, it checks one joint output from inference.
 A symbolic-width check adds one joint call before search.
 A different count gives `ParakeetDurationLayoutError`.
 
+Candidate selection uses a float32 matrix for token and frame-step scores.
+It orders equal scores by token ID, then frame-step ID, in descending order.
+The loop continues to expand one path at a time in raw-score order.
+A new zero-step path can come before the other paths, so joint calls do not use a batch.
+The cache, duplicate merge, `early stop`, frame budget, and token limit stay unchanged.
+
 The adapter uses private encoder and decoder methods from `onnx-asr==0.12.0`.
 That version has no public encoder or joint interface.
 Contract tests check the private method signatures and compare greedy tokens and text on synthetic audio.

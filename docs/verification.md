@@ -3345,3 +3345,78 @@ The test checked all four model hashes and all corpus audio hashes again. It mad
 
 The cost tables above give results before these limits. The test did not run those cost trials again.
 The test does not check other prefixes for command safety.
+
+## Candidate selection in the `final` decoder
+
+The test uses server commit `992d82b` for the earlier results.
+The pinned joint accepts two encoder frames, tokens, and predictor states in one call.
+The output has shape `[2, 1, 1, 1030]`, with two states of shape `[2, 2, 640]`.
+
+The search continues to make sequential joint calls.
+A new zero-step path can come before each queued path. An `early stop` can prevent the next call.
+Thus a batch of queued paths cannot keep the same expansion order and membership.
+
+The unchanged 15 s search `profile` gives 1702 joint calls and seven cache hits for each decode.
+With cProfile, the joint uses 130.67 ms, the Python pair generator uses 53.74 ms, and Python sorts use 45.59 ms.
+Duplicate merge uses 56.65 ms with its sort in that total.
+
+Argsort uses 15.98 ms, and log-softmax uses 16.36 ms.
+The complete search uses 389.50 ms. These `profile` times do not include the encoder. They include instrumentation cost.
+
+Candidate selection uses a float32 outer sum and `np.lexsort`.
+Equal scores keep the descending token-ID and frame-step-ID order of Python tuples.
+The vocabulary selection, path scores, duplicate merge, `early stop`, cache, budget, and token limit stay unchanged.
+
+The fake-joint suite uses 200 seeds at each width 1, 4, and 16.
+It checks tokens, frame indices, a maximum score error of 1e-5, predictor states, and the same joint-call order.
+The seeds include equal scores and heavy zero-step paths.
+
+The initial baseline run gives `620 passed`. The changed search with one more edge test gives `621 passed`.
+The edge test checks no token candidates, which the pinned model's vocabulary cannot give.
+Compiled mutations of path order and equal-score order give unsatisfactory results at their named behavior assertions.
+
+The real-model test checks all 5638 paths on 27 device cuts and 250 corpus recordings against `992d82b`.
+Tokens, frame indices, predictor states, and transcripts are the same. The maximum score difference is 0.0.
+Each transcript also agrees with the saved earlier result.
+The test checks model and corpus audio hashes. It makes no private audio copy.
+
+The 25 earlier D2 recordings were missing after an approved recording cleanup.
+Their 43 selected cuts could not run. The 27 cuts from all 11 D5 recordings stay available.
+Thus this test does not include the complete earlier 70-cut device set.
+
+The changed 15 s search `profile` gives 284.94 ms, with the same 1702 joint calls and seven cache hits.
+The joint uses 91.13 ms, duplicate merge uses 49.65 ms, and Python sorts use 24.29 ms of self time.
+Argsort uses 13.77 ms, and log-softmax uses 14.55 ms.
+The Python pair generator is gone. NumPy `tile` uses 8.20 ms, and `repeat` uses 2.63 ms.
+Some native NumPy time stays in the search function's self time.
+
+These different `profile` runs have different host load. Their time difference does not measure the change alone.
+
+The last cost test uses 30 paired trials for each input length, in AB/BA order (15 ABBA groups).
+It records the one-minute load before and after each pair.
+The table gives complete-decode wall times in milliseconds, with executor queue time.
+
+| Audio | Baseline p50/p99 | Changed p50/p99 | Paired savings p50 | Savings p25/p75 |
+|---|---:|---:|---:|---:|
+| 1.5 s | 63.87/72.42 | 65.01/71.62 | 0.17 | -4.29/3.40 |
+| 15 s | 452.66/1261.08 | 430.02/1090.66 | 27.90 | 6.68/39.60 |
+
+Positive savings mean less time. The ABBA-block median savings are -1.60 ms and 27.90 ms.
+The 15 s savings are small, approximately 6% of the baseline median.
+The test does not show short-input savings. Other workspaces ran tests on the same host.
+One-minute load is 8.73 to 9.81 during the pairs.
+
+The reconstructed four-session test uses 100 turns for each run, in ABBA order.
+Each turn decodes the same 15 s buffer for its `partial` and `final` transcripts.
+
+| Run | Final wall p50/p99 (ms) | Final worker p50/p99 (ms) |
+|---|---:|---:|
+| Baseline 1 | 820.12/3475.66 | 457.46/3022.67 |
+| Changed 1 | 834.72/4124.02 | 453.59/2875.65 |
+| Changed 2 | 792.57/2741.70 | 435.26/2019.21 |
+| Baseline 2 | 860.28/4854.20 | 479.84/3946.26 |
+
+One-minute load is 9.81 to 22.59 across these runs.
+Unchanged greedy `partial` decodes also have large tail times.
+Thus the four-session tails do not show a speed change. Heartbeat p99 is at most 2.47 ms.
+The test does not show sustained real-time capacity.
