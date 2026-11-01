@@ -3312,3 +3312,36 @@ git diff --check
 
 The model cache points to the hash-checked external copy. `PARAKEET_MODEL_CACHE` enables the real-model contract test.
 The STE checker examines each changed Markdown file. No commit, publication, deployment, or live hardware change is part of this work.
+
+### Decoder work limits
+
+NeMo's pinned `default_beam_search` has no zero-step token limit.
+The server limits each path to ten zero-step tokens before it moves to a subsequent frame.
+It also limits each frame to `beam_width * (10 + 1)` search steps, with cache hits in that count.
+The search makes at most 176 joint calls for a width-16 frame.
+At the frame budget, the search uses the kept future-frame paths without an error.
+Positive-step tokens and `blank` tokens can move the path to a subsequent frame at the token limit.
+
+A fake joint always gave its best score to a token with a frame step of 0.
+Before the repair, a call-budget assertion stopped frame 0 after 45 joint calls.
+With the repair, the width-four test uses all 44 joint calls in its frame budget and gives kept paths.
+Different tests check positive-step tokens and `blank` tokens at the ten-token limit.
+The cap-removal mutation gives an unsatisfactory result at `ten zero-duration tokens must be followed by a positive-duration token`.
+The four earlier mutations also give unsatisfactory results at their named assertions.
+
+The model config has no `duration` list. The documented frame steps are `[0, 1, 2, 3, 4]`.
+The adapter checks the joint output width one time for each model and caches only a satisfactory check.
+A symbolic width uses one joint output from inference. A different layout gives `ParakeetDurationLayoutError`.
+
+Five layout tests gave unsatisfactory results before this guard.
+The runtime contract checks `_decoder_joint` and its output metadata.
+The target provider tests give `31 passed` with the real-model contract enabled.
+
+The real-model test uses the decoder from `ac20e24` for the earlier output.
+All 70 selected device transcripts and 250 corpus transcripts stay the same.
+The 17 complete-command errors stay corrected, with no new error on the selected cuts.
+The corpus keeps 96/1945 word errors (4.936%), with no recording worse than the greedy baseline.
+The test checked all four model hashes and all corpus audio hashes again. It made no private audio copy.
+
+The cost tables above give results before these limits. The test did not run those cost trials again.
+The test does not check other prefixes for command safety.

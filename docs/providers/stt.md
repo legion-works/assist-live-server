@@ -33,6 +33,24 @@ It sums duplicate path scores with `log-add-exp` only when the tokens and the ne
 It divides the `final` path score by the token count, with the initial `blank` in that count.
 It uses no language model, word list, or audio change.
 
+The server adds work limits to NeMo's search.
+Each path can give at most ten tokens with a frame step of 0.
+At that limit, a positive frame step with a token or a `blank` can move the path to a subsequent frame.
+
+Each frame has a limit of `beam_width * (10 + 1)` search steps. Cache hits use that budget too.
+Thus the search makes at most 176 joint calls for a width-16 frame.
+At that budget, the search uses the available future-frame paths.
+
+NeMo does not have these limits. The limits stop a decoder loop.
+The server cannot stop an active executor task after cancellation.
+The token limit follows the pinned greedy decoder's limit of ten.
+
+The pinned export uses frame steps `[0, 1, 2, 3, 4]`.
+The adapter checks for five `duration` logits during the first encode for each model.
+For a symbolic width, it checks one joint output from inference.
+A symbolic-width check adds one joint call before search.
+A different count gives `ParakeetDurationLayoutError`.
+
 The adapter uses private encoder and decoder methods from `onnx-asr==0.12.0`.
 That version has no public encoder or joint interface.
 Contract tests check the private method signatures and compare greedy tokens and text on synthetic audio.

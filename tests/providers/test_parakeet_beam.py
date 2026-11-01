@@ -18,6 +18,9 @@ class Joint:
             for name in ("input_states_1", "input_states_2")
         ]
 
+    def get_outputs(self):
+        return [SimpleNamespace(name="outputs", shape=[1, 1, 1, 8])]
+
     def run(self, outputs, inputs):
         frame = int(inputs["encoder_outputs"].flat[0])
         previous = int(inputs["targets"][0][0])
@@ -27,7 +30,9 @@ class Joint:
             probabilities = [0.001, 0.001, 0.998]
         else:
             probabilities = [0.01, 0.59, 0.40]
-        logits = np.log(np.array(probabilities + [0.001, 0.999], np.float32))
+        logits = np.log(
+            np.array(probabilities + [0.001, 0.999, 1e-30, 1e-30, 1e-30], np.float32)
+        )
         return (
             logits[None, None, None],
             inputs["input_states_1"],
@@ -141,7 +146,8 @@ class DurationJoint(Joint):
         self.frames.append(frame)
         previous = int(inputs["targets"][0][0])
         token = [0.999, 0.0005, 0.0005] if previous == 2 else [0.0005, 0.0005, 0.999]
-        logits = np.log(np.array(token + self.duration, np.float32))
+        durations = self.duration + [1e-30] * (5 - len(self.duration))
+        logits = np.log(np.array(token + durations, np.float32))
         return logits, inputs["input_states_1"], inputs["input_states_2"]
 
 
@@ -199,6 +205,111 @@ def test_zero_duration_emits_token_without_advancing_or_updating_blank_state():
     assert joint.frames == [0, 0]
 
 
+class EndlessZeroJoint(Joint):
+    def __init__(self, vocabulary_size, call_budget):
+        self.vocabulary_size = vocabulary_size
+        self.call_budget = call_budget
+        self.calls = {}
+
+    def run(self, outputs, inputs):
+        frame = int(inputs["encoder_outputs"].flat[0])
+        self.calls[frame] = self.calls.get(frame, 0) + 1
+        assert self.calls[frame] <= self.call_budget, (
+            "joint calls per frame must stay within width times eleven"
+        )
+        logits = np.full(self.vocabulary_size + 5, -10000, np.float32)
+        logits[0] = 0
+        logits[self.vocabulary_size] = 0
+        logits[self.vocabulary_size + 2 :] = -20000
+        return logits, inputs["input_states_1"], inputs["input_states_2"]
+
+
+def test_endless_zero_duration_search_has_a_hard_frame_call_bound():
+    joint = EndlessZeroJoint(vocabulary_size=6, call_budget=44)
+    model = fake_model(joint)
+    model.asr._vocab_size = 6
+    model.asr._blank_idx = 5
+    result = parakeet_beam.search(
+        model.asr, np.array([[0], [1]], np.float32), 2, width=4
+    )
+    assert joint.calls[0] == 44, "adversarial frame must reach the hard call budget"
+    assert all(count <= 44 for count in joint.calls.values())
+    assert result and all(h.frame >= 2 for h in result), (
+        "frame budget must return kept advancing hypotheses, not raise"
+    )
+
+
+@pytest.mark.parametrize("frames", [1, 2])
+def test_zero_duration_cap_still_allows_a_positive_duration_token(frames):
+    joint = EndlessZeroJoint(vocabulary_size=3, call_budget=11)
+    result = parakeet_beam.search(
+        fake_model(joint).asr,
+        np.arange(frames, dtype=np.float32)[:, None],
+        frames,
+        width=1,
+    )
+    assert len(result[0].tokens) == 11 * frames, (
+        "ten zero-duration tokens must be followed by a positive-duration token"
+    )
+    assert result[0].frame >= frames
+    assert joint.calls == {frame: 11 for frame in range(frames)}
+
+
+def test_zero_duration_cap_still_allows_blank_advance():
+    class BlankAtCapJoint(EndlessZeroJoint):
+        def run(self, outputs, inputs):
+            logits, state1, state2 = super().run(outputs, inputs)
+            if int(state1.flat[0]) == 10:
+                logits[0] = -10000
+                logits[2] = 0
+            return logits, state1 + 1, state2 + 1
+
+    joint = BlankAtCapJoint(vocabulary_size=3, call_budget=11)
+    result = parakeet_beam.search(
+        fake_model(joint).asr, np.array([[0]], np.float32), 1, width=1
+    )
+    assert len(result[0].tokens) == 10, "blank must still advance the capped hypothesis"
+    assert result[0].frame == 1
+    assert joint.calls == {0: 11}
+
+
+class LayoutJoint(Joint):
+    def __init__(self, width, duration_count=5):
+        self.width = width
+        self.duration_count = duration_count
+        self.metadata_calls = 0
+        self.joint_calls = 0
+
+    def get_outputs(self):
+        self.metadata_calls += 1
+        return [SimpleNamespace(name="outputs", shape=[1, 1, 1, self.width])]
+
+    def run(self, outputs, inputs):
+        self.joint_calls += 1
+        logits, state1, state2 = super().run(outputs, inputs)
+        return logits[..., : 3 + self.duration_count], state1, state2
+
+
+@pytest.mark.parametrize("width,duration_count", [(7, 5), (9, 5), ("dynamic", 4)])
+def test_encode_rejects_an_unexpected_duration_layout(width, duration_count):
+    model = fake_model(LayoutJoint(width, duration_count))
+    with pytest.raises(ValueError, match="Parakeet TDT duration layout") as error:
+        parakeet_beam.encode(model, np.zeros(6400, np.float32))
+    assert type(error.value).__name__ == "ParakeetDurationLayoutError"
+
+
+@pytest.mark.parametrize("width,expected_calls", [(8, 0), ("dynamic", 1)])
+def test_encode_validates_duration_layout_once_per_model(width, expected_calls):
+    joint = LayoutJoint(width)
+    model = fake_model(joint)
+    for _ in range(2):
+        parakeet_beam.encode(model, np.zeros(6400, np.float32))
+    assert joint.metadata_calls == 1, "duration layout must be checked once per model"
+    assert joint.joint_calls == expected_calls, (
+        "only a symbolic joint width needs one validation inference"
+    )
+
+
 def test_pinned_private_api_contract():
     assert importlib.metadata.version("onnx-asr") == "0.12.0"
     expected = {
@@ -233,6 +344,19 @@ def test_real_pinned_adapter_matches_public_greedy_on_synthetic_audio():
         provider = await ParakeetProvider.load(cache)
         samples = np.random.default_rng(42).normal(0, 0.01, 24000).astype(np.float32)
         asr, encoded, lengths = parakeet_beam.encode(provider._model, samples)
+        members = (
+            "_preprocessor",
+            "_encode",
+            "_create_state",
+            "_vocab_size",
+            "_blank_idx",
+            "_decode_tokens",
+            "_decoder_joint",
+        )
+        assert all(hasattr(asr, member) for member in members)
+        metadata = asr._decoder_joint.get_outputs()
+        output = next(item for item in metadata if item.name == "outputs")
+        assert output.shape[-1] == asr._vocab_size + 5
         assert callable(asr._preprocessor)
         assert isinstance(asr._vocab_size, int)
         assert asr._blank_idx == asr._vocab_size - 1
