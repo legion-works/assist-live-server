@@ -3167,3 +3167,62 @@ git diff --check
 
 The explicit public-tree command supplies the privacy check when there is no sibling checker.
 No dependency, runtime setting, deployment, or publication changed.
+
+## Client DNS recovery
+
+Date: 2026-11-01 (UTC).
+
+The client keeps the supplied HTTP session for control requests, exports, events, STT, and TTS.
+Only a `ClientConnectorDNSError` starts one system-resolution retry.
+The retry keeps `Host`, authorization, TLS certificate checks, SNI, and the initial deadline.
+Numeric addresses and refused TCP connections do not start system resolution.
+
+The DNS test command is:
+
+```sh
+uv run --locked pytest tests/contract/test_dns_recovery.py -q
+```
+
+Before the change, the first 20 tests gave `17 failed, 3 passed`.
+Failures included `DNS_RETRY_REQUIRED`, `IPV6_RECOVERY_REQUIRED`, and `TLS_DNS_RETRY_REQUIRED`.
+The complete DNS suite then gave `26 passed`.
+It also gave `PASS` with only the loopback network available.
+
+The tests use an aiohttp server and a supplied resolver that keeps an NXDOMAIN answer.
+The system path uses `loop.getaddrinfo` without the supplied resolver's cache.
+TLS tests make short-lived certificates and keys in temporary storage with `openssl`.
+They check the initial name and refuse a certificate for a different name.
+
+Named assertions found changes that removed the retry or `Host`.
+They also found changes that removed SNI or the DNS-only error guard.
+
+`ORIGINAL_DEADLINE_REQUIRED` found a change that removed the resolution deadline.
+Other tests check the response-body budget, address-family selection, and numeric addresses.
+They also check WebSocket stream time and cancellation without an orphan task.
+
+A different process used Home Assistant 2026.10.3, aiohttp 3.14.5, aiodns 4.0.4, and pycares 5.0.1.
+A local UDP DNS responder first gave NXDOMAIN with an SOA record, then a loopback address.
+The shared resolver used DNS-only lookup for a name that the system resolver resolves to loopback.
+After the server started, the previous client gave an unsatisfactory result at 5.005 s.
+The new client gave a satisfactory result at 5.008 s on the first five-second health interval.
+
+The shared resolver made no new DNS query. The server received the initial `Host` and authorization fields.
+The process used no mock DNS lookup. No Home Assistant runtime state changed.
+
+The acceptance commands run from the server repository:
+
+```sh
+export UV_LINK_MODE=copy
+export ASSIST_LIVE_MODEL_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/assist-live/turn"
+uv run --locked ruff format --check .
+uv run --locked ruff check --no-cache .
+PRIVATE_DENYLIST="$PRIVATE_DENYLIST" task check
+UV_PROJECT_ENVIRONMENT="$FLOOR_ENV" uv run --locked --python 3.14.2 pytest tests/ -q
+UV_OFFLINE=1 unshare -rn sh -c 'ip link set lo up && uv run --locked pytest tests/ -q'
+python3 "$STE_CHECKER" docs/protocol.md docs/verification.md
+python3 "$WORKSPACE/assist-live/tools/check_public_tree.py" --root . --private-denylist "$PRIVATE_DENYLIST"
+git diff --check
+```
+
+The explicit public-tree command supplies the privacy check when there is no sibling checker.
+No dependency, deployment, or publication changed.

@@ -1,8 +1,10 @@
 import asyncio
 import contextlib
 import json
-from collections.abc import AsyncGenerator, AsyncIterator
+import socket
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from dataclasses import asdict
+from ipaddress import ip_address
 from typing import Any
 
 import aiohttp
@@ -75,6 +77,76 @@ class AssistLiveClient:
         if self._owns_session and self._session is not None:
             await self._session.close()
 
+    @contextlib.asynccontextmanager
+    async def _connect[Response](
+        self,
+        connect: Callable[..., contextlib.AbstractAsyncContextManager[Response]],
+        path: str,
+        *,
+        timeout: aiohttp.ClientTimeout | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[Response]:
+        session = self._connection()
+        url = aiohttp.client_reqrep.URL(self.url + path)
+        headers = self._headers
+        total = (timeout or session.timeout).total
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+        async with contextlib.AsyncExitStack() as stack:
+            async with asyncio.timeout(
+                total if total and total > 0 else None
+            ) as deadline:
+                try:
+                    response = await stack.enter_async_context(
+                        connect(url=url, headers=headers, **kwargs)
+                    )
+                except aiohttp.ClientConnectorDNSError as error:
+                    host = url.raw_host
+                    connector = session.connector
+                    if host is None or not isinstance(connector, aiohttp.TCPConnector):
+                        raise
+                    try:
+                        ip_address(host)
+                    except ValueError:
+                        pass
+                    else:
+                        raise error
+                    # The supplied resolver can keep an old NXDOMAIN answer.
+                    try:
+                        addresses = await asyncio.get_running_loop().getaddrinfo(
+                            host,
+                            url.port or 0,
+                            family=connector.family,
+                            type=socket.SOCK_STREAM,
+                        )
+                    except OSError:
+                        raise error from None
+                    if not addresses:
+                        raise error
+                    headers["Host"] = url.host_port_subcomponent or host
+                    when = deadline.when()
+                    if timeout is not None and when is not None:
+                        remaining = when - asyncio.get_running_loop().time()
+                        if remaining <= 0:
+                            raise TimeoutError from None
+                        kwargs["timeout"] = aiohttp.ClientTimeout(
+                            total=remaining,
+                            connect=timeout.connect,
+                            sock_read=timeout.sock_read,
+                            sock_connect=timeout.sock_connect,
+                            ceil_threshold=float("inf"),
+                        )
+                    response = await stack.enter_async_context(
+                        connect(
+                            url=url.with_host(str(addresses[0][4][0])),
+                            headers=headers,
+                            server_hostname=host,
+                            **kwargs,
+                        )
+                    )
+            # HTTP keeps its body deadline. WebSockets keep their stream deadlines.
+            yield response
+
     async def _request(
         self, method: str, path: str, *, data: object = None, timeout: float = 20
     ) -> Any:
@@ -82,11 +154,11 @@ class AssistLiveClient:
         if raw is not None and len(raw) > MAX_CONTROL:
             raise ProtocolError("request too large")
         try:
-            async with self._connection().request(
-                method,
-                self.url + path,
+            async with self._connect(
+                self._connection().request,
+                path,
+                method=method,
                 data=raw,
-                headers=self._headers,
                 timeout=aiohttp.ClientTimeout(total=timeout),
                 allow_redirects=False,
             ) as response:
@@ -208,9 +280,9 @@ class AssistLiveClient:
         identifier(satellite)
         unsigned(after_event_id)
         try:
-            async with self._connection().ws_connect(
-                self.url + "/v1/events",
-                headers=self._headers,
+            async with self._connect(
+                self._connection().ws_connect,
+                "/v1/events",
                 max_msg_size=MAX_CONTROL,
                 compress=0,
             ) as ws:
@@ -239,10 +311,11 @@ class AssistLiveClient:
         identifier(satellite)
         unsigned(since_utc_ns)
         try:
-            async with self._connection().get(
-                self.url + "/v1/export",
+            async with self._connect(
+                self._connection().get,
+                "/v1/export",
                 params={"satellite": satellite, "since_utc_ns": str(since_utc_ns)},
-                headers=self._headers,
+                timeout=self._connection().timeout,
                 allow_redirects=False,
             ) as response:
                 if response.status != 200:
@@ -282,9 +355,9 @@ class AssistLiveClient:
         sent_characters = 0
         previous_text_end = 0
         try:
-            async with self._connection().ws_connect(
-                self.url + "/v1/audio",
-                headers=self._headers,
+            async with self._connect(
+                self._connection().ws_connect,
+                "/v1/audio",
                 # aiohttp refuses equality. The protocol maximum is inclusive.
                 max_msg_size=MAX_AUDIO + 1,
                 compress=0,

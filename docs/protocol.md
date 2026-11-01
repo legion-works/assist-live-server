@@ -11,6 +11,26 @@ It also states: "The first message selects the protocol version and functions."
 
 ## Health functions
 
+### Client session and DNS recovery
+
+The client uses the HTTP session that Home Assistant supplies.
+It does not replace or close that session or change its resolver.
+
+On `ClientConnectorDNSError`, the client resolves the server name with the system resolver and tries the connection one more time.
+This resolution does not use the supplied session's DNS cache.
+The client uses the first address for the connector's address family through the same session.
+Numeric server addresses and other connection errors do not cause this retry.
+
+The retry keeps the initial `Host` header, non-default port, and authorization header.
+For TLS, it keeps the initial name for SNI and the certificate check.
+The resolution and retry use the remaining time from the initial deadline.
+HTTP response reads keep that deadline. WebSocket streams keep their different message deadlines.
+
+Cancellation stops the pending connection or resolution without a new background task.
+If recovery is not satisfactory, the client gives its usual error so the integration can use its fallback engine.
+
+### Health response
+
 Authenticated `GET /health` gives this body:
 
 ```json
