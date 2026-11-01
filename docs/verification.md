@@ -3420,3 +3420,59 @@ One-minute load is 9.81 to 22.59 across these runs.
 Unchanged greedy `partial` decodes also have large tail times.
 Thus the four-session tails do not show a speed change. Heartbeat p99 is at most 2.47 ms.
 The test does not show sustained real-time capacity.
+
+## DNS deadline clock checks (2026-11-01 UTC)
+
+`test_resolve_consumes_original_deadline` was the only client DNS recovery test with an elapsed-time assertion.
+Its three tests include health, events, and STT. The initial assertion used `0.06 <= elapsed < 0.115` seconds.
+An 80 ms event-loop stall at system resolution entry made the unchanged events test use 0.121373 seconds.
+It gave `1 failed` at `ORIGINAL_DEADLINE_REQUIRED`, without a production change.
+
+Reproduction command, with the external test plugin on `PYTHONPATH`:
+
+```sh
+uv run --locked pytest -p stall_plugin 'tests/contract/test_dns_recovery.py::test_resolve_consumes_original_deadline[events]' -q --tb=short
+```
+
+The test uses the controlled loop-clock offset from the response-body deadline test.
+The initial budget is 60 seconds. The cached lookup consumes 40 clock seconds before system resolution starts.
+An event shows that resolution or the retry has started. The operation must stay pending at this point.
+
+The clock then increases by 21 seconds. The initial deadline must stop the operation, without a new retry budget.
+The five-second wait is a failure guard, not an elapsed-time acceptance bound.
+
+The pending-operation check and expiry after the controlled clock increase replace the elapsed-time assertion.
+The health result of `False` and the events/STT `ProtocolError` checks stay the same.
+The resolver-call and resolver-stop checks stay the same. A new assertion refuses a retry after resolution expires.
+Each entry has different resolution and retry tests. Cleanup cancels the operation, waits for it, and closes its stream.
+
+Two runtime mutations tested these guards without a production file edit:
+
+| Mutation | Named test case | Result |
+|---|---|---|
+| Give the retry a new deadline | `test_resolve_consumes_original_deadline[retry-events]` | `ORIGINAL_DEADLINE_REQUIRED` |
+| Remove the deadline during system resolution | `test_resolve_consumes_original_deadline[resolve-events]` | `ORIGINAL_DEADLINE_REQUIRED` |
+
+The complete DNS recovery file gave `33 passed`.
+The six controlled-clock tests ran 50 times with the same 80 ms stall: all 300 results were satisfactory.
+No production code, public API, dependency, or timeout policy changed.
+
+Ruff reported `114 files already formatted` and `All checks passed!`.
+`task check`, Python 3.14.2, and the network-isolated suite each gave `1185 passed, 1 skipped`.
+Mypy reported no issues in 46 source files. Package, bootstrap, CI, asset, and secret checks were satisfactory.
+The relative public-tree task reported `NOT CHECKED public tree` because this worktree has no sibling integration checkout.
+The canonical privacy check gave `PASS public data matches=0` and a satisfactory history check for 67 commits.
+`git diff --check` and the STE check were satisfactory.
+
+Repository gate commands:
+
+```sh
+uv run --locked ruff format --check .
+uv run --locked ruff check --no-cache .
+PRIVATE_DENYLIST="$PRIVATE_DENYLIST" task check
+ASSIST_LIVE_MODEL_CACHE="$TURN_MODEL_CACHE" UV_PROJECT_ENVIRONMENT="$FLOOR_ENV" uv run --locked --python 3.14.2 pytest tests/ -q
+ASSIST_LIVE_MODEL_CACHE="$TURN_MODEL_CACHE" unshare -rn sh -c 'ip link set lo up && UV_OFFLINE=1 uv run --locked pytest tests/ -q'
+uv run --locked python "$WORKSPACE/assist-live/tools/check_public_tree.py" --history --root . --private-denylist "$PRIVATE_DENYLIST"
+git diff --check
+python3 "$STE_CHECKER" docs/verification.md
+```

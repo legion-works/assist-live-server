@@ -225,19 +225,49 @@ def test_connection_refused_does_not_retry(monkeypatch):
 
 
 @pytest.mark.parametrize("entry", ["health", "events", "stt"])
-def test_resolve_consumes_original_deadline(monkeypatch, turn_id, entry):
+@pytest.mark.parametrize("stage", ["resolve", "retry"])
+def test_resolve_consumes_original_deadline(monkeypatch, turn_id, entry, stage):
     async def run():
-        calls, _, stopped = system_address(monkeypatch, delay=0.3)
+        loop = asyncio.get_running_loop()
+        real_time = loop.time
+        clock_offset = 0
+        calls, resolve_entered, stopped = system_address(
+            monkeypatch, delay=3600 if stage == "resolve" else 0
+        )
+        retry_entered = asyncio.Event()
+        retry_release = asyncio.Event()
+
+        class ConsumingNXDomain(CachedNXDomain):
+            async def resolve(self, host, port=0, family=socket.AF_INET):
+                nonlocal clock_offset
+                try:
+                    return await super().resolve(host, port, family)
+                finally:
+                    clock_offset += 40
+
+        monkeypatch.setattr(loop, "time", lambda: real_time() + clock_offset)
         async with aiohttp.ClientSession(
-            connector=aiohttp.TCPConnector(resolver=CachedNXDomain(delay=0.04)),
-            timeout=aiohttp.ClientTimeout(total=0.08),
+            connector=aiohttp.TCPConnector(resolver=ConsumingNXDomain()),
+            timeout=aiohttp.ClientTimeout(total=60),
         ) as session:
+            method = "request" if entry == "health" else "ws_connect"
+            original_connect = getattr(session, method)
+
+            @asynccontextmanager
+            async def connect(*args, **kwargs):
+                if kwargs["url"].raw_host == "127.0.0.1":
+                    retry_entered.set()
+                    await retry_release.wait()
+                async with original_connect(*args, **kwargs) as response:
+                    yield response
+
+            monkeypatch.setattr(session, method, connect)
             client = AssistLiveClient(
                 "http://service.invalid", "test-token", session=session
             )
-            start = asyncio.get_running_loop().time()
+            stream = None
             if entry == "health":
-                assert not await client.health(timeout=0.08)
+                operation = client.health(timeout=60)
             else:
 
                 async def source():
@@ -249,13 +279,33 @@ def test_resolve_consumes_original_deadline(monkeypatch, turn_id, entry):
                     if entry == "events"
                     else client.stt(turn_id, source())
                 )
-                with pytest.raises(ProtocolError):
-                    await anext(stream)
-                await stream.aclose()
-            elapsed = asyncio.get_running_loop().time() - start
-            assert calls, "DNS_RESOLUTION_REQUIRED"
-            assert 0.06 <= elapsed < 0.115, "ORIGINAL_DEADLINE_REQUIRED"
-            assert stopped.is_set(), "TIMED_OUT_RESOLVE_MUST_STOP"
+                operation = anext(stream)
+            task = asyncio.create_task(operation)
+            try:
+                entered = resolve_entered if stage == "resolve" else retry_entered
+                await asyncio.wait_for(entered.wait(), 120)
+                assert calls, "DNS_RESOLUTION_REQUIRED"
+                assert not task.done(), "REMAINING_BUDGET_REQUIRED"
+                clock_offset += 21
+                try:
+                    if entry == "health":
+                        assert not await asyncio.wait_for(task, 5), (
+                            "ORIGINAL_DEADLINE_REQUIRED"
+                        )
+                    else:
+                        with pytest.raises(ProtocolError):
+                            await asyncio.wait_for(task, 5)
+                except TimeoutError:
+                    pytest.fail("ORIGINAL_DEADLINE_REQUIRED")
+                assert stopped.is_set(), "TIMED_OUT_RESOLVE_MUST_STOP"
+                assert retry_entered.is_set() is (stage == "retry"), (
+                    "NO_RETRY_AFTER_RESOLVE_DEADLINE"
+                )
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+                if stream is not None:
+                    await stream.aclose()
 
     asyncio.run(run())
 
