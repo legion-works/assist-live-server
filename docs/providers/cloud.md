@@ -2,8 +2,65 @@
 
 The project is experimental and has no release.
 An explicit provider setting or constructor call selects a cloud provider. Credentials alone do not select a cloud provider.
-No cloud API request or API key use occurred.
-Live checks: `NOT RUN (needs operator credentials and spend approval)`.
+Deepgram and ElevenLabs live checks: `NOT RUN (needs operator credentials and spend approval)`.
+
+## OpenAI live transcription
+
+Sources, read on 2026-11-02 (UTC):
+
+- [Realtime transcription](https://developers.openai.com/api/docs/guides/realtime-transcription).
+- [WebSocket connection](https://developers.openai.com/api/docs/guides/voice-websockets?api=realtime).
+- [Data controls](https://developers.openai.com/api/docs/guides/your-data#data-retention-controls-for-abuse-monitoring).
+
+`OpenAIProvider(api_key)` declares destination `cloud` and makes no connection until a session connects or accepts audio.
+The server loads it only with the explicit `openai` STT selection. Local-only mode refuses it before construction and at request selection.
+
+The key comes from `OPENAI_API_KEY`. Each connection sends it only in the `Authorization` header with the `Bearer` scheme.
+The adapter refuses redirects and does not use proxy environment settings.
+Errors contain no provider response text or transport `__context__`.
+
+Each turn opens `wss://api.openai.com/v1/realtime?intent=transcription`.
+`session.update` selects type `transcription`, model `gpt-live-transcribe`, and `audio.input.turn_detection: null`.
+`OPENAI_TRANSCRIPTION_DELAY` supplies `audio.input.transcription.delay`. The default is `low`.
+The permitted values are `minimal`, `low`, `medium`, `high`, and `xhigh`.
+
+The session accepts mono 16 kHz little-endian signed int16 PCM through the same interface as Deepgram.
+The adapter changes it to 24 kHz with continuous linear interpolation and sends base64 PCM through `input_audio_buffer.append`.
+Only `finish`, after the server end decision, sends `input_audio_buffer.commit`.
+No provider event ends the turn.
+
+The adapter collects delta text independently for each `item_id`.
+The adapter accepts a `completed` event only for the `item_id` from `input_audio_buffer.committed`.
+It does not use event arrival order. A `completed` event for a different item cannot replace the selected result.
+A `failed` event for that item, or an `error` event, gives `stt_failed`.
+`final_redecodes` is `False`, so transcript replacement does not apply.
+The model supplies no word times or confidence scores.
+
+The adapter imports the limits that the Deepgram adapter uses. The Deepgram adapter sets 128 received messages and 4096 UTF-8 bytes in one transcript event. The client protocol sets 16000 JSON-escaped transcript bytes.
+The complete transcript budget includes all kept items and separator spaces.
+
+The WebSocket message limit is 262144 bytes. The wait for the last transcript has a 15-second default limit.
+The input audio limit is 15 seconds. Cancellation closes the connection and clears kept transcript text.
+
+### Audio rate check
+
+Date: 2026-11-02 (UTC). The live service refused the 16 kHz transcription format with this error:
+
+```text
+Invalid 'session.audio.input.format.rate': integer below minimum value. Expected a value >= 24000, but got 16000 instead.
+```
+
+The error code was `integer_below_min_value`. A 24 kHz session update succeeded with provider turn detection off.
+The adapter always sends 24 kHz. It has no rate option or 16 kHz output branch.
+See [verification](../verification.md#openai-live-transcription) for replay results.
+
+### Retention
+
+OpenAI keeps abuse-monitoring logs for a maximum of 30 days by default. These logs can contain customer content.
+The data-controls page states that longer retention can be necessary for law or the protection of services.
+
+OpenAI approval is necessary for the `Zero Data Retention` and `Modified Abuse Monitoring` controls. More conditions apply to these controls.
+The adapter does not stop content retention. A local transcript setting does not change the cloud provider's retention policy.
 
 ## Deepgram retention and data use
 

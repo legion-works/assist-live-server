@@ -3476,3 +3476,84 @@ uv run --locked python "$WORKSPACE/assist-live/tools/check_public_tree.py" --his
 git diff --check
 python3 "$STE_CHECKER" docs/verification.md
 ```
+
+## OpenAI live transcription
+
+Date: 2026-11-02 (UTC).
+
+The `openai` STT provider declares destination `cloud`. Local-only mode refuses it before construction and at request selection.
+Each turn uses one transcription WebSocket session with `gpt-live-transcribe` and provider turn detection off.
+Only the server end decision causes `input_audio_buffer.commit`.
+The adapter selects the last transcript by the committed `item_id`, not event arrival order.
+The [public design record](https://github.com/legion-works/assist-live/blob/main/docs/design.md) gives the contract.
+
+### Mocked protocol and faults
+
+The first command ran before the adapter and configuration changes:
+
+```sh
+uv run --locked pytest tests/providers/test_openai_stt.py -q
+```
+
+RED result: `45 failed`. The adapter, provider registry entry, and app mappings were missing.
+After implementation, the OpenAI and adjacent Deepgram, destination, and startup tests gave `142 passed`.
+The live rate check below then removed the rejected 16 kHz option and its tests. The last OpenAI suite gives `39 passed`.
+A test for removal of that option first gave `DID NOT RAISE TypeError` before the removal.
+
+The tests check the session configuration, header-only authentication, deltas for each item, and `final` selection with unrelated events first.
+They check provider errors, redirects, message limits, transcript limits, `final` timeout, audio limits, cancellation, and local-only refusal.
+They also check app options, environment mapping, and all five `delay` values.
+The resampling test checks 16000 input samples against 24000 output samples and a 1000 Hz sine frequency.
+It checks the same output for one complete push, 321-sample pushes, and one-sample pushes.
+
+Four isolated valid-Python mutations gave named assertion failures:
+
+| Mutation | Assertion |
+|---|---|
+| Commit during audio input | `commit sent before end decision` |
+| Use the first completed item | `final selected by arrival order, not committed item ID` |
+| Remove the segment limit | `remote limit did not close socket` |
+| Put the API key in an error | `credential leaked in exception` |
+
+The mutation copies did not change production files. No dependency changed.
+
+### Live rate and replay check
+
+The live service refused the 16 kHz transcription configuration with this error:
+
+```text
+Invalid 'session.audio.input.format.rate': integer below minimum value. Expected a value >= 24000, but got 16000 instead.
+```
+
+The response type was `invalid_request_error`, with code `integer_below_min_value` and parameter `session.audio.input.format.rate`.
+A 24 kHz `session.update` succeeded with `gpt-live-transcribe` and `turn_detection: null`.
+The two configuration probes sent no audio. The adapter always changes 16 kHz input to 24 kHz output, with no rate setting.
+
+The replay used the 50 tuning recordings, numeric manifest positions `201` through `250`, with `delay: low`.
+Each source WAV gave the specified SHA-256 from the manifest and its filename before replay.
+The adapter and server gateway used the default local turn detector, 32 ms real-time input frames, and at most 2 seconds of audio without voice.
+The shared `assist-live tools/result_text.py:words` function supplied the rules to compare text.
+Word errors use the pooled edit distance. Percentiles use NumPy linear interpolation.
+
+| Rate | Accepted | Clips with a final result | Word errors | End-decision to final p50/p90 |
+|---|---|---:|---:|---:|
+| 16000 Hz | No | Not run | Not measured | Not measured |
+| 24000 Hz | Yes | 50/50 | 34/348 (9.7701%) | 1006.28/1068.59 ms |
+
+The replay sent 3.224533 minutes of audio, with trailing audio without voice in this total. The approved limit was 30 minutes.
+The rate rule selects 24 kHz because the service refused 16 kHz.
+The test made no local audio or transcript artifact. It kept numeric recording results and aggregate measurements only.
+This is a tuning result, not a held-out or target-device acceptance result.
+
+Acceptance commands, after the last edit:
+
+```sh
+uv run --locked ruff format --check
+uv run --locked ruff check --no-cache .
+PRIVATE_DENYLIST="$PRIVATE_DENYLIST" ASSIST_LIVE_MODEL_CACHE="$TURN_MODEL_CACHE" task check
+UV_PROJECT_ENVIRONMENT="$FLOOR_ENV" uv run --locked --python 3.14.2 pytest tests/ -q
+UV_OFFLINE=1 unshare -rn sh -c 'ip link set lo up && uv run --locked pytest tests/ -q'
+python3 "$WORKSPACE/assist-live/tools/check_public_tree.py" --root . --private-denylist "$PRIVATE_DENYLIST"
+git diff --check
+python3 "$STE_CHECKER" docs/configuration.md docs/providers/cloud.md docs/verification.md
+```

@@ -99,6 +99,7 @@ type ProviderFactory = Callable[..., Awaitable[STTProvider]]
 PROVIDER_DESTINATIONS: dict[str, Destination] = {
     "parakeet": "local",
     "deepgram": "cloud",
+    "openai": "cloud",
 }
 
 
@@ -131,6 +132,16 @@ async def _load_deepgram(api_key: str) -> STTProvider:
     return DeepgramProvider(api_key)
 
 
+async def _load_openai(api_key: str) -> STTProvider:
+    import os
+
+    from .openai_stt import OpenAIProvider
+
+    return OpenAIProvider(
+        api_key, delay=os.environ.get("OPENAI_TRANSCRIPTION_DELAY", "low")
+    )
+
+
 def provider_factory(name: str | None = None, *, mode: str = "all") -> ProviderFactory:
     if mode == "local_streaming":
         from .streaming_local import no_streaming_default
@@ -141,6 +152,8 @@ def provider_factory(name: str | None = None, *, mode: str = "all") -> ProviderF
         raise ValueError(f"unknown STT provider: {name}")
     if name == "deepgram":
         return _load_deepgram
+    if name == "openai":
+        return _load_openai
     from .parakeet import ParakeetProvider
 
     return ParakeetProvider.load

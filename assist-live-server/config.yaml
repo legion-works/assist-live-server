@@ -22,18 +22,22 @@ options:
   speaker_url: ""
   download_models: true
   deepgram_api_key: ""
+  openai_api_key: ""
+  openai_transcription_delay: low
   elevenlabs_api_key: ""
   elevenlabs_voice_id: ""
   elevenlabs_voice_name: ""
   elevenlabs_voice_language: ""
 schema:
-  stt_provider: list(parakeet|deepgram|none)
+  stt_provider: list(parakeet|deepgram|openai|none)
   tts_provider: list(piper|elevenlabs|none)
   local_only: bool
   record_transcripts: bool
   speaker_url: str
   download_models: bool
   deepgram_api_key: password
+  openai_api_key: password
+  openai_transcription_delay: list(minimal|low|medium|high|xhigh)
   elevenlabs_api_key: password
   elevenlabs_voice_id: str
   elevenlabs_voice_name: str

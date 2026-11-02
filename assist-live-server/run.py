@@ -10,6 +10,8 @@ OPTIONS = {
     "speaker_url": "ASSIST_LIVE_SPEAKER_URL",
     "download_models": "ASSIST_LIVE_DOWNLOAD_MODELS",
     "deepgram_api_key": "DEEPGRAM_API_KEY",
+    "openai_api_key": "OPENAI_API_KEY",
+    "openai_transcription_delay": "OPENAI_TRANSCRIPTION_DELAY",
     "elevenlabs_api_key": "ELEVENLABS_API_KEY",
     "elevenlabs_voice_id": "ELEVENLABS_VOICE_ID",
     "elevenlabs_voice_name": "ELEVENLABS_VOICE_NAME",

@@ -16,20 +16,29 @@ The store's initial value does not add a different switch when it runs in the se
 
 | Option | Default | Purpose |
 |---|---|---|
-| `stt_provider` | `parakeet` | Select `parakeet`, `deepgram`, or `None` to disable STT. |
+| `stt_provider` | `parakeet` | Select `parakeet`, `deepgram`, `openai`, or `None` to disable STT. |
 | `tts_provider` | `piper` | Select `piper`, `elevenlabs`, or `None` to disable TTS. |
 | `local_only` | `True` | Refuse cloud providers and non-local speaker addresses. |
 | `record_transcripts` | `False` | Store `final` transcripts only when the turn also opts in. |
 | `speaker_url` | `None` | Disable speaker identification unless an explicit HTTP destination is set. |
 
-Parakeet and Piper have destination `local`. Deepgram and ElevenLabs have destination `cloud`.
+Parakeet and Piper have destination `local`. Deepgram, OpenAI, and ElevenLabs have destination `cloud`.
 The factory loads only the selected providers.
 
 The STT and TTS `provider_names()`, `provider_destination()`, and `provider_factory()` helpers are the registry source for configuration.
 The STT helper's explicit `mode="local_compatible"` filter lists local providers only. Its default lists all available providers.
 
-`DEEPGRAM_API_KEY` and `ELEVENLABS_API_KEY` supply credentials for a selected cloud provider.
+`DEEPGRAM_API_KEY`, `OPENAI_API_KEY`, and `ELEVENLABS_API_KEY` supply credentials for a selected cloud provider.
 A credential does not select a provider. `local_only=True` refuses cloud selection before construction and at each request selection.
+
+For OpenAI STT, select `openai` and set `local_only=False`.
+The provider uses one `gpt-live-transcribe` realtime transcription session for each turn.
+It changes mono 16 kHz PCM16 input to 24 kHz. The server turn detector controls the commit.
+
+`OPENAI_TRANSCRIPTION_DELAY` sets the transcription `delay` value. Its default is `low`.
+The permitted values are `minimal`, `low`, `medium`, `high`, and `xhigh`.
+The app options are `openai_api_key` (password field) and `openai_transcription_delay`.
+See [cloud retention and protocol information](providers/cloud.md#openai-live-transcription) before you select this cloud provider.
 
 The `backend`, `audio_gateway`, `tts_gateway`, and `tts_provider` arguments stay available for embedding code.
 They cannot accompany `providers`. That embedding code owns its provider policy.
@@ -177,6 +186,8 @@ This stops ONNX Runtime from sending its default telemetry data. It also applies
 | `ASSIST_LIVE_SPEAKER_URL` | empty | `speaker_url` | Set the speaker destination. |
 | `ASSIST_LIVE_DOWNLOAD_MODELS` | `true` | `download_models` | Download missing selected startup files. |
 | `DEEPGRAM_API_KEY` | empty | `deepgram_api_key` | Supply a runtime secret. |
+| `OPENAI_API_KEY` | empty | `openai_api_key` | Supply a runtime secret for OpenAI STT. |
+| `OPENAI_TRANSCRIPTION_DELAY` | `low` | `openai_transcription_delay` | Select `minimal`, `low`, `medium`, `high`, or `xhigh`. |
 | `ELEVENLABS_API_KEY` | empty | `elevenlabs_api_key` | Supply a runtime secret. |
 | `ELEVENLABS_VOICE_ID` | empty | `elevenlabs_voice_id` | Set the configured TTS voice. |
 | `ELEVENLABS_VOICE_NAME` | voice identifier | `elevenlabs_voice_name` | Set its display name. |
