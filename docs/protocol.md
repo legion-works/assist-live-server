@@ -462,8 +462,8 @@ For the last fragment at input end, the count includes all input characters, wit
 The gateway's last added marker also gives the total input count.
 The values do not decrease. Equal values and `0` are correct.
 
-Piper uses request sentence positions.
-ElevenLabs gives a position only when the provider's `alignment` text agrees with the request sentence text after whitespace normalization.
+Piper uses request sentence positions, before the spoken-text changes below.
+ElevenLabs compares `alignment` with the changed sentence after whitespace normalization, then uses that sentence's request position.
 It compares the text of each sentence, not sentence counts.
 After the first mismatch, that marker and each subsequent marker have no position.
 
@@ -507,6 +507,28 @@ Use the typed API for native Piper audio.
 The two client TTS methods divide input parts into `text` messages at code-point boundaries.
 Each complete encoded message fits the 16384-byte control limit, with its JSON envelope and JSON-escaped text.
 The receiver gets the complete input text without added or removed characters.
+
+### Spoken text
+
+Before synthesis, the server removes Markdown marks through one shared normalizer for Piper, ElevenLabs, and the legacy backend.
+The public [design record, "Spoken text"](https://github.com/legion-works/assist-live/blob/311f984/docs/design.md#spoken-text) gives the rules.
+
+The normalizer removes heading, quotation, and list marks at line starts.
+It removes horizontal-rule lines, code-fence lines, HTML tags, and table separator rows.
+It keeps the text from `[text](address)` and `![text](address)` without the address. A pipe between table cells becomes a comma.
+It removes emphasis marks and inline-code backticks only when a word touches one side, not the two sides.
+Thus arithmetic, `snake_case`, and URLs without Markdown stay unchanged.
+
+A heading or list line ends a sentence, also without end punctuation.
+The server holds streamed `[text](address)` text for a maximum of 2048 characters.
+If no closing mark is available at that limit, the held text goes through unchanged.
+HTML tag candidates use the same limit. The text `x < 5 and y > 3` stays unchanged.
+The normalizer processes text in linear time.
+
+Sentence markers and sentence timing events count request characters before normalization, not the changed text.
+The server sends no sentence without letters or digits to the provider. The next marker includes those skipped characters.
+A nonempty reply with only marks keeps the no-audio `tts_failed` result, so HA can use its fallback.
+No protocol or client field changes.
 
 `create_app(..., tts_provider=provider)` connects a sentence-level provider to this route.
 The provider registry selects `PiperProvider.load(cache)` for `piper`. Loading uses the two hash-checked voice files in the external cache.

@@ -127,10 +127,10 @@ class ElevenLabsProvider:
         complete = False
         input_ended = False
         aligned = False
-        assembler = SentenceAssembler()
+        assembler = SentenceAssembler(spoken=False)
         request_assembler = SentenceAssembler()
-        request_sentences: deque[tuple[str, int]] = deque()
-        alignment_sentences: deque[str] = deque()
+        request_sentences: deque[tuple[str, int, bool]] = deque()
+        alignment_sentences: deque[tuple[str, int]] = deque()
         positions_proved = True
         sentence = 0
         audio_bytes = 0
@@ -163,12 +163,18 @@ class ElevenLabsProvider:
                             if sent_characters + len(part) > MAX_TEXT_CHARACTERS:
                                 raise ValueError("ElevenLabs text limit exceeded")
                             request_sentences.extend(
-                                (" ".join(sentence.split()), end)
+                                (
+                                    " ".join(sentence.split()),
+                                    end,
+                                    end in request_assembler.line_ends,
+                                )
                                 for sentence, end in request_assembler.feed_positions(
                                     part
                                 )
                             )
-                            await ws.send_json({"text": part})
+                            changed = request_assembler.spoken_part
+                            if changed:
+                                await ws.send_json({"text": changed})
                             sent_characters += len(part)
                             allowance = (
                                 STREAM_MARGIN_SECONDS
@@ -176,13 +182,17 @@ class ElevenLabsProvider:
                             )
                             deadline = started + allowance
                             audio_limit = int(allowance * bytes_per_second)
-                    if "".join(request_assembler.buffer).strip():
-                        request_sentences.append(
-                            (
-                                " ".join("".join(request_assembler.buffer).split()),
-                                request_assembler.received,
-                            )
+                    request_sentences.extend(
+                        (
+                            " ".join(sentence.split()),
+                            end,
+                            end in request_assembler.line_ends,
                         )
+                        for sentence, end in request_assembler.finish_positions()
+                    )
+                    changed = request_assembler.spoken_part
+                    if changed:
+                        await ws.send_json({"text": changed})
                     await ws.send_json({"text": " ", "flush": True})
                     await ws.send_json({"text": ""})
                     input_ended = True
@@ -252,11 +262,17 @@ class ElevenLabsProvider:
                     if alignment_bytes > MAX_ALIGNMENT_BYTES:
                         raise ValueError("ElevenLabs alignment limit exceeded")
                     aligned = True
-                    alignment_sentences.extend(assembler.feed(alignment_text))
+                    alignment_sentences.extend(
+                        (" ".join(fragment.split()), 0)
+                        for fragment in assembler.feed(alignment_text)
+                    )
                 if value.get("isFinal") is True:
                     complete = True
-                    if aligned and "".join(assembler.buffer).strip():
-                        alignment_sentences.append("".join(assembler.buffer).strip())
+                    if aligned:
+                        alignment_sentences.extend(
+                            (" ".join(fragment.split()), 0)
+                            for fragment, _ in assembler.finish_positions()
+                        )
                 while alignment_sentences:
                     if (
                         positions_proved
@@ -267,14 +283,32 @@ class ElevenLabsProvider:
                         break
                     if monotonic() >= deadline:
                         raise ValueError("ElevenLabs stream deadline exceeded")
-                    aligned_sentence = alignment_sentences.popleft()
+                    aligned_sentence, aligned_offset = alignment_sentences.popleft()
                     text_end = None
                     # A mismatch breaks the proof for all subsequent sentences.
                     # Normalized alignment cannot prove a request position.
                     if positions_proved:
                         if request_sentences:
-                            requested_sentence, endpoint = request_sentences.popleft()
-                            if " ".join(aligned_sentence.split()) == requested_sentence:
+                            requested_sentence, endpoint, line_end = (
+                                request_sentences.popleft()
+                            )
+                            if line_end and aligned_sentence.startswith(
+                                requested_sentence + " ", aligned_offset
+                            ):
+                                # A heading can end without punctuation. The raw
+                                # alignment can then include the next sentence.
+                                alignment_sentences.appendleft(
+                                    (
+                                        aligned_sentence,
+                                        aligned_offset + len(requested_sentence) + 1,
+                                    )
+                                )
+                                text_end = endpoint
+                            elif len(aligned_sentence) - aligned_offset == len(
+                                requested_sentence
+                            ) and aligned_sentence.startswith(
+                                requested_sentence, aligned_offset
+                            ):
                                 text_end = endpoint
                             else:
                                 positions_proved = False

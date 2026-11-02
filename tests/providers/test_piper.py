@@ -12,7 +12,11 @@ from types import SimpleNamespace
 import pytest
 from assist_live_client.models import TTSAudio, TTSFormat, TTSSentenceEnd
 from assist_live_server.providers.piper import PiperProvider
-from assist_live_server.providers.tts import provider_factory, provider_names
+from assist_live_server.providers.tts import (
+    SentenceAssembler,
+    provider_factory,
+    provider_names,
+)
 
 VOICE = "en_US-lessac-medium"
 
@@ -32,7 +36,7 @@ def test_public_sentence_assembler_keeps_split_text_boundaries():
         ("One. Two! Tail", [4, 9, 14]),
         ("Dr. Test uses 3.5 units. Done.", [24, 30]),
         ("Wait...\n[Yes.] “Fine.” Tail", [7, 14, 22, 27]),
-        ("\U0001f642. e\u0301! \U0001f469\u200d\U0001f680", [2, 6, 10]),
+        ("Hi \U0001f642. e\u0301! Go \U0001f469\u200d\U0001f680", [5, 9, 16]),
         ("  No punctuation  ", [18]),
         ("No punctuation", [14]),
     ],
@@ -91,16 +95,27 @@ def test_random_sentence_positions_preserve_spoken_prefix():
             model = Voice()
             spoken = []
             previous = 0
+            reference = SentenceAssembler(spoken=False)
+            spans = reference.feed_positions(text) + reference.finish_positions()
+            expected = [(s, end) for s, end in spans if any(c.isalnum() for c in s)]
+            index = 0
             async for item in PiperProvider(model).stream(parts(*chunks), VOICE):
                 if isinstance(item, TTSAudio):
                     spoken.append(item.data.decode("utf-16le"))
                 elif isinstance(item, TTSSentenceEnd):
-                    assert previous <= item.text_end <= len(text)
-                    assert " ".join(text[: item.text_end].split()) == " ".join(
-                        " ".join(spoken).split()
+                    assert previous < item.text_end <= len(text)
+                    expected_text, expected_end = expected[index]
+                    assert item.text_end == expected_end
+                    assert " ".join(spoken[-1].split()) == " ".join(
+                        expected_text.split()
                     )
+                    for span, end in spans:
+                        if previous < end < expected_end:
+                            assert not any(c.isalnum() for c in span)
                     previous = item.text_end
-            assert not text[previous:].strip()
+                    index += 1
+            assert index == len(expected)
+            assert not any(c.isalnum() for c in text[previous:])
 
     asyncio.run(run())
 

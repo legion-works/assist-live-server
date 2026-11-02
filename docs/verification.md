@@ -3669,3 +3669,54 @@ The same fixtures keep export and subscription events readable without conversat
 The initial read tests gave `6 failed, 41 deselected`. The repaired tests gave `6 passed, 41 deselected`.
 A scratch mutation removes the read compatibility rule and drops the turn during validation.
 It parses and gives unsatisfactory results for all four historical fixtures at `legacy_turn_read_dropped`.
+
+## Spoken text before synthesis
+
+The public [design record, "Spoken text"](https://github.com/legion-works/assist-live/blob/311f984/docs/design.md#spoken-text) gives the contract.
+One streaming normalizer supplies Piper, ElevenLabs, and the legacy backend.
+Sentence markers and timing events keep request-text positions after the normalizer removes Markdown marks.
+ElevenLabs compares raw `alignment` with changed text before it gives a request position.
+
+The first provider tests ran before implementation on `7ab511c` and found the missing Markdown rules.
+The isolated base with corrected fixtures gave `23 failed, 3 passed, 1 deselected`.
+The operation-count test did not run because the base does not contain the new normalizer.
+
+The synthetic story includes a title, heading, lists, `[text](address)`, inline code, fenced code, and table.
+The Piper model fake receives spoken sentences without those marks. The test checks correct request endpoints.
+Other tests check each input division, unchanged arithmetic and identifiers, Unicode positions, HTML attributes, and CRLF line endings.
+
+The hold-limit tests check 2047, 2048, and 2049 characters, plus release before input end.
+An HTML tag candidate without a closing `>` has the same 2048-character hold limit and then goes through unchanged.
+A 100000-character reply with an unclosed `<` gets its first audio before input end.
+The text `x < 5 and y > 3` stays unchanged.
+
+Operation counts at two input lengths check linear work for Markdown addresses, line prefixes, and emphasis marks.
+The sentence assembler tests also check time scaling and event-loop heartbeats.
+
+Marks-only and emoji-only sentences cause no synthesis call. The next marker includes their request characters.
+A marks-only reply keeps the no-audio fallback result.
+Fake raw cloud `alignment` checks changed text, stream divisions, heading boundaries, and request offsets before normalization.
+Legacy backend tests keep the correct, incorrect-index, and missing-marker checks.
+
+Fifteen isolated valid-Python mutations each give a failure at a named assertion.
+They disable line marks, horizontal rules, fences, emphasis, Markdown address removal, HTML tags, table rows, table cells, or line sentence ends.
+Other mutations use changed-text positions, remove the 2048-character hold limit, or send a marks-only sentence.
+A cloud-specific mutation also uses a changed-text position.
+
+One more mutation accepts a word after an unpunctuated fragment. The sentence-equality assertion finds that incorrect position.
+The tag-hold mutation stops first audio before input end. The early-audio assertion finds that stall.
+The mutation copies do not change the working source.
+
+Commands from the repository root:
+
+```sh
+uv run --locked ruff format --check .
+uv run --locked ruff check --no-cache .
+PRIVATE_DENYLIST="$PRIVATE_DENYLIST" ASSIST_LIVE_MODEL_CACHE="$TURN_MODEL_CACHE" task check
+UV_PROJECT_ENVIRONMENT="$FLOOR_ENV" ASSIST_LIVE_MODEL_CACHE="$TURN_MODEL_CACHE" uv run --locked --python 3.14.2 pytest tests/ -q
+ASSIST_LIVE_MODEL_CACHE="$TURN_MODEL_CACHE" unshare -rn sh -c 'ip link set lo up && UV_OFFLINE=1 uv run --locked pytest tests/ -q'
+python3 "$STE_CHECKER" docs/protocol.md docs/verification.md
+git diff --check
+```
+
+These tests use no live cloud service, device, or household audio.

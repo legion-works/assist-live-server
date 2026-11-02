@@ -161,11 +161,20 @@ class TTSGateway:
                     for _, endpoint in assembler.feed_positions(chunk):
                         if len(text_ready) < sentence_limit:
                             text_ready.append((endpoint, last_text_ms))
-                    if len(text_ready) >= sentence_limit:
+                    if len(text_ready) >= sentence_limit and self.backend is None:
                         assembler = None
-                yield chunk
-            if assembler is not None and "".join(assembler.buffer).strip():
-                text_ready.append((received, last_text_ms))
+                if self.backend is not None:
+                    assert assembler is not None
+                    if assembler.spoken_part:
+                        yield assembler.spoken_part
+                else:
+                    yield chunk
+            if assembler is not None:
+                for _, endpoint in assembler.finish_positions():
+                    if len(text_ready) < sentence_limit:
+                        text_ready.append((endpoint, last_text_ms))
+                if self.backend is not None and assembler.spoken_part:
+                    yield assembler.spoken_part
 
         try:
             require_destination(self.destination, self.local_only)

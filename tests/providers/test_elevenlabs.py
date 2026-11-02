@@ -89,7 +89,7 @@ def test_normalized_alignment_has_no_request_sentence_positions(cloud_ws_server)
             async for message in ws:
                 value = message.json()
                 if value == {"text": ""}:
-                    alignment = "Set three point five.  \U0001f642! Tail"
+                    alignment = "Set three point five.  Hi \U0001f642! Tail"
                     await ws.send_json(
                         {
                             "audio": base64.b64encode(b"\x01\0").decode(),
@@ -109,7 +109,7 @@ def test_normalized_alignment_has_no_request_sentence_positions(cloud_ws_server)
             items = [
                 item
                 async for item in provider.stream(
-                    parts(*"Set 3.5.\n\U0001f642! Tail  "), "test-voice"
+                    parts(*"Set 3.5.\nHi \U0001f642! Tail  "), "test-voice"
                 )
             ]
             assert [
@@ -167,14 +167,15 @@ def test_normalized_alignment_has_no_request_sentence_positions(cloud_ws_server)
             [4, None, None],
         ),
         (
-            "One.  \nTwo.\t\U0001f642!",
-            [{"alignment": " One. \tTw"}, {"alignment": "o. \U0001f642!"}],
-            [4, 11, 14],
+            "One.  \nTwo.\tHi \U0001f642!",
+            [{"alignment": " One. \tTw"}, {"alignment": "o. Hi \U0001f642!"}],
+            [4, 11, 17],
         ),
         ("One.", [{"alignment": "One. Two."}], [4, None]),
         ("One.", [{"normalizedAlignment": "One. Two."}], [None, None]),
         ("One. Two. Three.", [{"alignment": "One. Bad. Three."}], [4, None, None]),
         ("Tail  ", [{"alignment": "Tail"}], [6]),
+        ("Tail", [{"alignment": "Tail extra."}], [None]),
     ],
     ids=[
         "month-expansion",
@@ -189,6 +190,7 @@ def test_normalized_alignment_has_no_request_sentence_positions(cloud_ws_server)
         "extra-normalized-sentence",
         "same-length-middle-mismatch",
         "last-fragment-total",
+        "extra-unpunctuated-tail",
     ],
 )
 def test_alignment_positions_require_matching_request_sentences(
@@ -220,7 +222,9 @@ def test_alignment_positions_require_matching_request_sentences(
                 async for item in provider.stream(parts(*request_text), "test-voice")
             ]
             markers = [item for item in items if isinstance(item, TTSSentenceEnd)]
-            assert [item.text_end for item in markers] == expected
+            assert [item.text_end for item in markers] == expected, (
+                "alignment request sentence equality"
+            )
             assert [item.sentence for item in markers] == list(range(len(expected)))
             assert b"".join(
                 item.data for item in items if isinstance(item, TTSAudio)

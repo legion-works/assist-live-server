@@ -3,13 +3,14 @@
 import asyncio
 import os
 import threading
-from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from typing import Protocol
 
 from assist_live_client.models import TTSItem
 
 from ..destinations import Destination
+from ..spoken import SpokenText
 
 
 class TTSBusyError(RuntimeError):
@@ -54,7 +55,7 @@ _CLOSING = frozenset("\"'”’)]")
 
 
 class SentenceAssembler:
-    def __init__(self) -> None:
+    def __init__(self, *, spoken: bool = True) -> None:
         self.buffer: list[str] = []
         self._boundary = 0
         self._period = False
@@ -62,6 +63,13 @@ class SentenceAssembler:
         self._opening = True
         self._initials = 0
         self.received = 0
+        self._position = 0
+        self._spoken = SpokenText() if spoken else None
+        self._audible = False
+        self._unsent: list[str] = []
+        self._trailing = False
+        self.spoken_part = ""
+        self.line_ends: set[int] = set()
 
     def _read_token(self, character: str) -> None:
         if character.isspace():
@@ -90,16 +98,49 @@ class SentenceAssembler:
         return [sentence for sentence, _ in self.feed_positions(part)]
 
     def feed_positions(self, part: str) -> list[tuple[str, int]]:
+        start = self.received
+        self.received += len(part)
+        characters = (
+            self._spoken.feed(part)
+            if self._spoken is not None
+            else ((char, start + index + 1, False) for index, char in enumerate(part))
+        )
+        return self._scan(characters)
+
+    def _scan(
+        self, characters: Iterator[tuple[str, int, bool]]
+    ) -> list[tuple[str, int]]:
         ready = []
-        for character in part:
+        output = []
+        self.line_ends.clear()
+        for character, end, forced in characters:
+            was_audible = self._audible or self._trailing
+            if forced:
+                fragment = "".join(self.buffer).strip()
+                if fragment and any(c.isalnum() for c in fragment):
+                    ready.append((fragment, end))
+                    self.line_ends.add(end)
+                self.buffer.clear()
+                self._boundary = 0
+                self._read_token(" ")
+                self._audible = False
+                self._unsent.clear()
+                self._trailing = was_audible
+            if not character:
+                self._position = end
+                continue
             if self._boundary and character.isspace():
                 if not self._period or not (
                     self._token in _ABBREVIATIONS or self._initials == 0
                 ):
                     sentence = "".join(self.buffer).strip()
-                    if sentence:
-                        ready.append((sentence, self.received))
+                    if sentence and (
+                        self._spoken is None or any(c.isalnum() for c in sentence)
+                    ):
+                        ready.append((sentence, self._position))
                     self.buffer.clear()
+                    self._audible = False
+                    self._unsent.clear()
                 self._boundary = 0
             elif character in ".!?":
                 self._period = self._boundary != 1 and character == "."
@@ -112,20 +153,48 @@ class SentenceAssembler:
             # Each character advances the scan once, even when parts contain
             # only one character. No old prefix is scanned or copied again.
             self.buffer.append(character)
-            self.received += 1
+            if self._spoken is not None:
+                if self._audible or (character.isspace() and was_audible):
+                    output.append(character)
+                elif character.isalnum():
+                    output.extend(self._unsent)
+                    self._unsent.clear()
+                    output.append(character)
+                    self._audible = True
+                else:
+                    self._unsent.append(character)
+                self._trailing = False
+            self._position = end
             self._read_token(character)
         if len(self.buffer) > 16384:
             raise ValueError("TTS sentence exceeds 16384 characters")
+        self.spoken_part = "".join(output)
+        return ready
+
+    def finish_positions(self) -> list[tuple[str, int]]:
+        ready = self._scan(self._spoken.finish()) if self._spoken is not None else []
+        fragment = "".join(self.buffer).strip()
+        if fragment and (self._spoken is None or any(c.isalnum() for c in fragment)):
+            ready.append((fragment, self.received))
+        self.buffer.clear()
         return ready
 
 
 async def sentences(text: AsyncIterator[str]) -> AsyncGenerator[tuple[str, int]]:
     assembler = SentenceAssembler()
+    scanned = 0
     async for part in text:
-        for sentence in assembler.feed_positions(part):
-            yield sentence
-    if fragment := "".join(assembler.buffer).strip():
-        yield fragment, assembler.received
+        for offset in range(0, len(part), 1024):
+            section = part[offset : offset + 1024]
+            for sentence in assembler.feed_positions(section):
+                yield sentence
+            scanned += len(section)
+            if scanned >= 1024:
+                # Limit event-loop work when a reply has no sentence boundary.
+                await asyncio.sleep(0)
+                scanned = 0
+    for sentence in assembler.finish_positions():
+        yield sentence
 
 
 type ProviderFactory = Callable[..., Awaitable[TTSProvider]]
