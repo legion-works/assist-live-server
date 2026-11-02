@@ -385,13 +385,10 @@ def create_app(
             stored_integer(payload["opened_utc_ns"])
         turn = TurnOpen(**payload)
         allowed(request, turn.satellite)
-        existing = await storage().get_turn(turn.turn_id)
-        if existing is not None:
-            raise web.HTTPConflict(text="turn already exists")
         try:
             await storage().open_turn(turn)
         except TurnExistsError:
-            raise web.HTTPConflict(text="turn already exists") from None
+            return web.json_response({"error": "turn_conflict"}, status=409)
         except ValueError as error:
             if str(error) in {"late_open_too_old", "late_open_in_future"}:
                 return web.json_response({"error": str(error)}, status=400)

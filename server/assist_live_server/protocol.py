@@ -26,7 +26,7 @@ MAX_DEVICE_PER_DEVICE = 4
 
 
 class TurnExistsError(ValueError):
-    """The turn identifier already exists in the store."""
+    """The turn identifier belongs to a different open request."""
 
 
 class IntegerRangeError(ValueError):

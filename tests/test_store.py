@@ -103,7 +103,7 @@ def test_open_turn_removes_only_unusable_parent(tmp_path, caplog, parent_kind):
     asyncio.run(run())
 
 
-def test_duplicate_turn_uses_typed_error(tmp_path):
+def test_conflicting_turn_uses_typed_error(tmp_path):
     from assist_live_server.protocol import TurnExistsError
     from assist_live_server.store import SQLiteStore
 
@@ -113,7 +113,7 @@ def test_duplicate_turn_uses_typed_error(tmp_path):
             turn = TurnOpen(str(uuid7()), "satellite-a", "voice", None, None)
             await store.open_turn(turn)
             with pytest.raises(TurnExistsError):
-                await store.open_turn(turn)
+                await store.open_turn(replace(turn, record_transcripts=True))
         finally:
             store.close()
 

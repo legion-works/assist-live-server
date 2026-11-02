@@ -385,7 +385,34 @@ After that handler exits, a different stream can use the same stored turn ID if 
 The audio route checks turn existence and satellite access, not turn status or previous STT records.
 Sequential streams can add different STT records to that ID. This rule does not keep a permanent stream lock.
 
+### Turn open
+
 Open a turn first with `POST /v1/turns` and a complete `TurnOpen` record.
+The public [design record, "Background timing events"](https://github.com/legion-works/assist-live/blob/7c9eeda/docs/design.md#background-timing-events) specifies a turn open that is safe to send again.
+
+For a turn identifier in the store, the server compares these values:
+
+- Satellite, turn type, and parent identifier.
+- Conversation identifier and transcript permission.
+- Open time, with an omitted value.
+
+Equal values give HTTP `200` with `{"version": 1}`, as for a new turn.
+The retry changes no row, status, `late_open` mark, counter, or event. It sends no store notification.
+A different value gives HTTP `409` with `{"error": "turn_conflict"}`.
+The client keeps `ProtocolError(kind="refused")` for this conflict, without a different server-code field.
+
+The server compares the received parent. Parent removal because of a missing parent or a different satellite does not change this value.
+An omitted open time is different from the server-assigned time.
+Private stored fields keep these received values and do not occur in public records.
+The old-row rule reads an invalid conversation identifier as `null` before the server compares requests.
+
+Rows stored before this rule use their stored parent and open time because the received values are unavailable.
+A retry can get `turn_conflict` if the server had cleared its parent or supplied its open time.
+Two equal concurrent opens give one stored turn and two success responses.
+Concurrent opens with a different value give one success and one `turn_conflict`.
+
+### Initial audio control
+
 The initial control message selects version `1`, mode `stt` or `tts`, and functions.
 The `capabilities` functions are `stt`, `tts`, `events`, and `speaker_result`.
 The selected mode must occur in the `capabilities` list.

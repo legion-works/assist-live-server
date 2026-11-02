@@ -308,21 +308,35 @@ class SQLiteStore:
             self._bad_row(satellite, kind, error)
             return None
 
-    def _decode_turn(self, raw: str, satellite: str) -> TurnOpen | None:
+    def _decode_turn(
+        self,
+        raw: str,
+        satellite: str,
+        *,
+        received: bool = False,
+        count_errors: bool = True,
+    ) -> TurnOpen | None:
         try:
             value = json.loads(raw)
             value.pop("late_open", None)
+            parent = value.pop("received_parent_turn_id", value.get("parent_turn_id"))
+            opened = value.pop("requested_opened_utc_ns", value.get("opened_utc_ns"))
+            if opened is not None:
+                stored_integer(opened)
             try:
                 turn = TurnOpen(**value)
             except ConversationIdError:
                 value["conversation_id"] = None
                 turn = TurnOpen(**value)
-                self.removed_conversation_ids[satellite] += 1
+                if count_errors:
+                    self.removed_conversation_ids[satellite] += 1
             if turn.satellite != satellite:
                 raise ValueError("stored satellite mismatch")
-            return turn
+            request = replace(turn, parent_turn_id=parent, opened_utc_ns=opened)
+            return request if received else turn
         except ROW_ERRORS as error:
-            self._bad_row(satellite, "turn", error)
+            if count_errors:
+                self._bad_row(satellite, "turn", error)
             return None
 
     def _unmatched(self, event: TimingEvent) -> TimingEvent:
@@ -483,20 +497,32 @@ class SQLiteStore:
 
     def _open_turn(self, turn: TurnOpen) -> None:
         removal = None
-        now = self.now_ns()
-        opened = turn.opened_utc_ns if turn.opened_utc_ns is not None else now
-        stored_integer(opened)
-        if opened < now - self.retention_ns:
-            raise ValueError("late_open_too_old")
-        if opened > now + OPEN_CLOCK_TOLERANCE_NS:
-            raise ValueError("late_open_in_future")
         with self.connection:
             self.connection.execute("BEGIN IMMEDIATE")
+            existing = self.connection.execute(
+                "SELECT payload,satellite FROM turns WHERE turn_id=?", (turn.turn_id,)
+            ).fetchone()
+            if existing is not None:
+                # A retry must not run maintenance or change read counters.
+                if (
+                    self._decode_turn(
+                        existing[0], existing[1], received=True, count_errors=False
+                    )
+                    == turn
+                ):
+                    return
+                raise TurnExistsError("turn_conflict")
+            now = self.now_ns()
+            opened = turn.opened_utc_ns if turn.opened_utc_ns is not None else now
+            stored_integer(opened)
+            if opened < now - self.retention_ns:
+                raise ValueError("late_open_too_old")
+            if opened > now + OPEN_CLOCK_TOLERANCE_NS:
+                raise ValueError("late_open_in_future")
             self._maintain()
-            if self.connection.execute(
-                "SELECT 1 FROM turns WHERE turn_id=?", (turn.turn_id,)
-            ).fetchone():
-                raise TurnExistsError("turn already exists")
+            # Keep received values because parent removal and server time lose them.
+            received_parent = turn.parent_turn_id
+            requested_opened = turn.opened_utc_ns
             if turn.parent_turn_id is not None:
                 parent = self.connection.execute(
                     "SELECT satellite FROM turns WHERE turn_id=?",
@@ -520,6 +546,8 @@ class SQLiteStore:
                             **asdict(turn),
                             "opened_utc_ns": opened,
                             "late_open": opened < now,
+                            "received_parent_turn_id": received_parent,
+                            "requested_opened_utc_ns": requested_opened,
                         }
                     ),
                     opened,
@@ -631,7 +659,10 @@ class SQLiteStore:
         turn = self._decode_turn(row[0], row[2])
         if turn is None:
             return None
-        value: TurnRecord = json.loads(row[0])
+        payload = json.loads(row[0])
+        payload.pop("received_parent_turn_id", None)
+        payload.pop("requested_opened_utc_ns", None)
+        value: TurnRecord = payload
         value["conversation_id"] = turn.conversation_id
         value["status"] = "open" if row[1] == "closing" else row[1]
         value["events"] = [

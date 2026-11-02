@@ -11,7 +11,14 @@ from assist_live_client.protocol import ProtocolError, encode_control
 
 
 @asynccontextmanager
-async def service(tmp_path, policy=False, udp=False, malformed=False, queue_size=128):
+async def service(
+    tmp_path,
+    policy=False,
+    udp=False,
+    malformed=False,
+    queue_size=128,
+    satellites=("satellite-a",),
+):
     from assist_live_server.app import UDP_ADDRESS, create_app
     from assist_live_server.auth import Registry
     from assist_live_server.protocol import TimingIngress
@@ -22,7 +29,7 @@ async def service(tmp_path, policy=False, udp=False, malformed=False, queue_size
     registry = Registry()
     for satellite in ["satellite-a", "satellite-b"]:
         registry.bind(satellite, satellite, b"synthetic-device-key")
-    registry.add_token("synthetic-integration-token", ["satellite-a"])
+    registry.add_token("synthetic-integration-token", satellites)
     ingress = TimingIngress(registry, queue_size=queue_size)
 
     class Backend:
@@ -256,27 +263,24 @@ def test_maintenance_recovers_after_store_error(tmp_path, monkeypatch, caplog):
     asyncio.run(run())
 
 
-def test_concurrent_open_turn_returns_conflict_not_invalid_request(
-    tmp_path, monkeypatch
-):
+def test_concurrent_identical_open_turn_returns_success(tmp_path, monkeypatch):
     from dataclasses import asdict
 
     async def run():
         async with service(tmp_path) as (client, session, store, _, _):
-            original = store.get_turn
+            original = store.open_turn
             release = asyncio.Event()
             reads = 0
 
-            async def simultaneous(turn_id):
+            async def simultaneous(turn):
                 nonlocal reads
-                result = await original(turn_id)
                 reads += 1
                 if reads == 2:
                     release.set()
                 await release.wait()
-                return result
+                await original(turn)
 
-            monkeypatch.setattr(store, "get_turn", simultaneous)
+            monkeypatch.setattr(store, "open_turn", simultaneous)
             turn = TurnOpen(str(uuid7()), "satellite-a", "voice", None, None)
 
             async def post():
@@ -288,7 +292,7 @@ def test_concurrent_open_turn_returns_conflict_not_invalid_request(
                     return response.status
 
             async with asyncio.timeout(2):
-                assert sorted(await asyncio.gather(post(), post())) == [200, 409]
+                assert sorted(await asyncio.gather(post(), post())) == [200, 200]
 
     asyncio.run(run())
 

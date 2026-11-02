@@ -3720,3 +3720,49 @@ git diff --check
 ```
 
 These tests use no live cloud service, device, or household audio.
+
+## Turn open retries
+
+The public [design record, "Background timing events"](https://github.com/legion-works/assist-live/blob/7c9eeda/docs/design.md#background-timing-events) specifies the retry rule.
+Equal received values give the new-turn response without a store change. A different value gives `turn_conflict` with HTTP `409`.
+Private payload fields keep the received parent and optional open time after server normalization.
+Earlier rows use stored values. A cleared parent or server-supplied open time from an earlier row can cause a conflict.
+
+The initial tests on `3905140` gave `25 failed` before the server change.
+The complete regression file against an isolated copy of that base gave `28 failed, 5 passed`.
+The five satisfactory cases check invalid private fields, not retry success.
+
+Command from the repository root:
+
+```sh
+uv run --locked pytest tests/contract/test_turn_open_retry.py tests/contract/test_event_store.py tests/test_store.py -q
+```
+
+Result: `100 passed`. Mypy reported no issues in 48 source files.
+
+The tests compare all six fields, dropped responses, cleared parents, earlier conversation identifiers, and the two concurrent-open cases.
+Snapshots compare each table, SQLite write counts, and in-process counters. A different test checks store notifications.
+
+Public-read tests include turn queries, exports, subscriptions, turn decoding, diagnostics, and metrics.
+Archived clients from `b3b1e16`, `c3aadd3`, `5ac300b`, and `7ab511c` each send an equal request two times without an error.
+
+Three isolated source mutations each gave one failure at a named assertion:
+
+- Always refuse a second open: `identical_retry_response`.
+- Ignore transcript permission: `conflict_compares_record_transcripts`.
+- Write one more turn row on retry: `identical_retry_store_unchanged`.
+
+The mutations did not change the working source or test assertions.
+
+Repository gate commands:
+
+```sh
+uv run --locked ruff format --check .
+uv run --locked ruff check --no-cache .
+PRIVATE_DENYLIST="$PRIVATE_DENYLIST" ASSIST_LIVE_MODEL_CACHE="$TURN_MODEL_CACHE" task check
+UV_PROJECT_ENVIRONMENT="$FLOOR_ENV" ASSIST_LIVE_MODEL_CACHE="$TURN_MODEL_CACHE" uv run --locked --python 3.14.2 pytest tests/ -q
+UV_PROJECT_ENVIRONMENT="$FLOOR_ENV" ASSIST_LIVE_MODEL_CACHE="$TURN_MODEL_CACHE" unshare -rn sh -c 'ip link set lo up && UV_OFFLINE=1 uv run --locked --python 3.14.2 pytest tests/ -q'
+python3 "$STE_CHECKER" docs/protocol.md docs/verification.md
+git diff --check
+uv run --locked python "$PUBLIC_TREE_CHECKER" --history --root . --private-denylist "$PRIVATE_DENYLIST"
+```
