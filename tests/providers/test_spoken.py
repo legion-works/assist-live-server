@@ -109,6 +109,32 @@ def test_spoken_rule(raw, spoken):
     assert ends[-1] == len(raw), "request endpoint"
 
 
+@pytest.mark.parametrize("mark", ["-", "*", "+", "1.", "1)"])
+@pytest.mark.parametrize("ending", ["\n", "  \n", "\r\n", " \t\r\n", ""])
+@pytest.mark.parametrize("streamed", [False, True])
+def test_empty_list_lines_never_reach_tts_and_keep_request_positions(
+    mark, ending, streamed
+):
+    line = mark + ending
+    chunks = list(line) if streamed else [line]
+    assert speak(*chunks) == ([], []), "empty list line must not reach TTS"
+    if ending:
+        raw = "First.\n" + line + "Next."
+        expected = (["First.", "Next."], [6, len(raw)])
+    else:
+        raw = "First\n" + line
+        expected = (["First"], [len(raw)])
+    chunks = list(raw) if streamed else [raw]
+    assert speak(*chunks) == expected, "empty list marks removed at request positions"
+
+
+@pytest.mark.parametrize("digits", ["1990", "5"])
+@pytest.mark.parametrize("ending", ["", "\n", "\r\n", "  \r\n"])
+def test_digit_only_line_without_list_suffix_stays_spoken(digits, ending):
+    raw = digits + ending
+    assert speak(*raw) == ([digits], [len(raw)]), "bare digits are not list marks"
+
+
 STORY = (
     "**The copper bird**.\n# Dawn\n- It woke\n1. It flew\n"
     "Read [the map](https://example.org/map). Use `north`.\n"

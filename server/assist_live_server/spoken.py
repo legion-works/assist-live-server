@@ -113,7 +113,7 @@ class SpokenText:
                 self._prefix.append((char, end))
                 return
         elif kind in {"bullet", "number_end"}:
-            if char in " \t":
+            if char in " \t\r":
                 self._forced = True
                 yield from self._drop_prefix()
                 self._kind = "body"
@@ -149,7 +149,7 @@ class SpokenText:
         yield from self._inline(char, end)
 
     def _end_line(self, end: int, *, final: bool = False) -> Iterator[Character]:
-        if self._kind in {"discard", "table", "hash"} or (
+        if self._kind in {"discard", "table", "hash", "bullet", "number_end"} or (
             self._kind == "rule" and self._count >= 3
         ):
             yield from self._drop_prefix()
