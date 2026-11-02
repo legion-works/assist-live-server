@@ -183,9 +183,15 @@ def test_health_capabilities_and_legacy_boolean(
                     "http://service.invalid/health",
                     headers={"Authorization": "Bearer test-token"},
                 ) as response:
-                    assert await response.json() == {
+                    health = await response.json()
+                    epoch = health.pop("counters_since_utc_ns")
+                    assert type(epoch) is int and epoch > 0
+                    assert health == {
                         "version": 1,
                         "healthy": ready,
+                        "sequence_gaps_by_satellite": {
+                            "satellite-a": {"boot_id": None, "missing": 0}
+                        },
                         "capabilities": {
                             "stt": stt,
                             "tts": tts,
@@ -962,7 +968,9 @@ def test_timing_destinations_match_declared_sources(tmp_path, store, source, par
                 row["event"] for row in store.rows if row["event"]["turn_id"] == turn_id
             ]
             expected = (
-                {"stt_final"} if part == "stt" else {"tts_first_text", "tts_first_byte"}
+                {"stt_final"}
+                if part == "stt"
+                else {"tts_text_received", "tts_first_byte"}
             )
             assert expected <= {event["stage"] for event in events}
             metadata = [e["data"] for e in events if e["data"].get("part") == part]

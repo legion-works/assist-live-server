@@ -5,6 +5,7 @@ from uuid import uuid7
 
 import pytest
 from assist_live_client import TimingEvent, TurnOpen
+from assist_live_client.models import STAGE_OWNERS
 
 
 @pytest.mark.parametrize("stage", ["stt_final", "stt_partial", "speech_start"])
@@ -78,7 +79,7 @@ def test_open_turn_removes_only_unusable_parent(tmp_path, caplog, parent_kind):
                 TimingEvent(
                     turn.turn_id,
                     turn.satellite,
-                    "integration",
+                    "device",
                     "mic_open",
                     now[0],
                     "measured",
@@ -244,7 +245,7 @@ def test_store_restart_retention_cursor_and_isolation(tmp_path):
         event = TimingEvent(
             turn.turn_id,
             turn.satellite,
-            "integration",
+            "device",
             "mic_open",
             now[0],
             "proxy",
@@ -298,7 +299,7 @@ def test_store_transcript_policy_and_all_written_bytes(
             TimingEvent(
                 turn.turn_id,
                 turn.satellite,
-                "integration",
+                "server",
                 "stt_final",
                 100,
                 "measured",
@@ -459,7 +460,7 @@ def test_turn_completeness_and_reorder_deadline(tmp_path, turn_type):
                         TimingEvent(
                             turn.turn_id,
                             turn.satellite,
-                            "integration",
+                            STAGE_OWNERS[stage]["server"],
                             stage,
                             now[0],
                             "proxy",
@@ -496,7 +497,7 @@ def test_append_cannot_complete_a_turn_after_its_deadline(tmp_path, expired):
                 TimingEvent(
                     turn.turn_id,
                     turn.satellite,
-                    "integration",
+                    STAGE_OWNERS[stage]["server"],
                     stage,
                     now[0],
                     "proxy",

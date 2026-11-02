@@ -530,11 +530,11 @@ def test_configured_transcript_switch_controls_store(tmp_path, server_opt, turn_
                     str(uuid7()), "satellite-a", "voice", None, None, turn_opt
                 )
                 await client.open_turn(turn)
-                await client.event(
+                await store.append(
                     TimingEvent(
                         turn.turn_id,
                         turn.satellite,
-                        "integration",
+                        "server",
                         "stt_final",
                         1,
                         "measured",

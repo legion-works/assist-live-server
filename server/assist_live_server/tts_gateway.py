@@ -1,6 +1,7 @@
 """Select a TTS destination before the text iterator can supply content."""
 
 import json
+import time
 from collections.abc import AsyncIterator, Callable
 from typing import Any
 
@@ -16,7 +17,7 @@ from assist_live_client.protocol import MAX_PCM, decode_control, encode_control
 from .audio_gateway import Recorder
 from .destinations import Destination, require_destination
 from .protocol import AudioBackend
-from .providers.tts import TTSProvider
+from .providers.tts import SentenceAssembler, TTSProvider
 
 
 class TTSGateway:
@@ -85,10 +86,13 @@ class TTSGateway:
         *,
         record: Recorder | None = None,
         text_positions: bool = False,
+        request: int = 0,
+        sentence_limit: int = 256,
     ) -> AsyncIterator[dict[str, Any] | bytes]:
         metadata: dict[str, object] = {
             "part": "tts",
             "provider": self.provider,
+            "request": request,
         }
         if self.provider_factory is not None and self.declared_destination is not None:
             metadata["destination"] = self.declared_destination
@@ -100,17 +104,68 @@ class TTSGateway:
         sentence = 0
         received = 0
         failure_code = "tts_failed"
+        origin_ns: int | None = None
+        text_ready: list[tuple[int, int]] = []
+        assembler: SentenceAssembler | None = SentenceAssembler()
+        last_text_ms = 0
+        first_sentence_ms = 0
+        last_audio_ns: int | None = None
+        sentence_bytes = 0
+        total_bytes = 0
+        audio_format: TTSFormat | None = None
+
+        async def sentence_note(index: int, text_end: int | None) -> None:
+            nonlocal sentence_bytes
+            if record is not None and index < sentence_limit:
+                text_ms = last_text_ms
+                if index < len(text_ready):
+                    text_ms = text_ready[index][1]
+                await record(
+                    "tts_sentence",
+                    {
+                        "request": request,
+                        "index": index,
+                        "text_end": text_end,
+                        "text_ms": text_ms,
+                        "first_byte_ms": first_sentence_ms,
+                        "audio_ms": duration(sentence_bytes),
+                        "t_utc_ns": last_audio_ns
+                        if last_audio_ns is not None
+                        else time.time_ns(),
+                    },
+                )
+            sentence_bytes = 0
+
+        def duration(size: int) -> int:
+            if audio_format is None:
+                return 0
+            return (
+                size
+                * 1000
+                // (audio_format.rate * audio_format.channels * audio_format.width)
+            )
 
         async def input_text() -> AsyncIterator[str]:
-            nonlocal first_text, has_text, received
+            nonlocal first_text, has_text, received, origin_ns, assembler, last_text_ms
             async for chunk in text:
                 received += len(chunk)
                 has_text = has_text or bool(chunk.strip())
                 if chunk and not first_text:
                     first_text = True
+                    origin_ns = time.monotonic_ns()
                     if record is not None:
-                        await record("tts_first_text", metadata)
+                        await record("tts_text_received", metadata)
+                if origin_ns is not None:
+                    last_text_ms = (time.monotonic_ns() - origin_ns) // 1_000_000
+                if assembler is not None:
+                    for _, endpoint in assembler.feed_positions(chunk):
+                        if len(text_ready) < sentence_limit:
+                            text_ready.append((endpoint, last_text_ms))
+                    if len(text_ready) >= sentence_limit:
+                        assembler = None
                 yield chunk
+            if assembler is not None and "".join(assembler.buffer).strip():
+                text_ready.append((received, last_text_ms))
 
         try:
             require_destination(self.destination, self.local_only)
@@ -136,6 +191,7 @@ class TTSGateway:
                 stream = selected_provider.stream(input_text(), voice)
             async for item in stream:
                 if isinstance(item, TTSFormat):
+                    audio_format = item
                     yield encode_control(
                         "format",
                         turn_id,
@@ -145,13 +201,22 @@ class TTSGateway:
                         width=item.width,
                     )
                 elif isinstance(item, TTSAudio):
+                    if not pending_audio and origin_ns is not None:
+                        first_sentence_ms = (
+                            time.monotonic_ns() - origin_ns
+                        ) // 1_000_000
                     pending_audio = True
+                    sentence_bytes += len(item.data)
+                    total_bytes += len(item.data)
                     if not first_audio:
                         first_audio = True
                         if record is not None:
                             await record("tts_first_byte", metadata)
                     yield item.data
+                    # The caller sends the bytes before it requests the next item.
+                    last_audio_ns = time.time_ns()
                 elif isinstance(item, TTSSentenceEnd):
+                    await sentence_note(item.sentence, item.text_end)
                     fields = (
                         {"text_end": item.text_end}
                         if text_positions and item.text_end is not None
@@ -169,6 +234,20 @@ class TTSGateway:
                 fields = {"text_end": received} if text_positions else {}
                 yield encode_control(
                     "sentence_end", turn_id, sentence=sentence, **fields
+                )
+                await sentence_note(sentence, received if text_positions else None)
+                sentence += 1
+            if record is not None:
+                await record(
+                    "tts_last_byte",
+                    {
+                        "request": request,
+                        "sentences": sentence,
+                        "audio_ms": duration(total_bytes),
+                        "t_utc_ns": last_audio_ns
+                        if last_audio_ns is not None
+                        else time.time_ns(),
+                    },
                 )
         except ValueError, RuntimeError:
             if record is not None:

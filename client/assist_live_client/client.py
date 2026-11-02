@@ -10,6 +10,8 @@ from typing import Any
 import aiohttp
 
 from .models import (
+    MAX_TURN_RESPONSE,
+    STAGES,
     HealthCapabilities,
     TimingEvent,
     TTSAudio,
@@ -148,7 +150,13 @@ class AssistLiveClient:
             yield response
 
     async def _request(
-        self, method: str, path: str, *, data: object = None, timeout: float = 20
+        self,
+        method: str,
+        path: str,
+        *,
+        data: object = None,
+        timeout: float = 20,
+        response_max: int = MAX_CONTROL,
     ) -> Any:
         raw = json.dumps(data, allow_nan=False).encode() if data is not None else None
         if raw is not None and len(raw) > MAX_CONTROL:
@@ -166,7 +174,7 @@ class AssistLiveClient:
                     raise ProtocolError("request refused", kind="refused")
                 value = bytearray()
                 async for chunk in response.content.iter_chunked(1024):
-                    if len(value) + len(chunk) > MAX_CONTROL:
+                    if len(value) + len(chunk) > response_max:
                         raise ProtocolError("response too large", kind="malformed")
                     value.extend(chunk)
                 if path.startswith("/v1/bindings"):
@@ -179,7 +187,7 @@ class AssistLiveClient:
                     for row in bindings:
                         identifier(row["satellite"])
                     return bindings
-                return parse_json(bytes(value), MAX_CONTROL)
+                return parse_json(bytes(value), response_max)
         except TimeoutError:
             raise ProtocolError("request failed", kind="timeout") from None
         except aiohttp.ClientError:
@@ -262,7 +270,9 @@ class AssistLiveClient:
         from .models import turn_uuid
 
         turn_uuid(turn_id)
-        return await self._request("GET", "/v1/turns/" + turn_id)
+        return await self._request(
+            "GET", "/v1/turns/" + turn_id, response_max=MAX_TURN_RESPONSE
+        )
 
     async def bindings(self) -> list[dict[str, str]]:
         return await self._request("GET", "/v1/bindings")
@@ -296,6 +306,7 @@ class AssistLiveClient:
                         "version": 1,
                         "satellite": satellite,
                         "after_event_id": after_event_id,
+                        "stages": sorted(STAGES),
                     }
                 )
                 async for message in ws:

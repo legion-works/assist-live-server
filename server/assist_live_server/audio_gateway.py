@@ -78,7 +78,7 @@ class AudioGateway:
             if stopped:
                 return
             stopped = True
-            await note("end_decision", reason=reason)
+            await note("end_decision", reason=reason, decision_source="server")
             await output.put(encode_control("end_decision", turn_id))
 
         async def work() -> None:
@@ -102,7 +102,9 @@ class AudioGateway:
                     if not onset and detector.speech_started_at_ms is not None:
                         onset = True
                         active_session.speech_started()
-                        await note("speech_start")
+                        await note(
+                            "speech_start", onset_ms=int(detector.speech_started_at_ms)
+                        )
                         changed.set()
                     silence_ms = detector.silent_samples / 16
                     if silence_ms < detector.profile.min_silence_ms:

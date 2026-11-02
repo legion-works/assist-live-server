@@ -3557,3 +3557,65 @@ python3 "$WORKSPACE/assist-live/tools/check_public_tree.py" --root . --private-d
 git diff --check
 python3 "$STE_CHECKER" docs/configuration.md docs/providers/cloud.md docs/verification.md
 ```
+
+## Measurement owners and sentence times
+
+The measurement tests check `stage` owners on the server and fallback paths.
+A stored fallback marker must select the same turn and part before an integration event can use that path.
+The server refuses a different owner with `wrong_owner`. The client gives `ProtocolError(kind="refused")`.
+The data checks include fallback codes, detector rules, satellite states, audio onset, TTS request numbers, and sentence times.
+Events without the new optional fields continue to validate.
+
+The known-clock TTS test has two sentences with 200 ms and 50 ms of PCM.
+It checks text arrival, first audio, last audio, sentence count, and stream number.
+The sentence limit is 256 events for each turn across streams. The last-byte event counts sentences after that limit.
+The onset test starts voice after three 32 ms frames and checks for `onset_ms: 96`.
+Late-open tests check retention and the one-second future tolerance at the limits.
+
+Each turn keeps a maximum of 1024 events and 1,048,576 encoded event bytes.
+Real-server tests accept event 1024, refuse event 1025, fill the byte allowance, and read the full turn through the client.
+The turn-response bound is 1,095,680 bytes: stored bytes plus 1024 times 42 JSON-format bytes plus 4096 metadata bytes.
+The metadata test includes a 256-character conversation identifier with JSON `\u` sequences.
+
+Health tests check the token's satellites, an unseen boot, the largest unsigned 64-bit boot, a late event, and a new boot.
+The process-start time applies only to in-process counters. The device count belongs to its boot and can decrease.
+No metric uses satellite `labels`.
+
+The compatibility tests use `git archive` for clients `b3b1e16`, `c3aadd3`, and `5ac300b`.
+Each archived client reads health and turn records with new fields, receives the earlier subscription values, and exports an earlier event.
+The current client requests new subscription values explicitly.
+Archived exports with unknown values are not part of this contract. Export tools must use the current client.
+The device-vector digest in the protocol document does not change.
+
+The initial measurement tests gave `57 failed, 2 passed`. The initial route tests gave `6 failed`.
+The isolated base with the extended measurement tests gave `91 failed, 1 passed, 3 deselected`.
+The two turn-limit tests also gave unsatisfactory results before their guards were available.
+The two measurement test files then gave `98 passed`.
+
+Seven scratch mutations parse and give unsatisfactory results at named assertions:
+
+| Mutation | Assertion |
+|---|---|
+| Remove the owner check | `wrong_owner_not_refused` |
+| Remove the fallback-path check | `fallback_path_not_required` |
+| Remove a safe-data field | `safe_data_dropped_field` |
+| Remove the sentence limit | `sentence_cap_broken` |
+| Add one frame to onset | `onset_off_by_frame` |
+| Remove the event limit | `event_1025_not_refused` |
+| Remove the byte limit | `oversize_turn_not_refused` |
+
+Commands for the repository checks:
+
+```sh
+uv run --locked ruff format --check .
+uv run --locked ruff check --no-cache .
+task check
+UV_PROJECT_ENVIRONMENT="$FLOOR_ENV" uv run --locked --python 3.14.2 pytest tests/ -q
+UV_OFFLINE=1 unshare -rn sh -c 'ip link set lo up && uv run --locked pytest tests/ -q'
+python3 "$WORKSPACE/assist-live/tools/check_public_tree.py" --root . --private-denylist "$PRIVATE_DENYLIST"
+git diff --check
+python3 "$STE_CHECKER" docs/protocol.md docs/verification.md
+```
+
+Set `ASSIST_LIVE_MODEL_CACHE` before these checks. All audio and provider fixtures are synthetic.
+These checks do not prove device playback timing or acoustic sentence boundaries. No cloud call, commit, or publication is part of this work.

@@ -469,11 +469,11 @@ def test_final_transcript_requires_both_opt_ins(
 
             result = [r async for r in client.stt(turn.turn_id, audio())]
             assert any(r.get("text") == "synthetic final text" for r in result)
-            await client.event(
+            await store.append(
                 TimingEvent(
                     turn.turn_id,
                     turn.satellite,
-                    "integration",
+                    "server",
                     "stt_partial",
                     1,
                     "measured",

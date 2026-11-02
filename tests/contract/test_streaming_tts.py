@@ -300,10 +300,14 @@ def test_configured_cloud_tts_factory_keeps_wire_contract(
                 ]
                 events = [row["event"] for row in store.rows]
                 assert [e["stage"] for e in events] == [
-                    "tts_first_text",
+                    "tts_text_received",
                     "tts_first_byte",
+                    "tts_sentence",
+                    "tts_last_byte",
                 ]
-                assert all(e["data"]["destination"] == "cloud" for e in events)
+                metadata = [e["data"] for e in events if e["data"].get("part") == "tts"]
+                assert len(metadata) == 2
+                assert all(data["destination"] == "cloud" for data in metadata)
         finally:
             await runner.cleanup()
             await cloud.cleanup()
@@ -694,11 +698,14 @@ def test_local_provider_route_streams_before_text_end_and_marks_each_sentence(
                         TTSAudio("Tail".encode("utf-16le")),
                         TTSSentenceEnd(1),
                     ]
-                    assert store.rows
-                    assert all(
-                        row["event"]["data"]["provider"] == provider_id
+                    metadata = [
+                        row["event"]["data"]
                         for row in store.rows
-                    )
+                        if row["event"]["stage"]
+                        in {"tts_text_received", "tts_first_byte"}
+                    ]
+                    assert len(metadata) == 2
+                    assert all(data["provider"] == provider_id for data in metadata)
         finally:
             await runner.cleanup()
 

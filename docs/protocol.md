@@ -91,6 +91,17 @@ The client ignores unknown top-level keys and unknown keys in `capabilities`.
 It keeps only `stt`, `tts`, and `speaker` keys in `destinations`.
 It drops other keys without an error for all values.
 
+Health also gives `sequence_gaps_by_satellite` for the token's satellites only.
+Each value has `boot_id` (an unsigned 64-bit JSON integer or `null`) and `missing` (a non-negative integer).
+Before the first event from that satellite, the value has `boot_id: null` and `missing: 0`.
+
+The count belongs to that device boot. A late event can decrease it. A new boot starts the count again.
+Replay storage keeps this state through server restarts.
+
+The `counters_since_utc_ns` field gives the server instance's start time in UTC nanoseconds.
+This time applies to in-process counters, not to the device count for each boot.
+The metrics route keeps the aggregate sequence-gap value and adds `assist_live_counters_since_utc_ns` without satellite `labels`.
+
 An older server can have no policy or destination fields. The client then gives `None`, not `False` or invented destinations.
 An explicit `null` also gives `None`. The client refuses an invalid field type or a destination value for a known key with `ProtocolError`.
 See [server configuration](configuration.md) for the local-only option and integration rule.
@@ -647,6 +658,14 @@ For callers, `None` means an unclassified error. All client error sites set `kin
 `TurnOpen` contains `turn_id`, `satellite`, `turn_type`, `parent_turn_id`, `conversation_id`, and `record_transcripts`.
 The last field defaults to `false`.
 
+The optional `opened_utc_ns` gives the initial open time in UTC nanoseconds.
+Without it, the server uses its receipt time. An earlier time gives `late_open: true` in the turn record.
+The server uses the initial time for turn expiry and retention.
+
+It refuses a time older than its retention with `late_open_too_old`.
+It refuses a time more than one second after receipt with `late_open_in_future`.
+The two errors use HTTP `400` and an `error` field with the named code.
+
 The server does not refuse a turn because its parent is missing or belongs to a different satellite.
 It opens that turn with `parent_turn_id=null`. The stored turn and its events keep no parent identifier.
 A missing parent can follow a fallback-only turn, store retention, or a new store.
@@ -656,6 +675,80 @@ All other turn-open checks stay unchanged.
 `TimingEvent` contains `turn_id`, `satellite`, `source`, `stage`, `t_utc_ns`, `quality`, and `uncertainty_ms`.
 Optional fields are `t_device_ms`, `seq`, and `data`.
 Quality stays `measured`, `proxy`, or `estimate`. Estimates must have a non-negative uncertainty.
+
+### Measurement rules
+
+See the public [design record](https://github.com/legion-works/assist-live/blob/main/docs/design.md), sections "Measurement rules" and "TTS sentence timing".
+The shared `assist_live_client.models.STAGE_OWNERS` table gives the owner for each `stage` value and path.
+
+| Stages | Server path | Fallback path |
+|---|---|---|
+| `wake_detected`, `mic_open`, `playback_start`, `playback_end`, `barge_in` | device | device |
+| `speech_start`, `end_candidate`, `end_decision`, `stt_partial`, `stt_final`, `stt_failed`, `tts_failed` | server | integration |
+| `tts_first_text`, `satellite_state`, `fallback_used`, `turn_superseded` | integration | integration |
+| `tts_first_byte` | server | integration |
+| `tts_sentence`, `tts_last_byte` | server | none |
+| `stt_final_received`, `tts_audio_received` | integration | integration |
+| `speaker_result`, `tts_text_received`, `unmatched` | server | server |
+| `late_result_queued`, `late_result_delivering`, `late_result_spoken`, `late_result_cancelled`, `late_result_uncertain`, `late_result_notify_sent`, `late_result_notify_failed`, `late_result_expired` | integration | integration |
+
+A stored `fallback_used` with `part: stt` selects the fallback owner for STT `stage` values.
+The same rule with `part: tts` selects the fallback owner for TTS `stage` values.
+A marker for a different part or turn does not select that path.
+Send each marker before its fallback `stage` values. Earlier events without the optional fields also validate.
+
+The server refuses a different source with HTTP `403` and `{"error": "wrong_owner"}`.
+The `assist_live_wrong_owner_total` metric counts these refusals for the token's satellites.
+The client gives `ProtocolError(kind="refused")`. The sender must remove and count that event, then continue with the next event.
+Connection errors and timeouts do not remove pending events.
+
+The server keeps these optional data fields:
+
+| Stage | Fields and valid values |
+|---|---|
+| `fallback_used` | `part`: `stt` or `tts`. `reason`: one code below. |
+| `end_decision` | `reason`: `early`, `hard`, `max_silence`, or `input_end`. `decision_source`: `server` or `ha_audio_end`. |
+| `satellite_state` | `state`: `idle`, `listening`, `processing`, or `responding`. |
+| `speech_start` | `onset_ms`: non-negative integer, from the start of the turn audio to the first voice sample. |
+| Each `tts_` value | `request`: non-negative integer, from 0 for each turn. |
+| `tts_sentence` | `index`, `text_ms`, `first_byte_ms`, `audio_ms`: non-negative integers. `text_end`: non-negative integer or `null`. |
+| `tts_last_byte` | `sentences`, `audio_ms`: non-negative integers. |
+
+All these integers are less than `2**64`. Booleans are not integers for these fields.
+Unknown codes, negative numbers, and incorrect types give HTTP `400`.
+The 13 fallback `reason` values are `health_timeout`, `health_error`, `server_unhealthy`, `stt_unsupported`, `tts_unsupported`, `not_local_only`, and `destination_not_local`.
+The other values are `open_refused`, `open_error`, `stream_refused`, `stream_closed`, `stream_error`, and `message_timeout`.
+
+The server's `tts_text_received` marks its first text. The integration owns `tts_first_text`.
+The integration uses `stt_final_received` and `tts_audio_received` for its receipt boundaries, not copies of the server's `stage` values.
+The `speech_start` event keeps the detector's confirmation time. Its `onset_ms` gives the earlier audio position, not a second host timestamp.
+The server's `end_decision` keeps its detector rule and `decision_source: server`.
+
+### TTS sentence timing
+
+The server records `tts_first_byte` and one `tts_sentence` for each sentence, with a maximum of 256 events for each turn across all streams.
+The sentence event time is the time when the server sends the sentence's last audio byte.
+Its `index` starts at 0 in each stream. Its `text_end` equals the provider's marker position, or `null` without a position.
+The server measures `text_ms` and `first_byte_ms` from `tts_text_received` with its monotonic clock.
+
+The first value marks full sentence text. The second value marks the first audio byte of that sentence.
+
+The `audio_ms` value gives PCM audio time in full milliseconds.
+At stream end, `tts_last_byte` gives the full sentence count and audio time, also after the 256-event limit.
+These two event data objects contain only integers or `null`, without provider text.
+All server TTS events keep their `request` number. The next stream in the same turn increments that number.
+
+### Turn size limits
+
+Each turn keeps a maximum of 1024 events and 1,048,576 bytes of encoded event data.
+The byte count sums the compact stored JSON, not PCM or transport bytes.
+The next event must fit the two limits. A refused large event does not prevent a smaller event that fits.
+The named errors are `turn_event_limit` and `turn_size_limit`, with HTTP `403` and client `kind` value `refused`.
+The metrics `assist_live_turn_event_limit_total` and `assist_live_turn_size_limit_total` count these refusals.
+
+The current client's `turn()` method has a different response bound of 1,095,680 bytes.
+This equals 1,048,576 stored bytes, 1024 times 42 bytes for JSON spaces and separators, and 4096 bytes for turn metadata.
+Other control messages keep the 16,384-byte bound.
 
 The device clock consumer uses a different clock window for each boot.
 Its minimum arrival offset comes from the last 60 seconds or 50 events.
@@ -691,6 +784,13 @@ They do not keep `data.pre_roll_ms`, because an unmatched record has no turn aud
 | WebSocket `/v1/events` | Stored event subscription |
 
 The first subscription message is `subscribe`, with `version`, `satellite`, and `after_event_id`.
+An optional `stages` list selects `stage` values. The current client sends all values that it knows.
+Without this list, the server sends only the values from before sentence timing and receipt events.
+This default keeps archived clients' timing and speaker subscriptions available.
+
+Archived clients can read turn records and health with new fields.
+They can export earlier `stage` values, but cannot parse exports with unknown values. Export tools must use the current client.
+
 The server sends only event identifiers greater than that cursor.
 Each envelope has `version`, a monotonically increasing stored `event_id`, and a complete `event` object.
 Reconnect with the last consumed identifier. The client does not change that cursor automatically.

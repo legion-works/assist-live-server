@@ -273,7 +273,7 @@ def test_bad_event_row_does_not_block_status_query_or_export(tmp_path, payload):
         event = TimingEvent(
             turn.turn_id,
             "satellite-a",
-            "integration",
+            "device",
             "mic_open",
             now[0],
             "proxy",
@@ -296,7 +296,7 @@ def test_bad_event_row_does_not_block_status_query_or_export(tmp_path, payload):
                 TimingEvent(
                     turn.turn_id,
                     "satellite-a",
-                    "integration",
+                    "device",
                     "playback_end",
                     now[0],
                     "proxy",

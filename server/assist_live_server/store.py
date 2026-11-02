@@ -12,6 +12,11 @@ from pathlib import Path
 from typing import Any
 
 from assist_live_client.models import (
+    EVENT_CODES,
+    EVENT_NUMBERS,
+    MAX_TURN_EVENT_BYTES,
+    MAX_TURN_EVENTS,
+    STAGE_OWNERS,
     STAGES,
     TimingEvent,
     TurnOpen,
@@ -26,6 +31,17 @@ from .replay_store import SQLiteReplayStore, connect
 
 LOGGER = logging.getLogger(__name__)
 ROW_ERRORS = (ValueError, TypeError, KeyError, OverflowError, RecursionError)
+OPEN_CLOCK_TOLERANCE_NS = 1_000_000_000
+
+
+class WrongOwnerError(ValueError):
+    def __init__(self) -> None:
+        super().__init__("wrong_owner")
+
+
+class TurnLimitError(ValueError):
+    pass
+
 
 SPEAKER_NAME_DROPS: Counter[str] = Counter(
     dict.fromkeys(
@@ -62,6 +78,14 @@ def safe_speaker_name(value: object, stage: str) -> str | None:
 
 def safe_data(event: TimingEvent, transcript: bool = False) -> dict[str, object]:
     data: dict[str, object] = {}
+    fields = set(EVENT_CODES.get(event.stage, {})) | EVENT_NUMBERS.get(
+        event.stage, frozenset()
+    )
+    if event.stage.startswith("tts_"):
+        fields.add("request")
+    for key in fields:
+        if key in event.data:
+            data[key] = event.data[key]
     if event.stage == "stt_final" and event.data.get("replaced") is True:
         data["replaced"] = True
     if event.stage == "mic_open" and "pre_roll_ms" in event.data:
@@ -118,6 +142,8 @@ class SQLiteStore:
         self.last_retention_ns: int | None = None
         self.invalid_rows: Counter[tuple[str, str]] = Counter()
         self.removed_parents: Counter[str] = Counter()
+        self.wrong_owners: Counter[str] = Counter()
+        self.turn_limits: Counter[tuple[str, str]] = Counter()
         self.changed = asyncio.Event()
         self.loop: asyncio.AbstractEventLoop | None = None
         self.writer = ThreadPoolExecutor(
@@ -282,7 +308,9 @@ class SQLiteStore:
 
     def _decode_turn(self, raw: str, satellite: str) -> TurnOpen | None:
         try:
-            turn = TurnOpen(**json.loads(raw))
+            value = json.loads(raw)
+            value.pop("late_open", None)
+            turn = TurnOpen(**value)
             if turn.satellite != satellite:
                 raise ValueError("stored satellite mismatch")
             return turn
@@ -293,11 +321,25 @@ class SQLiteStore:
     def _unmatched(self, event: TimingEvent) -> TimingEvent:
         data = {**event.data, "original_stage": event.stage}
         data.pop("pre_roll_ms", None)
-        event = replace(event, stage="unmatched", data=data)
+        event = replace(event, source="server", stage="unmatched", data=data)
         return replace(event, data=safe_data(event))
 
     def _insert(self, event: TimingEvent) -> None:
+        payload = self._encode(event)
         if event.turn_id is not None:
+            count, size = self.connection.execute(
+                "SELECT count(*),coalesce(sum(length(CAST(payload AS BLOB))),0) "
+                "FROM events WHERE turn_id=?",
+                (event.turn_id,),
+            ).fetchone()
+            limit = ""
+            if count >= MAX_TURN_EVENTS:
+                limit = "turn_event_limit"
+            elif size + len(payload.encode()) > MAX_TURN_EVENT_BYTES:
+                limit = "turn_size_limit"
+            if limit:
+                self.turn_limits[event.satellite, limit] += 1
+                raise TurnLimitError(limit)
             self.connection.execute(
                 "UPDATE turns SET status='incomplete' "
                 "WHERE turn_id=? AND status='open' AND opened_ns<=?",
@@ -311,7 +353,7 @@ class SQLiteStore:
                 event.satellite,
                 event.turn_id,
                 event.t_utc_ns,
-                self._encode(event),
+                payload,
                 self.now_ns(),
             ),
         )
@@ -433,6 +475,12 @@ class SQLiteStore:
 
     def _open_turn(self, turn: TurnOpen) -> None:
         removal = None
+        now = self.now_ns()
+        opened = turn.opened_utc_ns if turn.opened_utc_ns is not None else now
+        if opened < now - self.retention_ns:
+            raise ValueError("late_open_too_old")
+        if opened > now + OPEN_CLOCK_TOLERANCE_NS:
+            raise ValueError("late_open_in_future")
         with self.connection:
             self.connection.execute("BEGIN IMMEDIATE")
             self._maintain()
@@ -455,7 +503,18 @@ class SQLiteStore:
             )
             self.connection.execute(
                 "INSERT INTO turns VALUES(?,?,?,?, 'open',NULL)",
-                (turn.turn_id, turn.satellite, json.dumps(asdict(turn)), self.now_ns()),
+                (
+                    turn.turn_id,
+                    turn.satellite,
+                    json.dumps(
+                        {
+                            **asdict(turn),
+                            "opened_utc_ns": opened,
+                            "late_open": opened < now,
+                        }
+                    ),
+                    opened,
+                ),
             )
             pending = self.connection.execute(
                 "SELECT pending_id,payload FROM pending WHERE satellite=? "
@@ -486,6 +545,21 @@ class SQLiteStore:
             if turn is None:
                 raise ValueError("invalid stored turn")
             enabled = self.record_transcripts and turn.record_transcripts
+        part = "tts" if event.stage.startswith("tts_") else "stt"
+        fallback = (
+            event.turn_id is not None
+            and self.connection.execute(
+                "SELECT 1 FROM events WHERE turn_id=? "
+                "AND json_extract(payload,'$.stage')='fallback_used' "
+                "AND json_extract(payload,'$.data.part')=? LIMIT 1",
+                (event.turn_id, part),
+            ).fetchone()
+            is not None
+        )
+        owner = STAGE_OWNERS[event.stage]["fallback" if fallback else "server"]
+        if event.source != owner:
+            self.wrong_owners[event.satellite] += 1
+            raise WrongOwnerError()
         return replace(event, data=safe_data(event, enabled))
 
     async def append(self, event: TimingEvent) -> None:
@@ -613,6 +687,19 @@ class SQLiteStore:
             placeholders = ",".join("?" for _ in parameters)
             clause = f" AND satellite IN ({placeholders})"
         return {
+            **{
+                limit + "_total": sum(
+                    count
+                    for (satellite, kind), count in self.turn_limits.items()
+                    if kind == limit and (satellites is None or satellite in satellites)
+                )
+                for limit in ("turn_event_limit", "turn_size_limit")
+            },
+            "wrong_owner_total": sum(
+                count
+                for satellite, count in self.wrong_owners.items()
+                if satellites is None or satellite in satellites
+            ),
             "parent_turn_id_removed_total": sum(
                 count
                 for satellite, count in self.removed_parents.items()

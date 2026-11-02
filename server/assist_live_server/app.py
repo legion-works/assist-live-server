@@ -10,6 +10,8 @@ from typing import Any
 
 from aiohttp import WSMsgType, web
 from assist_live_client.models import (
+    LEGACY_STAGES,
+    STAGES,
     TimingEvent,
     TurnOpen,
     identifier,
@@ -42,7 +44,13 @@ from .protocol import (
     WebSocketTransport,
 )
 from .providers.tts import TTSProvider
-from .store import SPEAKER_NAME_DROPS, SQLiteStore, safe_data
+from .store import (
+    SPEAKER_NAME_DROPS,
+    SQLiteStore,
+    TurnLimitError,
+    WrongOwnerError,
+    safe_data,
+)
 from .tts_gateway import TTSGateway
 
 UDP_ADDRESS = web.AppKey("udp_address", tuple[str, int])
@@ -119,6 +127,7 @@ def create_app(
     auth_connections: dict[bytes, int] = {}
     active_audio_turns: set[str] = set()
     audio_store_errors_total = 0
+    counters_since_utc_ns = time.time_ns()
 
     @web.middleware
     async def connections(
@@ -252,7 +261,18 @@ def create_app(
         return parse_json(bytes(raw), MAX_CONTROL)
 
     async def health(request: web.Request) -> web.Response:
-        allowed(request)
+        satellites = allowed(request)
+        sequence_gaps_by_satellite: dict[str, dict[str, int | None]] = {
+            satellite: {"boot_id": None, "missing": 0}
+            for satellite in sorted(satellites)
+        }
+        for device, binding in registry.devices.items():
+            satellite = binding["satellite"]
+            if satellite in sequence_gaps_by_satellite:
+                sequence_gaps_by_satellite[satellite] = {
+                    "boot_id": registry.replay[device].boot,
+                    "missing": registry.missing(device),
+                }
         destinations: dict[str, str] = {}
         if audio_gateway is not None:
             destinations["stt"] = audio_gateway.declared_destination or "unknown"
@@ -282,6 +302,8 @@ def create_app(
             {
                 "version": 1,
                 "healthy": store is not None and registry.replay_store is not None,
+                "sequence_gaps_by_satellite": sequence_gaps_by_satellite,
+                "counters_since_utc_ns": counters_since_utc_ns,
                 "capabilities": {
                     "stt": backend is not None or audio_gateway is not None,
                     "tts": backend is not None or tts_gateway is not None,
@@ -324,6 +346,7 @@ def create_app(
                 {
                     **await store.diagnostics(satellites),
                     "sequence_gaps": sequence_gaps,
+                    "counters_since_utc_ns": counters_since_utc_ns,
                     "device_accepted_total": timing.accepted,
                     "device_refused_total": timing.refused,
                     "device_dropped_total": timing.dropped,
@@ -362,6 +385,10 @@ def create_app(
             await storage().open_turn(turn)
         except TurnExistsError:
             raise web.HTTPConflict(text="turn already exists") from None
+        except ValueError as error:
+            if str(error) in {"late_open_too_old", "late_open_in_future"}:
+                return web.json_response({"error": str(error)}, status=400)
+            raise
         return web.json_response({"version": 1})
 
     async def turn(request: web.Request) -> web.Response:
@@ -388,7 +415,12 @@ def create_app(
             and turn_value.get("record_transcripts", False)
         )
         data = safe_data(event, transcript)
-        await storage().append(replace(event, data=data))
+        try:
+            await storage().append(replace(event, data=data))
+        except WrongOwnerError:
+            return web.json_response({"error": "wrong_owner"}, status=403)
+        except TurnLimitError as error:
+            return web.json_response({"error": str(error)}, status=403)
         return web.json_response({"version": 1})
 
     async def export(request: web.Request) -> web.StreamResponse:
@@ -420,8 +452,23 @@ def create_app(
             if first.type != WSMsgType.TEXT:
                 raise ValueError("subscription required")
             value = parse_json(first.data, MAX_CONTROL)
-            if value.keys() != {"type", "version", "satellite", "after_event_id"}:
+            if value.keys() - {"stages"} != {
+                "type",
+                "version",
+                "satellite",
+                "after_event_id",
+            }:
                 raise ValueError("invalid subscription")
+            wanted = value.get("stages", sorted(LEGACY_STAGES))
+            if (
+                not isinstance(wanted, list)
+                or len(wanted) > len(STAGES)
+                or any(
+                    not isinstance(stage, str) or stage not in STAGES
+                    for stage in wanted
+                )
+            ):
+                raise ValueError("invalid subscription stages")
             if type(value["version"]) is not int or value["version"] != 1:
                 raise ValueError("unsupported version")
             if value["type"] != "subscribe" or value["satellite"] not in satellites:
@@ -456,7 +503,8 @@ def create_app(
                         if len(raw.encode()) > MAX_CONTROL:
                             raise ValueError("stored event too large")
                         cursor = row["event_id"]
-                        await ws.send_str(raw)
+                        if row["event"]["stage"] in wanted:
+                            await ws.send_str(raw)
                     finally:
                         next_event.cancel()
                         with contextlib.suppress(
@@ -696,12 +744,28 @@ def create_app(
                 else:
                     seq = 0
                     if tts_gateway is not None:
+                        previous = turn_value.get("events", [])
+                        requests = [
+                            number
+                            for row in previous
+                            if row["source"] == "server"
+                            and row["stage"].startswith("tts_")
+                            and isinstance(number := row["data"].get("request"), int)
+                        ]
                         tts_stream = tts_gateway.stream(
                             turn_id,
                             text_input(),
                             negotiation.get("voice", ""),
                             record=record,
                             text_positions=negotiation.get("text_positions", False),
+                            request=max(requests, default=-1) + 1,
+                            sentence_limit=max(
+                                0,
+                                256
+                                - sum(
+                                    row["stage"] == "tts_sentence" for row in previous
+                                ),
+                            ),
                         )
                         try:
                             async for item in tts_stream:
