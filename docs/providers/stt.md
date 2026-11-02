@@ -70,8 +70,15 @@ the [transcript replacement rule](../protocol.md), and the [verification record]
 
 The [public design](https://github.com/legion-works/assist-live/blob/main/docs/design.md#stt-name-hints) specifies context biasing for the last transcript only.
 The server uses the names for the turn's satellite, from its prepared snapshot at session creation.
-It selects a minimum-piece token sequence for each name from the pinned vocabulary.
-A name without a complete token sequence gives no bias.
+It selects minimum-piece token sequences from the pinned vocabulary for three spellings of each name:
+
+- All lower case: `test light`.
+- A capital first letter: `Test light`.
+- A capital first letter in each word: `Test Light`.
+
+The same token path occurs one time only. Shared token positions get the bonus one time, not the sum of the spelling bonuses.
+A spelling without a complete token sequence gives no bias.
+The protocol list and its digest stay in lower case.
 
 A prefix `graph` gives a bonus to tokens that continue a name before candidate pruning.
 Failure arcs remove the temporary bonus of a name that is not complete. Complete names keep their bonus.
@@ -86,10 +93,23 @@ The best hypotheses by the score without the bonus fill the other eight position
 This rule keeps acoustic alternatives when a temporary name prefix changes candidate pruning.
 It does not guarantee the same transcript as recognition without names.
 
-The server builds each satellite list's token sequences and prefix `graph` in the background after the accepted PUT request.
-Subsequent turns use this `graph`. A list update replaces it for new turns only, after the build finishes.
+The server builds the token sequences and prefix `graph` in the background after the accepted PUT request.
+Satellites with the same list and digest share one built tree in the provider.
+The tree keeps name-token edges, node offsets, failure arcs, and bonus values in compact arrays.
+It does not keep a table for each vocabulary token at each node.
+It makes the bonus row for candidate ranking from these sparse edges.
+A cache keeps at most 32 rows, plus the root row.
+
+At 500 names, the built tree uses less than 4 MB, with the full cache in that count.
+The limit includes Unicode capital expansions and all three spellings of maximum-length names.
+
+Subsequent turns use the prepared tree. A list update replaces it for new turns only, after the build finishes.
 Until then, turns use the previous prepared list without a wait for the new build.
 The single decode worker serializes builds and decodes. A superseded list cannot replace a newer list.
+
+A list change on one satellite does not change the tree of a different satellite.
+The weak-reference index releases the tree when no list snapshot uses it.
+An active turn can keep its snapshot until that turn ends.
 
 An empty list keeps the unchanged search arithmetic and n-best paths.
 The zero-duration token limit and frame budget also apply with names.

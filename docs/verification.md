@@ -3845,3 +3845,102 @@ python3 "$STE_CHECKER" docs/protocol.md docs/configuration.md docs/providers/stt
 git diff --check
 uv run --locked python "$PUBLIC_TREE_CHECKER" --history --root . --private-denylist "$PRIVATE_DENYLIST"
 ```
+
+## Three spellings and a shared sparse name tree
+
+Date: 2026-11-02 (UTC).
+
+The [public design, "STT name hints"](https://github.com/legion-works/assist-live/blob/main/docs/design.md#stt-name-hints) specifies three spellings and one sparse tree for each different list.
+The provider makes lower-case, initial-capital, and word-initial-capital token paths.
+The same path occurs one time only. Shared token positions get one bonus, not a sum of spelling bonuses.
+The protocol list and digest stay in lower case. Withdrawal and the eight acoustic positions stay unchanged.
+
+Six compact arrays keep node offsets, edge tokens, edge targets, failure arcs, output values, and `potential` values.
+Candidate ranking uses a root bonus row and at most 32 cached rows.
+The weak-reference index shares one built tree between satellite snapshots with the same canonical list.
+A different satellite's list change does not change that tree.
+The tree stays available while a prepared list or an active turn uses it.
+The index does not keep the tree alive after the last snapshot releases it.
+
+The initial tests against `8339fee` gave `4 failed, 10 passed` before implementation.
+The named assertions were `THREE_SPELLINGS_REQUIRED`, `SPARSE_ROW_API_REQUIRED`, `SPARSE_TREE_FOUR_MB_REQUIRED`, and `IDENTICAL_SATELLITES_ONE_BUILD`.
+The maximum-length test also refused a dictionary tree at `WORST_VALID_HINTS_FOUR_MB_REQUIRED`, with 24,481,467 bytes.
+The last `graph` and hint contract tests give `69 passed`.
+Synthetic cases compare all `transitions`, bonus rows, and n-best paths with `DenseReference`.
+The sharing tests use provider snapshots and two satellites through the HTTP route.
+
+Four scratch-only mutations each give a failure at a named assertion:
+
+- No capital spellings: `THREE_SPELLINGS_REQUIRED`.
+- Summed shared-position credit: `SHARED_SPELLING_POSITION_CREDIT_ONCE`.
+- Different trees for equal satellite lists: `IDENTICAL_SATELLITES_ONE_BUILD`.
+- Dense tables: `SPARSE_TREE_FOUR_MB_REQUIRED`.
+
+The 14 new device turns use the accepted audio prefixes to compare their transcripts with live text.
+Turn 5 changes from "Best light." to "Test light.". The other 13 transcripts stay equal to live text.
+The 29 earlier device recordings supply accepted prefixes and complete audio.
+The selected subset has 21 recordings, 112 words, and nine name commands.
+
+| Earlier device audio | Names | Word errors | Name-command errors |
+|---|---:|---:|---:|
+| Accepted prefix | 8 | 6/112 | 2/9 |
+| Complete recording | 8 | 7/112 | 1/9 |
+| Accepted prefix | 500 | 6/112 | 2/9 |
+| Complete recording | 500 | 6/112 | 1/9 |
+
+With 500 names, the 250 CC0 replay recordings have `96/1945` word errors and no name that the speaker did not say.
+All 6752 sparse/dense n-best paths have the same text and scores.
+With an empty list, all 7262 n-best paths agree with `8339fee`, with a maximum score difference of `0.0`.
+The test includes the 14 new turns, 29 earlier recordings, and 250 corpus recordings.
+The corpus audio and device recordings stay external to the public tree.
+The tests use no cloud service, bench change, or new recording.
+
+The pinned vocabulary has 1025 tokens.
+Each character in its non-special pieces has a one-token fallback.
+A full Unicode check finds eight representable multi-character capital expansions.
+A capital expansion at a word start and the space before it use at most three tokens.
+The initial pair has two characters.
+
+A stripped 64-character name has at most 32 space-separated words.
+Thus each spelling uses at most `65 + 32 = 97` tokens.
+
+A Unicode ligature example has 97 tokens: 31 repetitions of U+FB03 and a space, then U+FB03 and `q`.
+The 500-name list at this token bound has 35,725 nodes, a 490.52 ms build, and 1,002,474 bytes.
+The model-independent test uses 1500 different 97-token paths and 145,025 nodes.
+With the full row cache, it uses 3,625,674 bytes and builds in 152.92 ms.
+
+The conservative node bound is 145,501. Its six arrays and 33 bonus rows use at most 3,627,320 bytes before container metadata.
+The test also adds the missing nodes to its measured memory count and checks the 4 MB limit.
+
+The 500-name replay list has 7260 nodes and uses 320,858 bytes with the full cache and container metadata.
+Its arrays use 309,536 bytes, with 131,200 bytes for the 32 cached rows.
+Nine interleaved builds give median times of 66.9651 ms for the sparse tree and 231.4251 ms for the lower-case dense tree.
+The temporary construction dictionaries are not part of the built-tree memory count.
+
+The latency test uses the same 250 recordings, with seven interleaved repetitions for each recording and option.
+It subtracts each recording's no-hint median from its hinted median.
+The result uses linear percentiles of these paired differences.
+All options use the same encoder output. Thus the encoder cost cancels from the added time.
+
+| Tree | Added time p50 (ms) | Added time p90 (ms) |
+|---|---:|---:|
+| Lower-case dense tree from `8339fee` | 2.6941 | 4.9945 |
+| Three-spelling sparse tree | 2.0074 | 4.5273 |
+
+The run uses a 32-logical-CPU x86-64 host, ONNX intra/inter `threads` 4/1, and one `thread` for numerical libraries.
+The one-minute host load min/median/max is `7.1143/8.6133/11.8169`.
+The run starts at `2026-11-02T17:53:25.326729+00:00` and ends at `2026-11-02T17:57:00.083516+00:00`.
+These measurements include a built tree and search work, not model loading or live-device latency.
+
+Repository gate commands, in order:
+
+```sh
+uv run --locked ruff format --check .
+uv run --locked ruff check --no-cache .
+PRIVATE_DENYLIST="$PRIVATE_DENYLIST" ASSIST_LIVE_MODEL_CACHE="$TURN_MODEL_CACHE" task check
+UV_PROJECT_ENVIRONMENT="$FLOOR_ENV" ASSIST_LIVE_MODEL_CACHE="$TURN_MODEL_CACHE" uv run --locked --python 3.14.2 pytest tests/ -q
+ASSIST_LIVE_MODEL_CACHE="$TURN_MODEL_CACHE" unshare -rn sh -c 'ip link set lo up && UV_OFFLINE=1 uv run --locked pytest tests/ -q'
+python3 "$STE_CHECKER" docs/providers/stt.md docs/verification.md
+git diff --check
+uv run --locked python "$PUBLIC_TREE_CHECKER" --history --root . --private-denylist "$PRIVATE_DENYLIST"
+```

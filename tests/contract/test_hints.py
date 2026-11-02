@@ -597,3 +597,67 @@ def test_missing_ready_list_uses_empty_hints_without_lookup_miss(tmp_path, monke
             store.close()
 
     asyncio.run(run())
+
+
+def test_two_satellites_share_prepared_tree_until_last_list_change(
+    tmp_path, monkeypatch
+):
+    import gc
+    import weakref
+    from types import SimpleNamespace
+
+    from assist_live_server.config import ProviderFactory, ServerConfig
+    from assist_live_server.providers import name_context
+    from assist_live_server.providers.parakeet import ParakeetProvider
+
+    builds, trees = [], []
+    tokenize = name_context.tokenize_names
+
+    def counted(names, vocabulary):
+        builds.append(names)
+        return tokenize(names, vocabulary)
+
+    monkeypatch.setattr(name_context, "tokenize_names", counted)
+
+    async def run():
+        provider = ParakeetProvider(
+            SimpleNamespace(
+                asr=SimpleNamespace(
+                    _vocab={0: " command", 1: " filler", 2: "<blk>"}, _vocab_size=3
+                )
+            )
+        )
+        prepared = asyncio.Queue()
+        original = provider.prepare_hints
+
+        async def prepare(hints):
+            await original(hints)
+            trees.append(weakref.ref(hints._context))
+            prepared.put_nowait(None)
+
+        monkeypatch.setattr(provider, "prepare_hints", prepare)
+        factory = ProviderFactory(ServerConfig(tts_provider=None), provider)
+        async with service(tmp_path, providers=factory) as (client, _):
+            for satellite in ("satellite-a", "satellite-b"):
+                await client.set_hints(satellite, ["command"])
+                await asyncio.wait_for(prepared.get(), 1)
+            assert builds == [("command",)], "SATELLITES_SHARE_ONE_BUILD"
+            assert trees[0]() is trees[1](), "SATELLITES_SHARE_ONE_TREE"
+            await client.set_hints("satellite-a", ["filler"])
+            await asyncio.wait_for(prepared.get(), 1)
+            gc.collect()
+            assert trees[1]() is not None, "OTHER_SATELLITE_KEEPS_PREPARED_TREE"
+            assert trees[2]() is not trees[1](), (
+                "LIST_CHANGE_DOES_NOT_MUTATE_OTHER_TREE"
+            )
+            health = await client.health_capabilities()
+            assert health.stt_hints_by_satellite["satellite-b"]["digest"] == digest(
+                ["command"]
+            ), "SHARING_KEEPS_LOWER_CASE_WIRE_DIGEST"
+            await client.set_hints("satellite-b", ["filler"])
+            await asyncio.wait_for(prepared.get(), 1)
+            gc.collect()
+            assert trees[1]() is None, "LAST_SATELLITE_RELEASES_UNUSED_TREE"
+            assert builds == [("command",), ("filler",)], "SHARED_UPDATE_BUILDS_ONCE"
+
+    asyncio.run(run())

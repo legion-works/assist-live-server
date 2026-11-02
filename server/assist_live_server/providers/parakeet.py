@@ -5,7 +5,8 @@ import importlib
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+from weakref import WeakValueDictionary
 
 import numpy as np
 
@@ -13,6 +14,9 @@ from ..assets import load_asset_manifest
 from ..hints import HintList
 from ..turn.detector import verified_model
 from .stt import AudioLimitError, STTClosedError, run_decode
+
+if TYPE_CHECKING:
+    from .name_context import NameContext
 
 INTERVAL_BYTES = 12800
 MAX_AUDIO_BYTES = 480000
@@ -75,6 +79,10 @@ def _load_model(cache: Path, manifest: Path | str | None) -> Any:
 class ParakeetProvider:
     def __init__(self, model: Any) -> None:
         self._model = model
+        # Snapshots own the tree. The index must not keep unused name lists alive.
+        self._hint_contexts: WeakValueDictionary[tuple[str, ...], NameContext] = (
+            WeakValueDictionary()
+        )
 
     @classmethod
     async def load(
@@ -89,7 +97,11 @@ class ParakeetProvider:
 
     async def prepare_hints(self, hints: HintList) -> None:
         asr = self._model.asr
-        await run_decode(lambda: hints.context(asr._vocab, asr._vocab_size))
+        await run_decode(
+            lambda: hints.context(
+                asr._vocab, asr._vocab_size, shared=self._hint_contexts
+            )
+        )
 
     def _decode_final(
         self, pcm: bytes, hints: HintList | tuple[str, ...] = (), bonus: float = 1.0
@@ -101,7 +113,9 @@ class ParakeetProvider:
         if not selected.names:
             return recognize(self._model, samples)
         asr = self._model.asr
-        context = selected.context(asr._vocab, asr._vocab_size)
+        context = selected.context(
+            asr._vocab, asr._vocab_size, shared=self._hint_contexts
+        )
         return recognize(self._model, samples, context=context, bonus=bonus)
 
     def session(

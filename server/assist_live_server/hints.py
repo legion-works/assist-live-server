@@ -2,7 +2,7 @@
 
 import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, MutableMapping
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -16,12 +16,24 @@ class HintList:
         self.names = names
         self._context: NameContext | None = None
 
-    def context(self, vocabulary: Mapping[int, str], size: int) -> NameContext:
+    def context(
+        self,
+        vocabulary: Mapping[int, str],
+        size: int,
+        *,
+        shared: MutableMapping[tuple[str, ...], NameContext] | None = None,
+    ) -> NameContext:
         from .providers.name_context import NameContext, tokenize_names
 
         # The single decode worker serializes first use, including canceled turns.
         if self._context is None:
-            self._context = NameContext(tokenize_names(self.names, vocabulary), size)
+            self._context = shared.get(self.names) if shared is not None else None
+            if self._context is None:
+                self._context = NameContext(
+                    tokenize_names(self.names, vocabulary), size
+                )
+                if shared is not None:
+                    shared[self.names] = self._context
         return self._context
 
 

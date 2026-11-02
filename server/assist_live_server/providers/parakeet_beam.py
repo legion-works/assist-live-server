@@ -131,12 +131,9 @@ def search(
             scores = token_scores
             if context is not None:
                 scores = token_scores.copy()
-                scores[:-1] += (
-                    np.float32(bonus)
-                    * context.increments[
-                        context_states[best.tokens], : asr._vocab_size - 1
-                    ]
-                )
+                context_state = context_states[best.tokens]
+                increments = context.bonus_row(context_state)
+                scores[:-1] += np.float32(bonus) * increments[: asr._vocab_size - 1]
             tokens = np.argsort(scores[:-1])[-token_count:][::-1]
             durations = np.argsort(duration_scores)[-beam:][::-1]
             token_durations = durations
@@ -162,14 +159,13 @@ def search(
                     frame + duration,
                     best.zero_duration_tokens + 1 if duration == 0 else 0,
                 )
-                if context is not None:
+                # Name credit depends on tokens, not on frames or duration paths.
+                if context is not None and hypothesis.tokens not in context_states:
                     context_bonuses[hypothesis.tokens] = context_bonuses[
                         best.tokens
-                    ] + float(
-                        bonus * context.increments[context_states[best.tokens], token]
-                    )
-                    context_states[hypothesis.tokens] = int(
-                        context.transitions[context_states[best.tokens], token]
+                    ] + float(bonus * increments[token])
+                    context_states[hypothesis.tokens] = context.step(
+                        context_state, token
                     )
                 (current if duration == 0 else kept).append(hypothesis)
             # NeMo tdt_beam_decoding.py:428–454 permits zero steps only for tokens.
