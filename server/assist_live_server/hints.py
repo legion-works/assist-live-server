@@ -5,10 +5,10 @@ import json
 from collections.abc import Mapping, MutableMapping
 from typing import TYPE_CHECKING
 
+from assist_live_client.protocol import MAX_HINT_BYTES as MAX_HINT_BYTES
+
 if TYPE_CHECKING:
     from .providers.name_context import NameContext
-
-MAX_HINT_BYTES = 500 * (64 * 12 + 4) + 2
 
 
 class HintList:

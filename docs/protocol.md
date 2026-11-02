@@ -173,10 +173,20 @@ The health digest identifies the accepted list before that build finishes.
 A turn that starts before the build finishes uses the previous prepared list, or no hints if none is prepared.
 Only the newest accepted list can replace the prepared list after its build finishes.
 
+Builds use the same serial executor as decodes, after queued `final` and `partial` decodes.
+The four decode-admission slots are for decodes, not builds.
+A queued build runs after a queued `final` decode. A build that runs can finish before the `final` decode.
+
+A list update removes its previous queued build. Shutdown removes all queued builds without a wait for the decoder.
+Each satellite has at most one queued build.
+The process-local metric `assist_live_stt_hints_build_waits_total` counts each build that queues behind active executor work. Canceled builds also count.
+
 The STT session gets its satellite's prepared snapshot at session creation, through one turn-store read.
-A missing turn, a store error, or no prepared list gives no hints without a turn error or a retry.
+A missing turn, a store error, or no prepared list gives no hints without a lookup retry.
 The metric `assist_live_stt_hints_lookup_misses_total` counts missing turns and store or lookup errors. Logs give only the error class.
 A satellite without a prepared list uses empty hints without a metric increment or an error log.
+
+Other store checks apply. The store refuses timing writes for a removed turn.
 
 A list update does not change an active session. Server shutdown cancels pending build tasks and waits for them to stop.
 

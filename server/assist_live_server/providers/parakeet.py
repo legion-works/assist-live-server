@@ -13,7 +13,7 @@ import numpy as np
 from ..assets import load_asset_manifest
 from ..hints import HintList
 from ..turn.detector import verified_model
-from .stt import AudioLimitError, STTClosedError, run_decode
+from .stt import AudioLimitError, STTClosedError, run_decode, run_hint_build
 
 if TYPE_CHECKING:
     from .name_context import NameContext
@@ -97,7 +97,7 @@ class ParakeetProvider:
 
     async def prepare_hints(self, hints: HintList) -> None:
         asr = self._model.asr
-        await run_decode(
+        await run_hint_build(
             lambda: hints.context(
                 asr._vocab, asr._vocab_size, shared=self._hint_contexts
             )

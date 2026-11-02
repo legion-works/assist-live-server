@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import tarfile
+import threading
 from contextlib import asynccontextmanager
 from io import BytesIO
 from pathlib import Path
@@ -46,6 +47,196 @@ def digest(names):
     return hashlib.sha256(
         json.dumps(names, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
+
+
+async def scheduled_tasks():
+    ready = asyncio.get_running_loop().create_future()
+    asyncio.get_running_loop().call_soon(ready.set_result, None)
+    await ready
+
+
+def test_waiting_hint_build_preserves_final_priority_and_counts_wait(
+    tmp_path, monkeypatch
+):
+    from types import SimpleNamespace
+
+    from assist_live_server.config import ProviderFactory, ServerConfig
+    from assist_live_server.hints import HintList
+    from assist_live_server.providers import stt
+    from assist_live_server.providers.parakeet import ParakeetProvider
+    from assist_live_server.store import SQLiteStore
+
+    first_entered, second_entered = threading.Event(), threading.Event()
+    first_release, second_release = threading.Event(), threading.Event()
+    order = []
+    context = HintList.context
+
+    def build(self, *args, **kwargs):
+        order.append("build")
+        return context(self, *args, **kwargs)
+
+    monkeypatch.setattr(HintList, "context", build)
+
+    def held(entered, release):
+        entered.set()
+        assert release.wait(5), "DECODE_BARRIER_RELEASED"
+
+    async def run():
+        prepared = asyncio.Event()
+        provider = ParakeetProvider(
+            SimpleNamespace(asr=SimpleNamespace(_vocab={0: " lamp"}, _vocab_size=1))
+        )
+        original = provider.prepare_hints
+
+        async def prepare(hints):
+            await original(hints)
+            prepared.set()
+
+        monkeypatch.setattr(provider, "prepare_hints", prepare)
+        store = SQLiteStore(tmp_path / "turns.sqlite3")
+        tasks = [
+            asyncio.create_task(
+                stt.run_decode(lambda: held(first_entered, first_release))
+            )
+        ]
+        try:
+            assert await asyncio.to_thread(first_entered.wait, 2)
+            tasks.extend(
+                [
+                    asyncio.create_task(
+                        stt.run_decode(lambda: held(second_entered, second_release))
+                    ),
+                    asyncio.create_task(stt.run_decode(lambda: None)),
+                    asyncio.create_task(stt.run_decode(lambda: None)),
+                ]
+            )
+            await scheduled_tasks()
+            factory = ProviderFactory(ServerConfig(tts_provider=None), provider)
+            async with service(tmp_path, store, factory) as (client, session):
+
+                async def metric():
+                    async with session.get(
+                        client.url + "/metrics", headers=client._headers
+                    ) as response:
+                        lines = (await response.text()).splitlines()
+                        prefix = "assist_live_stt_hints_build_waits_total "
+                        values = [
+                            int(line[len(prefix) :])
+                            for line in lines
+                            if line.startswith(prefix)
+                        ]
+                        assert len(values) == 1, "HINT_BUILD_WAIT_METRIC_EXPOSED"
+                        return values[0]
+
+                before = await metric()
+                await client.set_hints("satellite-a", ["lamp"])
+                await scheduled_tasks()
+                with stt._LOCK:
+                    assert len(stt._QUEUE) == 4, (
+                        "HINT_BUILD_MUST_WAIT_IN_EXECUTOR_QUEUE"
+                    )
+                assert await metric() == before + 1, "HINT_BUILD_WAIT_COUNTED_ONCE"
+                with pytest.raises(stt.STTBusyError):
+                    await stt.run_decode(lambda: None, final=True)
+                first_release.set()
+                await tasks[0]
+                assert await asyncio.to_thread(second_entered.wait, 2)
+                final = asyncio.create_task(
+                    stt.run_decode(lambda: order.append("final"), final=True)
+                )
+                tasks.append(final)
+                await scheduled_tasks()
+                second_release.set()
+                await asyncio.gather(*tasks)
+                await asyncio.wait_for(prepared.wait(), 2)
+                assert order == ["final", "build"], (
+                    "FINAL_DECODE_PRECEDES_WAITING_BUILD"
+                )
+                assert await metric() == before + 1, "HINT_BUILD_WAIT_NOT_RECOUNTED"
+        finally:
+            first_release.set()
+            second_release.set()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            store.close()
+
+    asyncio.run(asyncio.wait_for(run(), 10))
+
+
+def test_supersede_and_shutdown_remove_waiting_builds_without_decode_progress(
+    tmp_path, monkeypatch
+):
+    from types import SimpleNamespace
+
+    from assist_live_server.config import ProviderFactory, ServerConfig
+    from assist_live_server.hints import HintList
+    from assist_live_server.providers import stt
+    from assist_live_server.providers.parakeet import ParakeetProvider
+
+    entered, release = threading.Event(), threading.Event()
+    built = []
+    context = HintList.context
+
+    def build(self, *args, **kwargs):
+        built.append(self.names)
+        return context(self, *args, **kwargs)
+
+    monkeypatch.setattr(HintList, "context", build)
+    push = stt.heapq.heappush
+    single_satellite = True
+
+    def enqueue(queue, entry):
+        push(queue, entry)
+        if queue is stt._QUEUE and single_satellite:
+            assert sum(item[0] == 2 for item in queue) <= 1, (
+                "SUPERSEDE_REMOVES_OLD_BUILD_BEFORE_NEW_ENQUEUE"
+            )
+
+    monkeypatch.setattr(stt.heapq, "heappush", enqueue)
+
+    def held():
+        entered.set()
+        assert release.wait(10), "DECODE_BARRIER_RELEASED"
+
+    async def run():
+        nonlocal single_satellite
+        provider = ParakeetProvider(
+            SimpleNamespace(asr=SimpleNamespace(_vocab={0: " lamp"}, _vocab_size=1))
+        )
+        factory = ProviderFactory(ServerConfig(tts_provider=None), provider)
+        tasks = [asyncio.create_task(stt.run_decode(held))]
+        try:
+            assert await asyncio.to_thread(entered.wait, 2)
+            tasks.extend(
+                asyncio.create_task(stt.run_decode(lambda: None)) for _ in range(3)
+            )
+            await scheduled_tasks()
+            async with service(tmp_path, providers=factory) as (client, _):
+                for index in range(100):
+                    await client.set_hints("satellite-a", [f"lamp {index}"])
+                    await scheduled_tasks()
+                    with stt._LOCK:
+                        assert len(stt._QUEUE) == 4, (
+                            "SUPERSEDE_REMOVES_OLD_QUEUED_BUILD"
+                        )
+                single_satellite = False
+                await client.set_hints("satellite-b", ["lamp"])
+                await scheduled_tasks()
+                with stt._LOCK:
+                    assert len(stt._QUEUE) == 5, (
+                        "OTHER_SATELLITE_BUILD_DOES_NOT_WAIT_FOR_LOCK"
+                    )
+            with stt._LOCK:
+                assert len(stt._QUEUE) == 3, (
+                    "SHUTDOWN_REMOVES_WAITING_BUILDS_IMMEDIATELY"
+                )
+            assert not release.is_set(), "CANCELLATION_NEEDS_NO_DECODE_PROGRESS"
+        finally:
+            release.set()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            await stt.run_decode(lambda: None)
+        assert built == [], "CANCELLED_WAITING_BUILDS_NEVER_RUN"
+
+    asyncio.run(asyncio.wait_for(run(), 15))
 
 
 @pytest.mark.parametrize(
@@ -597,6 +788,155 @@ def test_missing_ready_list_uses_empty_hints_without_lookup_miss(tmp_path, monke
             store.close()
 
     asyncio.run(run())
+
+
+def test_turn_removed_between_route_check_and_hint_snapshot_keeps_store_refusal(
+    tmp_path, monkeypatch, caplog
+):
+    from types import SimpleNamespace
+    from uuid import uuid7
+
+    from assist_live_client import TurnOpen
+    from assist_live_client.protocol import ProtocolError
+    from assist_live_server.audio_gateway import AudioGateway
+    from assist_live_server.config import ProviderFactory, ServerConfig
+    from assist_live_server.providers.parakeet import ParakeetProvider, ParakeetSession
+    from assist_live_server.store import SQLiteStore
+    from assist_live_server.turn.detector import TurnDetector
+
+    caplog.set_level(logging.DEBUG)
+    selected = []
+
+    def session(*, hints, bonus):
+        selected.append(hints.names if hasattr(hints, "names") else hints)
+        return ParakeetSession(lambda _: "synthetic final")
+
+    monkeypatch.setitem(
+        AudioGateway.__init__.__kwdefaults__,
+        "detector_factory",
+        lambda: TurnDetector(vad_probability=lambda _: 0, turn_probability=lambda _: 0),
+    )
+
+    async def run():
+        route_checked, remove_done, prepared = (asyncio.Event() for _ in range(3))
+        provider = ParakeetProvider(
+            SimpleNamespace(asr=SimpleNamespace(_vocab={0: " lamp"}, _vocab_size=1))
+        )
+        prepare = provider.prepare_hints
+
+        async def ready(hints):
+            await prepare(hints)
+            prepared.set()
+
+        monkeypatch.setattr(provider, "prepare_hints", ready)
+        monkeypatch.setattr(provider, "session", session)
+        factory = ProviderFactory(ServerConfig(tts_provider=None), provider)
+        store = SQLiteStore(tmp_path / "turns.sqlite3")
+        actual_get = store.get_turn
+        actual_append = store.append
+        reads = []
+        refusals = []
+
+        async def append(event):
+            try:
+                await actual_append(event)
+            except ValueError as error:
+                refusals.append((type(error).__name__, str(error)))
+                raise
+
+        async def get_turn(turn_id):
+            value = await actual_get(turn_id)
+            reads.append(value)
+            if len(reads) == 1:
+                route_checked.set()
+                await remove_done.wait()
+            return value
+
+        monkeypatch.setattr(store, "get_turn", get_turn)
+        monkeypatch.setattr(store, "append", append)
+        try:
+            async with service(tmp_path, store, factory) as (client, http):
+                await client.set_hints("satellite-a", ["lamp"])
+                await asyncio.wait_for(prepared.wait(), 2)
+                turn = TurnOpen(str(uuid7()), "satellite-a", "voice", None, None)
+                await client.open_turn(turn)
+
+                async def audio():
+                    yield b"\x01\0"
+
+                async def consume():
+                    return [r async for r in client.stt(turn.turn_id, audio())]
+
+                task = asyncio.create_task(consume())
+                try:
+                    await asyncio.wait_for(route_checked.wait(), 2)
+                    expired = store.now_ns() + store.retention_ns + 60_000_000_000
+                    store.now_ns = lambda: expired
+                    await store.maintain()
+                    assert await actual_get(turn.turn_id) is None, (
+                        "REAL_STORE_REMOVES_TURN"
+                    )
+                    remove_done.set()
+                    with pytest.raises(ProtocolError, match="audio refused") as error:
+                        await asyncio.wait_for(task, 2)
+                    assert error.value.kind == "refused", "REMOVED_TURN_AUDIO_REFUSED"
+                finally:
+                    remove_done.set()
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+                assert len(reads) == 2 and reads[0] is not None and reads[1] is None, (
+                    "APP_SNAPSHOT_REACHES_MISSING_TURN_BRANCH"
+                )
+                assert selected == [()], "REMOVED_TURN_USES_NO_HINTS"
+                assert refusals and set(refusals) == {
+                    ("ValueError", "turn satellite mismatch")
+                }, "REMOVED_TURN_KEEPS_NAMED_TIMING_WRITE_REFUSAL"
+                async with http.get(
+                    client.url + "/metrics", headers=client._headers
+                ) as response:
+                    assert (
+                        "assist_live_stt_hints_lookup_misses_total 1\n"
+                        in await response.text()
+                    ), "REMOVED_TURN_COUNTS_ONE_LOOKUP_MISS"
+                messages = [
+                    r.getMessage()
+                    for r in caplog.records
+                    if r.name.endswith("audio_gateway")
+                ]
+                assert messages == ["LookupError"], "REMOVED_TURN_LOGS_ERROR_CLASS_ONLY"
+                assert "lamp" not in caplog.text, "REMOVED_TURN_LOGS_NO_NAMES"
+        finally:
+            store.close()
+
+    asyncio.run(asyncio.wait_for(run(), 8))
+
+
+def test_hint_body_bound_is_shared_and_keeps_legacy_value(monkeypatch):
+    from assist_live_client import protocol
+    from assist_live_server import hints
+
+    assert getattr(protocol, "MAX_HINT_BYTES", None) == 386002, (
+        "SHARED_HINT_BOUND_KEEPS_LEGACY_VALUE"
+    )
+    assert hints.MAX_HINT_BYTES == 386002, "SERVER_HINT_BOUND_KEEPS_LEGACY_VALUE"
+    requests = []
+
+    async def request(self, method, path, **kwargs):
+        requests.append((method, path, kwargs))
+
+    monkeypatch.setattr(AssistLiveClient, "_request", request)
+    asyncio.run(
+        AssistLiveClient("http://service.invalid", "test-token").set_hints(
+            "satellite-a", ["lamp"]
+        )
+    )
+    assert requests == [
+        (
+            "PUT",
+            "/v1/satellites/satellite-a/hints",
+            {"data": ["lamp"], "request_max": 386002},
+        )
+    ], "CLIENT_HINT_BOUND_KEEPS_LEGACY_VALUE"
 
 
 def test_two_satellites_share_prepared_tree_until_last_list_change(

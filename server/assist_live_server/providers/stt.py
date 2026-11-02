@@ -42,7 +42,7 @@ class STTProvider(Protocol):
 
 
 # One worker prevents concurrent use of the shared decoder. Four slots bound
-# running and queued work together, including work whose caller cancelled.
+# running and queued decodes together, including work whose caller cancelled.
 _EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="local-stt")
 _SLOTS = threading.BoundedSemaphore(4)
 _QUEUE: list[tuple[int, int, Callable[[], None]]] = []
@@ -51,6 +51,7 @@ _SEQUENCE = itertools.count()
 # dispatch the next job in the caller thread while this lock is held.
 _LOCK = threading.RLock()
 _active = False
+_hint_build_waits_total = 0
 
 
 def _dispatch() -> None:
@@ -72,26 +73,59 @@ def _completed(future: Future[None]) -> None:
 async def run_decode[T](operation: Callable[[], T], *, final: bool = False) -> T:
     if not _SLOTS.acquire(blocking=False):
         raise STTBusyError("local STT executor busy: four jobs admitted")
+    return await _run_job(operation, priority=0 if final else 1, admitted=True)
+
+
+def hint_build_waits_total() -> int:
+    with _LOCK:
+        return _hint_build_waits_total
+
+
+async def run_hint_build[T](operation: Callable[[], T]) -> T:
+    # Decode slots are for decodes. Queued builds must run after queued decodes.
+    return await _run_job(operation, priority=2, admitted=False)
+
+
+async def _run_job[T](
+    operation: Callable[[], T], *, priority: int, admitted: bool
+) -> T:
+    global _hint_build_waits_total
     result: Future[T] = Future()
 
     def work() -> None:
         if not result.set_running_or_notify_cancel():
-            _SLOTS.release()
+            if admitted:
+                _SLOTS.release()
             return
         try:
             value = operation()
         except BaseException as error:
-            _SLOTS.release()
+            if admitted:
+                _SLOTS.release()
             result.set_exception(error)
         else:
-            _SLOTS.release()
+            if admitted:
+                _SLOTS.release()
             result.set_result(value)
 
     with _LOCK:
-        heapq.heappush(_QUEUE, (0 if final else 1, next(_SEQUENCE), work))
+        entry = (priority, next(_SEQUENCE), work)
+        if not admitted and _active:
+            _hint_build_waits_total += 1
+        heapq.heappush(_QUEUE, entry)
         if not _active:
             _dispatch()
-    return await asyncio.wrap_future(result)
+    try:
+        return await asyncio.wrap_future(result)
+    except asyncio.CancelledError:
+        if not admitted:
+            with _LOCK:
+                result.cancel()
+                # A blocked worker must not keep superseded lists in the queue.
+                if entry in _QUEUE:
+                    _QUEUE.remove(entry)
+                    heapq.heapify(_QUEUE)
+        raise
 
 
 type ProviderFactory = Callable[..., Awaitable[STTProvider]]

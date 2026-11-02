@@ -46,7 +46,7 @@ from .protocol import (
     WebSocketTransport,
     stored_integer,
 )
-from .providers.stt import STTBusyError
+from .providers.stt import hint_build_waits_total
 from .providers.tts import TTSProvider
 from .store import (
     SPEAKER_NAME_DROPS,
@@ -82,7 +82,6 @@ def create_app(
     empty_hints = HintList(())
     hint_tasks: set[asyncio.Task[None]] = set()
     hint_pending: dict[str, asyncio.Task[None]] = {}
-    hint_build_lock = asyncio.Lock()
 
     async def hint_snapshot(turn_id: str) -> HintList:
         turn = await storage().get_turn(turn_id)
@@ -92,14 +91,9 @@ def create_app(
 
     async def build_hints(satellite: str, candidate: HintList) -> None:
         try:
-            async with hint_build_lock:
-                while satellite_hints.get(satellite) is candidate:
-                    try:
-                        if providers is not None:
-                            await providers.prepare_hints(candidate)
-                        break
-                    except STTBusyError:
-                        await asyncio.sleep(0.1)
+            if satellite_hints.get(satellite) is candidate:
+                if providers is not None:
+                    await providers.prepare_hints(candidate)
                 if satellite_hints.get(satellite) is candidate:
                     ready_hints[satellite] = candidate
         except asyncio.CancelledError:
@@ -439,6 +433,7 @@ def create_app(
                         if audio_gateway is not None
                         else 0
                     ),
+                    "stt_hints_build_waits_total": hint_build_waits_total(),
                     **{
                         "speaker_name_dropped_" + reason + "_total": count
                         for reason, count in SPEAKER_NAME_DROPS.items()

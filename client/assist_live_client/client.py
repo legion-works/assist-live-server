@@ -28,6 +28,7 @@ from .models import (
 from .protocol import (
     MAX_AUDIO,
     MAX_CONTROL,
+    MAX_HINT_BYTES,
     MESSAGE_DEADLINE,
     ProtocolError,
     decode_audio,
@@ -286,7 +287,7 @@ class AssistLiveClient:
             "PUT",
             f"/v1/satellites/{satellite}/hints",
             data=names,
-            request_max=500 * (64 * 12 + 4) + 2,
+            request_max=MAX_HINT_BYTES,
         )
 
     async def open_turn(self, turn: TurnOpen) -> None:

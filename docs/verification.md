@@ -3944,3 +3944,34 @@ python3 "$STE_CHECKER" docs/providers/stt.md docs/verification.md
 git diff --check
 uv run --locked python "$PUBLIC_TREE_CHECKER" --history --root . --private-denylist "$PRIVATE_DENYLIST"
 ```
+
+## Hint-build queue and missing-turn lookup
+
+The [public design, "STT name hints"](https://github.com/legion-works/assist-live/blob/main/docs/design.md#stt-name-hints) specifies prepared name lists for local STT.
+Builds use the serial decode executor after queued decodes, without decode-admission slots or polling.
+The wait counter counts each build that queues behind active work. Canceled builds also count.
+
+The initial queue tests gave `2 failed` before implementation.
+An isolated base archive with the shared-bound test gives `3 failed` at named assertions.
+The hint contracts, name-tree tests, and Parakeet tests give `86 passed` after the repair.
+
+Four admitted decode tasks hold the test executor. A build queues, one decode slot becomes free, and a `final` decode queues.
+The `final` decode runs before the build. A fifth decode gets `STTBusyError` while all four decode slots are full.
+
+One hundred list updates for one satellite keep at most one queued build at each enqueue.
+A different satellite can queue its build without a wait for a list-build lock.
+Supersede and shutdown remove waiting builds without a wait for the decoder.
+
+Three isolated mutations each give one failure at a named assertion:
+
+- Polling with no queued build: `HINT_BUILD_MUST_WAIT_IN_EXECUTOR_QUEUE`.
+- A build before a `final` decode: `FINAL_DECODE_PRECEDES_WAITING_BUILD`.
+- No supersede cancellation: `SUPERSEDE_REMOVES_OLD_QUEUED_BUILD`.
+
+The missing-turn test uses the HTTP route and an actual SQLite store.
+A barrier holds the route after its owner check. Retention removes the turn before the hint-snapshot read.
+The session gets no hints, the lookup-miss counter increases by 1, and the lookup log contains only `LookupError`.
+The store refuses subsequent timing writes with `turn satellite mismatch`. The client gets the `audio refused` error.
+
+The client protocol supplies the single hint-body bound. Server and client checks each give the previous value, `386002` bytes.
+The five archived-client health tests stay in the contract suite.

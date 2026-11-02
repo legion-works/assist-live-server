@@ -9,6 +9,9 @@ from .models import turn_uuid, unsigned
 
 VERSION = 1
 MAX_CONTROL = 16384
+# Each of 500 names has at most 64 characters. A JSON surrogate pair uses 12 bytes.
+# Four bytes are for each name's JSON syntax. Two are for the list brackets.
+MAX_HINT_BYTES = 500 * (64 * 12 + 4) + 2
 # This JSON-escaped text budget lets each transcript envelope fit.
 MAX_TRANSCRIPT_BYTES = 16000
 MAX_PCM = 32000
