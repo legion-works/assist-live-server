@@ -5,7 +5,13 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from aiohttp import WSMsgType, web
-from assist_live_client.models import TimingEvent, TTSFormat, TurnOpen, TurnRecord
+from assist_live_client.models import (
+    TimingEvent,
+    TTSFormat,
+    TurnOpen,
+    TurnRecord,
+    unsigned,
+)
 from assist_live_client.protocol import parse_json
 
 from .auth import Registry, verify_event
@@ -21,6 +27,17 @@ MAX_DEVICE_PER_DEVICE = 4
 
 class TurnExistsError(ValueError):
     """The turn identifier already exists in the store."""
+
+
+class IntegerRangeError(ValueError):
+    pass
+
+
+def stored_integer(value: object) -> int:
+    try:
+        return unsigned(value, bits=63)
+    except ValueError:
+        raise IntegerRangeError("integer_out_of_range") from None
 
 
 class TurnStore(Protocol):

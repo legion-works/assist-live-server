@@ -18,6 +18,7 @@ from assist_live_client.models import (
     MAX_TURN_EVENTS,
     STAGE_OWNERS,
     STAGES,
+    ConversationIdError,
     TimingEvent,
     TurnOpen,
     TurnRecord,
@@ -26,7 +27,7 @@ from assist_live_client.models import (
 from assist_live_client.protocol import MAX_CONTROL
 
 from .auth import Registry
-from .protocol import DeviceEvent, TurnExistsError
+from .protocol import DeviceEvent, TurnExistsError, stored_integer
 from .replay_store import SQLiteReplayStore, connect
 
 LOGGER = logging.getLogger(__name__)
@@ -142,6 +143,7 @@ class SQLiteStore:
         self.last_retention_ns: int | None = None
         self.invalid_rows: Counter[tuple[str, str]] = Counter()
         self.removed_parents: Counter[str] = Counter()
+        self.removed_conversation_ids: Counter[str] = Counter()
         self.wrong_owners: Counter[str] = Counter()
         self.turn_limits: Counter[tuple[str, str]] = Counter()
         self.changed = asyncio.Event()
@@ -310,7 +312,12 @@ class SQLiteStore:
         try:
             value = json.loads(raw)
             value.pop("late_open", None)
-            turn = TurnOpen(**value)
+            try:
+                turn = TurnOpen(**value)
+            except ConversationIdError:
+                value["conversation_id"] = None
+                turn = TurnOpen(**value)
+                self.removed_conversation_ids[satellite] += 1
             if turn.satellite != satellite:
                 raise ValueError("stored satellite mismatch")
             return turn
@@ -325,6 +332,7 @@ class SQLiteStore:
         return replace(event, data=safe_data(event))
 
     def _insert(self, event: TimingEvent) -> None:
+        stored_integer(event.t_utc_ns)
         payload = self._encode(event)
         if event.turn_id is not None:
             count, size = self.connection.execute(
@@ -477,6 +485,7 @@ class SQLiteStore:
         removal = None
         now = self.now_ns()
         opened = turn.opened_utc_ns if turn.opened_utc_ns is not None else now
+        stored_integer(opened)
         if opened < now - self.retention_ns:
             raise ValueError("late_open_too_old")
         if opened > now + OPEN_CLOCK_TOLERANCE_NS:
@@ -586,6 +595,7 @@ class SQLiteStore:
         self._notify()
 
     def _append_device_rows(self, event: TimingEvent, arrival_ns: int) -> None:
+        stored_integer(arrival_ns)
         row = self.connection.execute(
             "SELECT turn_id,opened_ns FROM turns "
             "WHERE satellite=? AND ((status='open' AND opened_ns>?) "
@@ -622,6 +632,7 @@ class SQLiteStore:
         if turn is None:
             return None
         value: TurnRecord = json.loads(row[0])
+        value["conversation_id"] = turn.conversation_id
         value["status"] = "open" if row[1] == "closing" else row[1]
         value["events"] = [
             json.loads(raw)
@@ -664,6 +675,8 @@ class SQLiteStore:
     def _next_event(
         self, satellite: str, cursor: int, since: int
     ) -> tuple[int, str] | None:
+        stored_integer(cursor)
+        stored_integer(since)
         while row := self.connection.execute(
             "SELECT event_id,payload FROM events WHERE satellite=? AND utc_ns>=? "
             "AND event_id>? ORDER BY event_id LIMIT 1",
@@ -703,6 +716,11 @@ class SQLiteStore:
             "parent_turn_id_removed_total": sum(
                 count
                 for satellite, count in self.removed_parents.items()
+                if satellites is None or satellite in satellites
+            ),
+            "conversation_id_removed_total": sum(
+                count
+                for satellite, count in self.removed_conversation_ids.items()
                 if satellites is None or satellite in satellites
             ),
             **{

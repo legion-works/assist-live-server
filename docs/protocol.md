@@ -658,6 +658,22 @@ For callers, `None` means an unclassified error. All client error sites set `kin
 `TurnOpen` contains `turn_id`, `satellite`, `turn_type`, `parent_turn_id`, `conversation_id`, and `record_transcripts`.
 The last field defaults to `false`.
 
+An identifier in `conversation_id` has 1 to 64 characters from `[A-Za-z0-9_-]`.
+The usual integration value is `null`. An empty string is invalid.
+The client and server refuse an invalid identifier with `invalid_conversation_id`. The HTTP response uses `400` and an `error` field.
+
+The current integration and archived clients `b3b1e16`, `c3aadd3`, `5ac300b`, and `0f5241f` keep a missing identifier as `null`.
+None of these clients changes `null` to an empty string.
+
+The new identifier rule refuses writes, not historical turn reads.
+The shared turn decoder replaces a nonconforming stored conversation ID with `null` in its output.
+It does not change the stored row or log the stored identifier.
+The `assist_live_conversation_id_removed_total` metric counts each read that replaces a value, not stored rows.
+Maintenance reads can increase the count. The metric includes only the token's satellites and starts again with the process.
+
+Exports and subscriptions contain events without conversation metadata.
+They continue to read events for a historical turn without its conversation identifier.
+
 The optional `opened_utc_ns` gives the initial open time in UTC nanoseconds.
 Without it, the server uses its receipt time. An earlier time gives `late_open: true` in the turn record.
 The server uses the initial time for turn expiry and retention.
@@ -676,6 +692,16 @@ All other turn-open checks stay unchanged.
 Optional fields are `t_device_ms`, `seq`, and `data`.
 Quality stays `measured`, `proxy`, or `estimate`. Estimates must have a non-negative uncertainty.
 
+The server limits `t_utc_ns`, `opened_utc_ns`, `since_utc_ns`, and `after_event_id` to integers from `0` through `2**63 - 1`.
+These fields become SQLite INTEGER values or query filters.
+An out-of-range HTTP value gives `400` with `{"error": "integer_out_of_range"}`, not a storage error.
+An out-of-range subscription cursor closes with code `1008` and `reason` value `integer_out_of_range`.
+Device boot and sequence values and JSON-only timing data keep their unsigned 64-bit limits.
+
+An integration-token request to `POST /v1/event` must have a non-null `turn_id`, also for source `ha_state`.
+A null turn gives HTTP `403` with `{"error": "turn_required"}`.
+The signed device route does not use this rule. Device events without a turn and server-generated unmatched records keep their current behavior.
+
 ### Measurement rules
 
 See the public [design record](https://github.com/legion-works/assist-live/blob/main/docs/design.md), sections "Measurement rules" and "TTS sentence timing".
@@ -685,7 +711,8 @@ The shared `assist_live_client.models.STAGE_OWNERS` table gives the owner for ea
 |---|---|---|
 | `wake_detected`, `mic_open`, `playback_start`, `playback_end`, `barge_in` | device | device |
 | `speech_start`, `end_candidate`, `end_decision`, `stt_partial`, `stt_final`, `stt_failed`, `tts_failed` | server | integration |
-| `tts_first_text`, `satellite_state`, `fallback_used`, `turn_superseded` | integration | integration |
+| `tts_first_text`, `fallback_used`, `turn_superseded` | integration | integration |
+| `satellite_state` | integration with source `ha_state` | integration with source `ha_state` |
 | `tts_first_byte` | server | integration |
 | `tts_sentence`, `tts_last_byte` | server | none |
 | `stt_final_received`, `tts_audio_received` | integration | integration |

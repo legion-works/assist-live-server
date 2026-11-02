@@ -42,11 +42,12 @@ STAGE_OWNERS: dict[str, dict[str, str | None]] = {
             "integration",
         ),
         (
-            "tts_first_text satellite_state fallback_used turn_superseded "
+            "tts_first_text fallback_used turn_superseded "
             "stt_final_received tts_audio_received",
             "integration",
             "integration",
         ),
+        ("satellite_state", "ha_state", "ha_state"),
         ("tts_first_byte", "server", "integration"),
         ("tts_sentence tts_last_byte", "server", None),
         ("speaker_result tts_text_received unmatched", "server", "server"),
@@ -183,6 +184,10 @@ class HealthCapabilities:
     tts_default_voice: str | None = None
 
 
+class ConversationIdError(ValueError):
+    pass
+
+
 @dataclass(frozen=True)
 class TurnOpen:
     turn_id: str
@@ -204,10 +209,12 @@ class TurnOpen:
             raise ValueError("invalid turn type")
         if type(self.record_transcripts) is not bool:
             raise ValueError("invalid transcript option")
-        if self.conversation_id is not None and (
-            not isinstance(self.conversation_id, str) or len(self.conversation_id) > 256
-        ):
-            raise ValueError("invalid conversation identifier")
+        if self.conversation_id is not None:
+            try:
+                if len(identifier(self.conversation_id)) > 64:
+                    raise ValueError("conversation identifier too long")
+            except ValueError:
+                raise ConversationIdError("invalid_conversation_id") from None
 
 
 class TurnRecord(TypedDict):

@@ -3575,13 +3575,13 @@ Late-open tests check retention and the one-second future tolerance at the limit
 Each turn keeps a maximum of 1024 events and 1,048,576 encoded event bytes.
 Real-server tests accept event 1024, refuse event 1025, fill the byte allowance, and read the full turn through the client.
 The turn-response bound is 1,095,680 bytes: stored bytes plus 1024 times 42 JSON-format bytes plus 4096 metadata bytes.
-The metadata test includes a 256-character conversation identifier with JSON `\u` sequences.
+The metadata test includes a 64-character conversation identifier with the approved identifier shape.
 
 Health tests check the token's satellites, an unseen boot, the largest unsigned 64-bit boot, a late event, and a new boot.
 The process-start time applies only to in-process counters. The device count belongs to its boot and can decrease.
 No metric uses satellite `labels`.
 
-The compatibility tests use `git archive` for clients `b3b1e16`, `c3aadd3`, and `5ac300b`.
+The compatibility tests use `git archive` for clients `b3b1e16`, `c3aadd3`, `5ac300b`, and `0f5241f`.
 Each archived client reads health and turn records with new fields, receives the earlier subscription values, and exports an earlier event.
 The current client requests new subscription values explicitly.
 Archived exports with unknown values are not part of this contract. Export tools must use the current client.
@@ -3619,3 +3619,53 @@ python3 "$STE_CHECKER" docs/protocol.md docs/verification.md
 
 Set `ASSIST_LIVE_MODEL_CACHE` before these checks. All audio and provider fixtures are synthetic.
 These checks do not prove device playback timing or acoustic sentence boundaries. No cloud call, commit, or publication is part of this work.
+
+## Measurement input boundary review
+
+The integration's satellite-state event uses `source: ha_state` on the server and fallback paths.
+The route stores that event without a source change. The same event with `source: integration` gives `wrong_owner`.
+The route continues to accept the two integration-token source values for their permitted events.
+
+Stored UTC times, open times, export filters, and subscription cursors use the non-negative signed SQLite INTEGER range.
+The server accepts `2**63 - 1` for a stored UTC time or query filter. Negative values and values of `2**63` or more give `integer_out_of_range`.
+HTTP requests get `400`. An invalid subscription cursor closes with code `1008` and the named code.
+JSON-only timing numbers and signed-device fields keep their unsigned 64-bit range and HMAC bytes.
+
+The producer check found no necessary integration event without a turn ID.
+Usual timing marks, satellite states, and restart markers all have a turn ID.
+The integration-token event route refuses null turns with `turn_required`.
+The device route and server-generated unmatched events keep their current behavior.
+
+The conversation identifier is `null` or 1 to 64 characters from `[A-Za-z0-9_-]`.
+Invalid strings and incorrect types give `invalid_conversation_id`.
+The current integration uses `null`. The four archived clients keep it as `null` through an actual turn-open request and read.
+They do not change a missing identifier to an empty string. An explicitly supplied empty string is invalid input.
+
+The review tests first gave `25 failed, 5 passed, 10 deselected` on `eb82ba8`.
+The repaired boundary tests then gave `30 passed, 10 deselected`.
+The complete suite before this documentation check gave `2013 passed, 1 skipped`.
+
+Four isolated scratch mutations parse and give unsatisfactory results at named assertions:
+
+| Mutation | Assertion |
+|---|---|
+| Use the incorrect satellite-state owner | `ha_state_owner_not_stored` |
+| Remove the stored-integer guard | `sqlite_integer_http_refusal_missing` |
+| Remove the null-turn guard | `null_integration_turn_not_refused` |
+| Remove the conversation-identifier guard | `conversation_identifier_not_refused` |
+
+### Historical conversation identifiers
+
+The identifier rule refuses new writes, not historical reads.
+SQLite fixtures include a 256-character Unicode identifier, an empty string, an overlength identifier, and a string with a space.
+Each turn read keeps the turn and its events, with `conversation_id: null` in the output.
+The stored payload stays unchanged. No identifier value goes to the logs.
+
+The removal counter counts decoder reads that replace a value, not rows.
+Two turn reads increase it by `2`. A maintenance read increases it again and keeps the turn complete.
+The count includes only the token's satellites. Correct identifiers do not increase it.
+The same fixtures keep export and subscription events readable without conversation metadata.
+
+The initial read tests gave `6 failed, 41 deselected`. The repaired tests gave `6 passed, 41 deselected`.
+A scratch mutation removes the read compatibility rule and drops the turn during validation.
+It parses and gives unsatisfactory results for all four historical fixtures at `legacy_turn_read_dropped`.

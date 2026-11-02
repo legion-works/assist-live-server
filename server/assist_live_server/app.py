@@ -12,10 +12,10 @@ from aiohttp import WSMsgType, web
 from assist_live_client.models import (
     LEGACY_STAGES,
     STAGES,
+    ConversationIdError,
     TimingEvent,
     TurnOpen,
     identifier,
-    unsigned,
 )
 from assist_live_client.protocol import (
     HEARTBEAT_INTERVAL,
@@ -37,11 +37,13 @@ from .event_gateway import EventGateway
 from .protocol import (
     WS_CLOSE_TIMEOUT,
     AudioBackend,
+    IntegerRangeError,
     TimingIngress,
     TurnExistsError,
     TurnStore,
     UDPTransport,
     WebSocketTransport,
+    stored_integer,
 )
 from .providers.tts import TTSProvider
 from .store import (
@@ -163,6 +165,8 @@ def create_app(
     ) -> web.StreamResponse:
         try:
             return await handler(request)
+        except (IntegerRangeError, ConversationIdError) as error:
+            return web.json_response({"error": str(error)}, status=400)
         except ValueError, TypeError, KeyError, TimeoutError:
             raise web.HTTPBadRequest(text="invalid request") from None
 
@@ -376,7 +380,10 @@ def create_app(
 
     async def open_turn(request: web.Request) -> web.Response:
         allowed(request)
-        turn = TurnOpen(**await body(request))
+        payload = await body(request)
+        if payload.get("opened_utc_ns") is not None:
+            stored_integer(payload["opened_utc_ns"])
+        turn = TurnOpen(**payload)
         allowed(request, turn.satellite)
         existing = await storage().get_turn(turn.turn_id)
         if existing is not None:
@@ -400,10 +407,14 @@ def create_app(
 
     async def append(request: web.Request) -> web.Response:
         allowed(request)
-        event = TimingEvent(**await body(request))
+        payload = await body(request)
+        stored_integer(payload.get("t_utc_ns"))
+        event = TimingEvent(**payload)
         allowed(request, event.satellite)
         if event.source not in {"integration", "ha_state"}:
             raise web.HTTPForbidden(text="event source refused")
+        if event.turn_id is None:
+            return web.json_response({"error": "turn_required"}, status=403)
         turn_value = await storage().get_turn(event.turn_id) if event.turn_id else None
         if event.turn_id is not None and (
             turn_value is None or turn_value["satellite"] != event.satellite
@@ -426,7 +437,7 @@ def create_app(
     async def export(request: web.Request) -> web.StreamResponse:
         satellite = identifier(request.query["satellite"])
         allowed(request, satellite)
-        since = unsigned(int(request.query.get("since_utc_ns", "0")))
+        since = stored_integer(int(request.query.get("since_utc_ns", "0")))
         records = storage().export(satellite, since)
         response = web.StreamResponse(headers={"Content-Type": "application/x-ndjson"})
         await response.prepare(request)
@@ -473,7 +484,7 @@ def create_app(
                 raise ValueError("unsupported version")
             if value["type"] != "subscribe" or value["satellite"] not in satellites:
                 raise ValueError("subscription refused")
-            cursor = unsigned(value["after_event_id"])
+            cursor = stored_integer(value["after_event_id"])
             closed = asyncio.create_task(
                 ws.receive(), name="assist-live-subscription-close"
             )
@@ -517,6 +528,8 @@ def create_app(
                     await closed
                 if hasattr(iterator, "aclose"):
                     await iterator.aclose()
+        except IntegerRangeError:
+            await ws.close(code=1008, message=b"integer_out_of_range")
         except ValueError, KeyError, TypeError, TimeoutError, StopAsyncIteration:
             await ws.close(code=1008, message=b"subscription refused")
         return ws
