@@ -25,6 +25,8 @@ import numpy as np
 from numpy.typing import NDArray
 from onnx_asr.models.nemo import NemoConformerRnnt
 
+from .name_context import NameContext
+
 # NeMo e5d79d5a tdt_beam_decoding.py:348–477 has no symbol cap.
 # The server cannot interrupt an active executor job, so each frame must end.
 # onnx-asr 0.12.0 models/nemo.py:91–93 and asr.py:225–227 use a limit of 10.
@@ -72,8 +74,27 @@ def _log_softmax(logits: NDArray[np.float32]) -> NDArray[np.float32]:
     return logits - (maximum + np.log(np.exp(logits - maximum).sum()))
 
 
+def _hint_beam(
+    hypotheses: list[Hypothesis], bonuses: dict[tuple[int, ...], float], width: int
+) -> list[Hypothesis]:
+    reserved = min(8, width // 2)
+    biased = sorted(hypotheses, key=lambda h: h.score, reverse=True)[: width - reserved]
+    selected = set(biased)
+    acoustic = sorted(
+        hypotheses, key=lambda h: h.score - bonuses[h.tokens], reverse=True
+    )
+    # Temporary name prefixes can otherwise remove unrelated acoustic paths.
+    return biased + [h for h in acoustic if h not in selected][:reserved]
+
+
 def search(
-    asr: Any, encoded: NDArray[np.float32], length: int, width: int = 16
+    asr: Any,
+    encoded: NDArray[np.float32],
+    length: int,
+    width: int = 16,
+    *,
+    context: NameContext | None = None,
+    bonus: float = 1.0,
 ) -> list[Hypothesis]:
     if width < 1:
         raise ValueError("TDT beam width must be positive")
@@ -81,6 +102,10 @@ def search(
     token_count = min(beam, asr._vocab_size - 2)
     kept = [Hypothesis(0.0, (), asr._create_state(), 0)]
     cache = {}
+    if context is not None and (not context.active or bonus == 0):
+        context = None
+    context_states: dict[tuple[int, ...], int] = {(): 0}
+    context_bonuses: dict[tuple[int, ...], float] = {(): 0.0}
     # Each beam slot gets one initial state and ten zero-step states.
     # Cache hits also use the beam * (cap + 1) expansion budget.
     frame_budget = beam * (MAX_ZERO_DURATION_TOKENS + 1)
@@ -103,13 +128,22 @@ def search(
                     state,
                 )
             token_scores, duration_scores, state = cache[key]
-            tokens = np.argsort(token_scores[:-1])[-token_count:][::-1]
+            scores = token_scores
+            if context is not None:
+                scores = token_scores.copy()
+                scores[:-1] += (
+                    np.float32(bonus)
+                    * context.increments[
+                        context_states[best.tokens], : asr._vocab_size - 1
+                    ]
+                )
+            tokens = np.argsort(scores[:-1])[-token_count:][::-1]
             durations = np.argsort(duration_scores)[-beam:][::-1]
             token_durations = durations
             if best.zero_duration_tokens >= MAX_ZERO_DURATION_TOKENS:
                 token_durations = np.argsort(duration_scores[1:])[-beam:][::-1] + 1
             pair_scores = (
-                token_scores[tokens, None] + duration_scores[token_durations]
+                scores[tokens, None] + duration_scores[token_durations]
             ).ravel()
             pair_tokens = np.repeat(tokens, len(token_durations))
             pair_durations = np.tile(token_durations, len(tokens))
@@ -128,6 +162,15 @@ def search(
                     frame + duration,
                     best.zero_duration_tokens + 1 if duration == 0 else 0,
                 )
+                if context is not None:
+                    context_bonuses[hypothesis.tokens] = context_bonuses[
+                        best.tokens
+                    ] + float(
+                        bonus * context.increments[context_states[best.tokens], token]
+                    )
+                    context_states[hypothesis.tokens] = int(
+                        context.transitions[context_states[best.tokens], token]
+                    )
                 (current if duration == 0 else kept).append(hypothesis)
             # NeMo tdt_beam_decoding.py:428–454 permits zero steps only for tokens.
             for duration in durations:
@@ -155,12 +198,29 @@ def search(
                     (h for h in kept if h.score > threshold), key=lambda h: h.score
                 )
                 if len(superior) >= beam:
-                    kept = superior
+                    kept = (
+                        _hint_beam(kept, context_bonuses, beam)
+                        if context is not None
+                        else superior
+                    )
                     break
             else:
-                kept = sorted(kept, key=lambda h: h.score, reverse=True)[:beam]
+                kept = (
+                    _hint_beam(kept, context_bonuses, beam)
+                    if context is not None
+                    else sorted(kept, key=lambda h: h.score, reverse=True)[:beam]
+                )
         else:
-            kept = sorted(kept, key=lambda h: h.score, reverse=True)[:beam]
+            kept = (
+                _hint_beam(kept, context_bonuses, beam)
+                if context is not None
+                else sorted(kept, key=lambda h: h.score, reverse=True)[:beam]
+            )
+    if context is not None:
+        for hypothesis in kept:
+            hypothesis.score -= float(
+                bonus * context.potential[context_states[hypothesis.tokens]]
+            )
     return sort_nbest(kept)
 
 
@@ -202,7 +262,13 @@ def encode(model: Any, samples: NDArray[np.float32]) -> tuple[Any, Any, Any]:
     return asr, encoded, lengths
 
 
-def recognize(model: Any, samples: NDArray[np.float32]) -> str:
+def recognize(
+    model: Any,
+    samples: NDArray[np.float32],
+    *,
+    context: NameContext | None = None,
+    bonus: float = 1.0,
+) -> str:
     asr, encoded, lengths = encode(model, samples)
-    best = search(asr, encoded[0], int(lengths[0]))[0]
+    best = search(asr, encoded[0], int(lengths[0]), context=context, bonus=bonus)[0]
     return str(asr._decode_tokens(best.tokens, None, None).text).strip()

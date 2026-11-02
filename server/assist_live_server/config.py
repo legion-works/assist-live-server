@@ -1,5 +1,6 @@
 """Load explicit provider selections before any content can leave the server."""
 
+import math
 import os
 from collections import ChainMap
 from dataclasses import dataclass
@@ -18,6 +19,7 @@ from .destinations import (
 from .destinations import (
     speaker_url as parse_speaker_url,
 )
+from .hints import HintList
 from .providers import stt as stt_registry
 from .providers import tts as tts_registry
 from .providers.stt import STTProvider, STTSession
@@ -43,8 +45,15 @@ class ServerConfig:
     local_only: bool = True
     record_transcripts: bool = False
     speaker_url: str | None = None
+    stt_hint_bonus: float = 1.0
 
     def __post_init__(self) -> None:
+        if (
+            type(self.stt_hint_bonus) not in (int, float)
+            or not math.isfinite(self.stt_hint_bonus)
+            or not 0 <= self.stt_hint_bonus <= 4
+        ):
+            raise ValueError("invalid STT hint bonus")
         if (
             type(self.local_only) is not bool
             or type(self.record_transcripts) is not bool
@@ -70,10 +79,16 @@ class ServerConfig:
         local_only: bool = True,
         record_transcripts: bool = False,
         speaker_url: str | None = None,
+        stt_hint_bonus: float = 1.0,
         resolver: Resolver = resolve_addresses,
     ) -> ServerConfig:
         config = cls(
-            stt_provider, tts_provider, local_only, record_transcripts, speaker_url
+            stt_provider,
+            tts_provider,
+            local_only,
+            record_transcripts,
+            speaker_url,
+            stt_hint_bonus,
         )
         if speaker_url is not None:
             await checked_addresses(
@@ -132,6 +147,7 @@ class ProviderFactory:
             local_only=config.local_only,
             record_transcripts=config.record_transcripts,
             speaker_url=config.speaker_url,
+            stt_hint_bonus=config.stt_hint_bonus,
             resolver=resolver,
         )
         stt: STTProvider | None = None
@@ -169,6 +185,25 @@ class ProviderFactory:
         if provider != self.config.stt_provider or self._stt is None:
             raise ValueError("STT provider not selected")
         return self._stt.session()
+
+    def stt_with_hints(self, hints: HintList | tuple[str, ...]) -> STTSession:
+        from .providers.parakeet import ParakeetProvider
+
+        provider = self.config.stt_provider
+        if provider == "parakeet" and isinstance(self._stt, ParakeetProvider):
+            require_destination(provider_destination(provider), self.config.local_only)
+            return self._stt.session(hints=hints, bonus=self.config.stt_hint_bonus)
+        if provider is None:
+            raise ValueError("STT provider not selected")
+        return self.stt(provider)
+
+    async def prepare_hints(self, hints: HintList) -> None:
+        from .providers.parakeet import ParakeetProvider
+
+        if self.config.stt_provider == "parakeet" and isinstance(
+            self._stt, ParakeetProvider
+        ):
+            await self._stt.prepare_hints(hints)
 
     def tts(self, provider: str) -> TTSProvider:
         require_destination(provider_destination(provider), self.config.local_only)

@@ -138,6 +138,48 @@ The client ignores unknown entry fields.
 An integration must not copy voices from its fallback engine when the server gives no list.
 It must show no voices and send no voice.
 
+### STT name hints
+
+The [public design](https://github.com/legion-works/assist-live/blob/main/docs/design.md#stt-name-hints) specifies satellite-specific names for local STT.
+`PUT /v1/satellites/{satellite}/hints` replaces that satellite's complete list.
+The bearer token must give access to that satellite. Invalid tokens give `401`. Other satellites give `403`.
+
+The JSON body is a list of at most 500 strings, in the caller's stable order.
+Each string has 1 to 64 Unicode characters and a minimum of one letter (`str.isalpha()`).
+Each string must equal its `lower()` and `strip()` values. Duplicate strings are invalid.
+The server validates the names but does not change them.
+
+Invalid JSON, invalid names, or a body above 386002 bytes gives `400` with `{"error":"invalid_hints"}`.
+This route has its own body bound. The control-message bound does not change.
+
+The response is `{"count": N, "digest": "SHA256"}`.
+The digest is SHA-256 of `json.dumps(names, ensure_ascii=False, separators=(",", ":"))` encoded as UTF-8, with names in the submitted order.
+There is no byte-order mark, outer whitespace, or last newline in these canonical bytes.
+For an empty list, the bytes are `[]` and the digest is `4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945`.
+
+Health adds `capabilities.stt_hints` and the top-level `stt_hints_by_satellite` object.
+The flag is `true` only for a configured Parakeet hint path. Cloud STT providers do not get the list.
+The object maps only the token's satellites to their accepted list's `count` and `digest`.
+Names stay in memory only. Logs and the turn store do not get the list.
+
+After restart, each list is empty. A previous nonempty list then has a different digest.
+
+The client adds `set_hints(satellite, names)` and the new health fields without changes to earlier public method signatures.
+Older servers give `stt_hints=False` and `stt_hints_by_satellite=None`.
+Older clients ignore the new health fields.
+
+The server starts a background prefix-graph build when it accepts a Parakeet list.
+The health digest identifies the accepted list before that build finishes.
+A turn that starts before the build finishes uses the previous prepared list, or no hints if none is prepared.
+Only the newest accepted list can replace the prepared list after its build finishes.
+
+The STT session gets its satellite's prepared snapshot at session creation, through one turn-store read.
+A missing turn, a store error, or no prepared list gives no hints without a turn error or a retry.
+The metric `assist_live_stt_hints_lookup_misses_total` counts missing turns and store or lookup errors. Logs give only the error class.
+A satellite without a prepared list uses empty hints without a metric increment or an error log.
+
+A list update does not change an active session. Server shutdown cancels pending build tasks and waits for them to stop.
+
 ## Credentials and identity
 
 Each satellite has an anonymous `satellite_key`.

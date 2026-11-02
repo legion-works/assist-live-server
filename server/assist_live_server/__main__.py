@@ -117,6 +117,7 @@ async def serve() -> None:
         local_only=boolean("ASSIST_LIVE_LOCAL_ONLY", "true"),
         record_transcripts=boolean("ASSIST_LIVE_RECORD_TRANSCRIPTS", "false"),
         speaker_url=os.environ.get("ASSIST_LIVE_SPEAKER_URL") or None,
+        stt_hint_bonus=float(os.environ.get("ASSIST_LIVE_STT_HINT_BONUS", "1.0")),
     )
     data = Path(os.environ.get("ASSIST_LIVE_DATA", "/data"))
     data.mkdir(parents=True, exist_ok=True, mode=0o700)

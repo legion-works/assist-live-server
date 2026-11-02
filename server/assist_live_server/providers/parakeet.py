@@ -10,6 +10,7 @@ from typing import Any
 import numpy as np
 
 from ..assets import load_asset_manifest
+from ..hints import HintList
 from ..turn.detector import verified_model
 from .stt import AudioLimitError, STTClosedError, run_decode
 
@@ -86,14 +87,30 @@ class ParakeetProvider:
         samples = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768
         return str(self._model.recognize(samples, sample_rate=16000)).strip()
 
-    def _decode_final(self, pcm: bytes) -> str:
+    async def prepare_hints(self, hints: HintList) -> None:
+        asr = self._model.asr
+        await run_decode(lambda: hints.context(asr._vocab, asr._vocab_size))
+
+    def _decode_final(
+        self, pcm: bytes, hints: HintList | tuple[str, ...] = (), bonus: float = 1.0
+    ) -> str:
         from .parakeet_beam import recognize
 
         samples = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / np.float32(32768)
-        return recognize(self._model, samples)
+        selected = hints if isinstance(hints, HintList) else HintList(hints)
+        if not selected.names:
+            return recognize(self._model, samples)
+        asr = self._model.asr
+        context = selected.context(asr._vocab, asr._vocab_size)
+        return recognize(self._model, samples, context=context, bonus=bonus)
 
-    def session(self) -> ParakeetSession:
-        return ParakeetSession(self._decode, self._decode_final)
+    def session(
+        self, *, hints: HintList | tuple[str, ...] = (), bonus: float = 1.0
+    ) -> ParakeetSession:
+        selected = hints if isinstance(hints, HintList) else HintList(hints)
+        return ParakeetSession(
+            self._decode, partial(self._decode_final, hints=selected, bonus=bonus)
+        )
 
 
 class ParakeetSession:

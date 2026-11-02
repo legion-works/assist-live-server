@@ -1,12 +1,14 @@
 """Keep one provider and one detector for each audio turn."""
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
 from assist_live_client.protocol import encode_control, encode_transcript
 
 from .destinations import Destination, require_destination
+from .hints import HintList
 from .providers.parakeet import MAX_AUDIO_BYTES
 from .providers.stt import STTSession
 from .speaker import SpeakerPlugin
@@ -15,6 +17,7 @@ from .turn.transcript_guard import transcript_words
 
 TURN_TIMEOUT = 15.0
 STALL_INTERVAL = 0.1
+LOGGER = logging.getLogger(__name__)
 
 type Recorder = Callable[[str, dict[str, object]], Awaitable[None]]
 
@@ -29,6 +32,9 @@ class AudioGateway:
         destination: Destination | None = None,
         local_only: bool = True,
         speaker: SpeakerPlugin | None = None,
+        hinted_factory: Callable[[HintList | tuple[str, ...]], STTSession]
+        | None = None,
+        hint_snapshot: Callable[[str], Awaitable[HintList]] | None = None,
     ) -> None:
         self.provider_factory = provider_factory
         self.provider = provider
@@ -37,6 +43,9 @@ class AudioGateway:
         self.declared_destination = destination
         self.local_only = local_only
         self.speaker = speaker
+        self.hinted_factory = hinted_factory
+        self.hint_snapshot = hint_snapshot
+        self.stt_hints_lookup_misses_total = 0
         self.stt_final_replaced_total = 0
 
     async def stt(
@@ -86,7 +95,20 @@ class AudioGateway:
             try:
                 # Select the provider before the iterator can supply its first frame.
                 require_destination(self.destination, self.local_only)
-                session = self.provider_factory(self.provider)
+                hints: HintList | tuple[str, ...] = ()
+                if self.hinted_factory is not None:
+                    try:
+                        if self.hint_snapshot is None:
+                            raise LookupError
+                        hints = await self.hint_snapshot(turn_id)
+                    except Exception as error:
+                        self.stt_hints_lookup_misses_total += 1
+                        LOGGER.debug("%s", type(error).__name__)
+                session = (
+                    self.hinted_factory(hints)
+                    if self.hinted_factory is not None
+                    else self.provider_factory(self.provider)
+                )
                 detector = await asyncio.to_thread(self.detector_factory)
                 active_session = session
 

@@ -3766,3 +3766,82 @@ python3 "$STE_CHECKER" docs/protocol.md docs/verification.md
 git diff --check
 uv run --locked python "$PUBLIC_TREE_CHECKER" --history --root . --private-denylist "$PRIVATE_DENYLIST"
 ```
+
+## STT name hints
+
+The [public design, "STT name hints"](https://github.com/legion-works/assist-live/blob/main/docs/design.md#stt-name-hints) specifies memory-only lists for each satellite.
+The route validates names without changes and reports only the count and canonical SHA-256 digest.
+The initial tests against `8f9c620` gave `34 failed` before implementation.
+The hint contracts, prefix scoring, reserved positions, and list-cache tests give `62 passed`.
+Mypy reports no issues in 50 source files.
+
+The tests include each validation rule, token scope, store writes, logs at all levels, restart digests, and satellite snapshots.
+Clients from `b3b1e16`, `c3aadd3`, `5ac300b`, `7ab511c`, and `8f9c620` decode health without changes.
+Five isolated mutations give failures at these assertions:
+
+- No bonus withdrawal: `leave must withdraw partial bonus`.
+- Bonuses on `partial` transcripts: `partials must not use hint bonus`.
+- Names to a cloud provider: `cloud provider must not receive hints`.
+- Names in logs: `hint names must not appear in logs at any level`.
+- No reserved acoustic positions: `RESERVED_UNBIASED_SLOTS_REQUIRED`.
+
+The last decoder keeps eight positions by the score with the bonus and eight by the score without it, without duplicates.
+With 500 names and bonus `1.0`, the 250 CC0 recordings have `96/1945` word errors with and without names.
+No recording gets a name that the speaker did not say.
+
+The 21 selected device turns have 112 words and nine entity-name commands.
+On the accepted audio prefixes, names decrease word errors from `7/112` to `6/112` and entity errors from `3/9` to `2/9`.
+On complete recordings, the selected decoder gives `6/112` word errors and `1/9` entity errors.
+No selected turn gets a name that the speaker did not say.
+
+Without reserved positions, the same lists give `5/112` prefix word errors and `1/9` entity errors, but `97/1945` corpus word errors.
+Names with the `stairs` prefix change candidate pruning for one near-tie number transcript, despite complete bonus withdrawal.
+The `12+4` and `8+8` position tests each give `96/1945`, but correct only one device-prefix entity error.
+The `8+8` rule gives the lower complete-recording word-error count.
+The selected rule satisfies the design rule, with a smaller decrease in device errors.
+
+With an empty list, all 7521 n-best paths agree with `8f9c620`, with a maximum score difference of `0.0`.
+This test includes all 250 corpus recordings and 116 cuts from 29 available device recordings.
+Predictor states agree as arrays for device cuts and as SHA-256 byte digests for corpus paths.
+The earlier 27 device cuts were unavailable after recording cleanup, so this test uses the available recordings.
+
+Each available recording supplies its full audio and three cuts from automatic Whisper word-time estimates.
+The cuts follow the first positive word-end time, the command midpoint, and 80 ms before the last word-end time.
+These times are model estimates, not manually checked word boundaries.
+
+The latency test uses 250 interleaved baseline and hinted decode pairs with a warm model and one decode at a time.
+Each pair uses the same audio. The option order and recording order use a seeded shuffle.
+The hinted decoder uses the satellite list's prefix `graph` after its background build.
+The one-time build cost for 500 names is `228.87 ms`.
+
+The paired added decode time is `2.31/9.67 ms` at p50/p90.
+Baseline and hinted decode medians are `101.21/104.16 ms`.
+These times include the encoder and search, but do not include model loading, WAV reads, or the one-time `graph` build.
+The accepted PUT request schedules that build. A turn before the build finishes uses the previous prepared list, without a wait for the build.
+The test ran from `2026-11-02T12:01:42+00:00` to `2026-11-02T12:02:35+00:00` on a 32-logical-CPU host.
+
+ONNX uses `intra_op_num_threads=4` and `inter_op_num_threads=1`.
+The one-minute load is `1.91` to `4.29`, with median `3.71`.
+
+The session-start test uses 1000 interleaved pairs with an actual SQLite turn read and the ready-snapshot lookup.
+Against ordinary factory session creation, the added p50/p90 time is `0.03685/0.05179 ms`. The one-minute load is `1.35`.
+This test does not include turn detection, audio processing, or decode time.
+
+Missing turns and store or lookup errors keep audio available, with one lookup-miss metric increment and only an error-class log.
+Without a prepared list, the session uses empty hints without a metric increment.
+Tests also check the previous list during a pending build, one build for each accepted list, superseded generations, and shutdown task cancellation.
+
+The corpus audio and device recordings stay external to the public tree.
+The tests use no live cloud request, bench change, or new device recording.
+Repository gate commands:
+
+```sh
+uv run --locked ruff format --check .
+uv run --locked ruff check --no-cache .
+PRIVATE_DENYLIST="$PRIVATE_DENYLIST" ASSIST_LIVE_MODEL_CACHE="$TURN_MODEL_CACHE" task check
+UV_PROJECT_ENVIRONMENT="$FLOOR_ENV" ASSIST_LIVE_MODEL_CACHE="$TURN_MODEL_CACHE" uv run --locked --python 3.14.2 pytest tests/ -q
+ASSIST_LIVE_MODEL_CACHE="$TURN_MODEL_CACHE" unshare -rn sh -c 'ip link set lo up && UV_OFFLINE=1 uv run --locked pytest tests/ -q'
+python3 "$STE_CHECKER" docs/protocol.md docs/configuration.md docs/providers/stt.md docs/verification.md
+git diff --check
+uv run --locked python "$PUBLIC_TREE_CHECKER" --history --root . --private-denylist "$PRIVATE_DENYLIST"
+```

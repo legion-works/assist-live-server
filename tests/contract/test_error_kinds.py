@@ -57,7 +57,7 @@ def test_client_public_signatures_stay_unchanged():
             not name.startswith("_") or name in {"__init__", "__aenter__", "__aexit__"}
         )
     }
-    assert len(actual) == 15
+    assert len(actual) == 16
     assert actual == expected
 
 

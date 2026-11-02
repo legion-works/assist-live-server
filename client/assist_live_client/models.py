@@ -182,6 +182,8 @@ class HealthCapabilities:
     destinations: Mapping[str, str] | None = None
     tts_voices: tuple[TTSVoice, ...] = ()
     tts_default_voice: str | None = None
+    stt_hints: bool = False
+    stt_hints_by_satellite: Mapping[str, Mapping[str, str | int]] | None = None
 
 
 class ConversationIdError(ValueError):

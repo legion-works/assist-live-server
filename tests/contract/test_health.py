@@ -192,7 +192,17 @@ def test_health_capabilities_and_legacy_boolean(
                         "sequence_gaps_by_satellite": {
                             "satellite-a": {"boot_id": None, "missing": 0}
                         },
+                        "stt_hints_by_satellite": {
+                            "satellite-a": {
+                                "count": 0,
+                                "digest": (
+                                    "4f53cda18c2baa0c0354bb5f9a3ecbe5ed"
+                                    "12ab4d8e11ba873c2f11161202b945"
+                                ),
+                            }
+                        },
                         "capabilities": {
+                            "stt_hints": False,
                             "stt": stt,
                             "tts": tts,
                             "text_positions": tts,

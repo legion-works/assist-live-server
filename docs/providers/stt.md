@@ -31,7 +31,7 @@ An empty session finishes with an empty string.
 The search keeps alternative paths for tokens and frame counts on the same encoder output.
 It sums duplicate path scores with `log-add-exp` only when the tokens and the next frame agree.
 It divides the `final` path score by the token count, with the initial `blank` in that count.
-It uses no language model, word list, or audio change.
+Without name hints, it uses no language model, word list, or audio change.
 
 The server adds work limits to NeMo's search.
 Each path can give at most ten tokens with a frame step of 0.
@@ -65,6 +65,36 @@ Do not update the runtime pin without those checks.
 The gateway's `final_redecodes` replacement rule stays unchanged as a second guard.
 See the [public design record](https://github.com/legion-works/assist-live/blob/main/docs/design.md),
 the [transcript replacement rule](../protocol.md), and the [verification record](../verification.md).
+
+## Name hints for the last transcript
+
+The [public design](https://github.com/legion-works/assist-live/blob/main/docs/design.md#stt-name-hints) specifies context biasing for the last transcript only.
+The server uses the names for the turn's satellite, from its prepared snapshot at session creation.
+It selects a minimum-piece token sequence for each name from the pinned vocabulary.
+A name without a complete token sequence gives no bias.
+
+A prefix `graph` gives a bonus to tokens that continue a name before candidate pruning.
+Failure arcs remove the temporary bonus of a name that is not complete. Complete names keep their bonus.
+The last ranking also removes each remaining incomplete-name bonus.
+Nested names and names with a shared prefix use the same `graph`.
+
+The default bonus is `1.0`. See [configuration](../configuration.md) for the limits.
+
+With names, each beam has 16 positions.
+The best eight hypotheses by the score with the bonus fill the first eight positions.
+The best hypotheses by the score without the bonus fill the other eight positions, without duplicate hypotheses.
+This rule keeps acoustic alternatives when a temporary name prefix changes candidate pruning.
+It does not guarantee the same transcript as recognition without names.
+
+The server builds each satellite list's token sequences and prefix `graph` in the background after the accepted PUT request.
+Subsequent turns use this `graph`. A list update replaces it for new turns only, after the build finishes.
+Until then, turns use the previous prepared list without a wait for the new build.
+The single decode worker serializes builds and decodes. A superseded list cannot replace a newer list.
+
+An empty list keeps the unchanged search arithmetic and n-best paths.
+The zero-duration token limit and frame budget also apply with names.
+Greedy `partial` transcripts do not use this `graph`.
+Deepgram and OpenAI receive no names and report `stt_hints=false`.
 
 ## Voice onset
 

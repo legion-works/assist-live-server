@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import json
+import re
 import socket
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from dataclasses import asdict
@@ -157,9 +158,10 @@ class AssistLiveClient:
         data: object = None,
         timeout: float = 20,
         response_max: int = MAX_CONTROL,
+        request_max: int = MAX_CONTROL,
     ) -> Any:
         raw = json.dumps(data, allow_nan=False).encode() if data is not None else None
-        if raw is not None and len(raw) > MAX_CONTROL:
+        if raw is not None and len(raw) > request_max:
             raise ProtocolError("request too large", kind="malformed")
         try:
             async with self._connect(
@@ -210,7 +212,7 @@ class AssistLiveClient:
         if not isinstance(capabilities, dict):
             raise ProtocolError("invalid health capabilities", kind="malformed")
         fields = {}
-        for key in ("stt", "tts", "text_positions"):
+        for key in ("stt", "tts", "text_positions", "stt_hints"):
             item = capabilities.get(key, False)
             if type(item) is not bool:
                 raise ProtocolError("invalid health capability", kind="malformed")
@@ -251,6 +253,23 @@ class AssistLiveClient:
                 raise ValueError("invalid default voice")
         except ValueError, TypeError, KeyError:
             raise ProtocolError("invalid health TTS voices", kind="malformed") from None
+        hints = value.get("stt_hints_by_satellite")
+        try:
+            if hints is not None:
+                if not isinstance(hints, dict):
+                    raise ValueError("invalid hints map")
+                for satellite, summary in hints.items():
+                    identifier(satellite)
+                    if (
+                        not isinstance(summary, dict)
+                        or type(summary.get("count")) is not int
+                        or not 0 <= summary["count"] <= 500
+                        or not isinstance(summary.get("digest"), str)
+                        or not re.fullmatch("[a-f0-9]{64}", summary["digest"])
+                    ):
+                        raise ValueError("invalid hint summary")
+        except ValueError, TypeError:
+            raise ProtocolError("invalid health STT hints", kind="malformed") from None
         return HealthCapabilities(
             value["healthy"],
             **fields,
@@ -258,6 +277,16 @@ class AssistLiveClient:
             destinations=destinations,
             tts_voices=tuple(voices),
             tts_default_voice=default_voice,
+            stt_hints_by_satellite=hints,
+        )
+
+    async def set_hints(self, satellite: str, names: list[str]) -> None:
+        identifier(satellite)
+        await self._request(
+            "PUT",
+            f"/v1/satellites/{satellite}/hints",
+            data=names,
+            request_max=500 * (64 * 12 + 4) + 2,
         )
 
     async def open_turn(self, turn: TurnOpen) -> None:

@@ -21,9 +21,15 @@ The store's initial value does not add a different switch when it runs in the se
 | `local_only` | `True` | Refuse cloud providers and non-local speaker addresses. |
 | `record_transcripts` | `False` | Store `final` transcripts only when the turn also opts in. |
 | `speaker_url` | `None` | Disable speaker identification unless an explicit HTTP destination is set. |
+| `stt_hint_bonus` | `1.0` | Parakeet name bonus, a finite number from `0` through `4`, inclusive. |
 
 Parakeet and Piper have destination `local`. Deepgram, OpenAI, and ElevenLabs have destination `cloud`.
 The factory loads only the selected providers.
+
+`ASSIST_LIVE_STT_HINT_BONUS` sets `stt_hint_bonus` for the server command.
+`0` disables the bonus without a change to the accepted name list or digest.
+Only the last Parakeet transcript uses the bonus. `partial` transcripts and cloud requests do not use names.
+See the [name-hint protocol](protocol.md#stt-name-hints) and the [public design](https://github.com/legion-works/assist-live/blob/main/docs/design.md#stt-name-hints).
 
 The STT and TTS `provider_names()`, `provider_destination()`, and `provider_factory()` helpers are the registry source for configuration.
 The STT helper's explicit `mode="local_compatible"` filter lists local providers only. Its default lists all available providers.

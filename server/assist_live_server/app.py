@@ -34,6 +34,7 @@ from .auth import Registry
 from .config import ProviderFactory, provider_destination
 from .destinations import Destination
 from .event_gateway import EventGateway
+from .hints import MAX_HINT_BYTES, HintList, hint_summary, validate_hints
 from .protocol import (
     WS_CLOSE_TIMEOUT,
     AudioBackend,
@@ -45,6 +46,7 @@ from .protocol import (
     WebSocketTransport,
     stored_integer,
 )
+from .providers.stt import STTBusyError
 from .providers.tts import TTSProvider
 from .store import (
     SPEAKER_NAME_DROPS,
@@ -75,6 +77,36 @@ def create_app(
     providers: ProviderFactory | None = None,
     tts_gateway: TTSGateway | None = None,
 ) -> web.Application:
+    satellite_hints: dict[str, HintList] = {}
+    ready_hints: dict[str, HintList] = {}
+    empty_hints = HintList(())
+    hint_tasks: set[asyncio.Task[None]] = set()
+    hint_pending: dict[str, asyncio.Task[None]] = {}
+    hint_build_lock = asyncio.Lock()
+
+    async def hint_snapshot(turn_id: str) -> HintList:
+        turn = await storage().get_turn(turn_id)
+        if turn is None:
+            raise LookupError
+        return ready_hints.get(turn["satellite"], empty_hints)
+
+    async def build_hints(satellite: str, candidate: HintList) -> None:
+        try:
+            async with hint_build_lock:
+                while satellite_hints.get(satellite) is candidate:
+                    try:
+                        if providers is not None:
+                            await providers.prepare_hints(candidate)
+                        break
+                    except STTBusyError:
+                        await asyncio.sleep(0.1)
+                if satellite_hints.get(satellite) is candidate:
+                    ready_hints[satellite] = candidate
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            LOGGER.warning("%s", type(error).__name__)
+
     if providers is not None:
         if any(
             value is not None
@@ -90,6 +122,10 @@ def create_app(
                 destination=provider_destination(config.stt_provider),
                 local_only=config.local_only,
                 speaker=providers.speaker,
+                hinted_factory=providers.stt_with_hints
+                if config.stt_provider == "parakeet"
+                else None,
+                hint_snapshot=hint_snapshot,
             )
         if config.tts_provider is not None:
             tts_gateway = TTSGateway(
@@ -228,6 +264,7 @@ def create_app(
             if transport is not None:
                 transport.close()
             tasks = [task for task in (consumer, maintenance) if task is not None]
+            tasks.extend(hint_tasks)
             for task in tasks:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
@@ -308,7 +345,15 @@ def create_app(
                 "healthy": store is not None and registry.replay_store is not None,
                 "sequence_gaps_by_satellite": sequence_gaps_by_satellite,
                 "counters_since_utc_ns": counters_since_utc_ns,
+                "stt_hints_by_satellite": {
+                    satellite: hint_summary(satellite_hints[satellite].names)
+                    if satellite in satellite_hints
+                    else hint_summary(())
+                    for satellite in sorted(satellites)
+                },
                 "capabilities": {
+                    "stt_hints": audio_gateway is not None
+                    and audio_gateway.hinted_factory is not None,
                     "stt": backend is not None or audio_gateway is not None,
                     "tts": backend is not None or tts_gateway is not None,
                     "text_positions": tts_gateway is not None
@@ -335,6 +380,32 @@ def create_app(
         satellites = allowed(request)
         return web.json_response([{"satellite": s} for s in sorted(satellites)])
 
+    async def hints(request: web.Request) -> web.Response:
+        satellite = request.match_info["satellite"]
+        allowed(request, satellite)
+        try:
+            identifier(satellite)
+            raw = bytearray()
+            async with asyncio.timeout(MESSAGE_DEADLINE):
+                async for chunk in request.content.iter_chunked(4096):
+                    if len(raw) + len(chunk) > MAX_HINT_BYTES:
+                        raise ValueError("invalid_hints")
+                    raw.extend(chunk)
+            names = validate_hints(json.loads(raw))
+        except ValueError, TypeError, UnicodeError, TimeoutError:
+            return web.json_response({"error": "invalid_hints"}, status=400)
+        candidate = HintList(names)
+        satellite_hints[satellite] = candidate
+        if providers is not None and providers.config.stt_provider == "parakeet":
+            previous = hint_pending.get(satellite)
+            if previous is not None:
+                previous.cancel()
+            task = asyncio.create_task(build_hints(satellite, candidate))
+            hint_pending[satellite] = task
+            hint_tasks.add(task)
+            task.add_done_callback(hint_tasks.discard)
+        return web.json_response(hint_summary(names))
+
     async def metrics(request: web.Request) -> web.Response:
         satellites = allowed(request)
         if not isinstance(store, SQLiteStore) or gateway is None:
@@ -360,6 +431,11 @@ def create_app(
                     "audio_store_errors_total": audio_store_errors_total,
                     "stt_final_replaced_total": (
                         audio_gateway.stt_final_replaced_total
+                        if audio_gateway is not None
+                        else 0
+                    ),
+                    "stt_hints_lookup_misses_total": (
+                        audio_gateway.stt_hints_lookup_misses_total
                         if audio_gateway is not None
                         else 0
                     ),
@@ -826,4 +902,5 @@ def create_app(
     app.router.add_get("/v1/events", events)
     app.router.add_get("/v1/audio", audio)
     app.router.add_get("/v1/device", device)
+    app.router.add_put("/v1/satellites/{satellite}/hints", hints)
     return app

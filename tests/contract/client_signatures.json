@@ -5,6 +5,7 @@
   "close": "(self) -> None",
   "health": "(self, timeout: float = 0.2) -> bool",
   "health_capabilities": "(self, timeout: float = 0.2) -> assist_live_client.models.HealthCapabilities",
+  "set_hints": "(self, satellite: str, names: list[str]) -> None",
   "open_turn": "(self, turn: assist_live_client.models.TurnOpen) -> None",
   "event": "(self, event: assist_live_client.models.TimingEvent) -> None",
   "turn": "(self, turn_id: str) -> assist_live_client.models.TurnRecord",
