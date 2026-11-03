@@ -844,8 +844,8 @@ The server keeps these optional data fields:
 
 All these integers are less than `2**64`. Booleans are not integers for these fields.
 Unknown codes, negative numbers, and incorrect types give HTTP `400`.
-The 13 fallback `reason` values are `health_timeout`, `health_error`, `server_unhealthy`, `stt_unsupported`, `tts_unsupported`, `not_local_only`, and `destination_not_local`.
-The other values are `open_refused`, `open_error`, `stream_refused`, `stream_closed`, `stream_error`, and `message_timeout`.
+The 14 fallback `reason` values are `health_timeout`, `health_error`, `server_unhealthy`, `stt_unsupported`, `tts_unsupported`, `not_local_only`, and `destination_not_local`.
+The other values are `open_refused`, `open_error`, `stream_refused`, `stream_closed`, `stream_error`, `message_timeout`, and `fallback_unavailable`.
 
 The server's `tts_text_received` marks its first text. The integration owns `tts_first_text`.
 The integration uses `stt_final_received` and `tts_audio_received` for its receipt boundaries, not copies of the server's `stage` values.

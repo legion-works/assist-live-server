@@ -65,7 +65,8 @@ STAGE_OWNERS: dict[str, dict[str, str | None]] = {
 FALLBACK_REASONS = frozenset(
     """health_timeout health_error server_unhealthy
 stt_unsupported tts_unsupported not_local_only destination_not_local open_refused
-open_error stream_refused stream_closed stream_error message_timeout""".split()
+open_error stream_refused stream_closed stream_error message_timeout
+fallback_unavailable""".split()
 )
 END_REASONS = frozenset({"early", "hard", "max_silence", "input_end"})
 SATELLITE_STATES = frozenset({"idle", "listening", "processing", "responding"})

@@ -3975,3 +3975,26 @@ The store refuses subsequent timing writes with `turn satellite mismatch`. The c
 
 The client protocol supplies the single hint-body bound. Server and client checks each give the previous value, `386002` bytes.
 The five archived-client health tests stay in the contract suite.
+
+## Unavailable fallback `reason`
+
+The client and server share `FALLBACK_REASONS` through `EVENT_CODES`.
+The table includes `fallback_unavailable`. The protocol lists all 14 values.
+
+The new tests gave `5 failed, 2 passed` on `35b715c` before the repair.
+After the repair, `uv run --locked pytest tests/contract/test_fallback_unavailable.py -q` gives `7 passed`.
+
+The client accepts the `stt` and `tts` parts.
+An HTTP test with SQLite gives HTTP `200`. The store keeps each part and its `reason` value.
+A subsequent query gives the same fields.
+Unknown `reason` values give HTTP `400` with the plain-text body `invalid request`, without a stored event.
+The documentation test compares the count and the two lists with the shared table.
+
+Archived clients `8339fee` and `c3aadd3` each open a turn and send the two parts with `health_timeout` to the new server.
+The server at `35b715c` refuses the new `reason` for the two parts with HTTP `400`.
+Its response body is `invalid request`, with `Content-Type: text/plain; charset=utf-8`, not a JSON error object.
+The integration keeps refused events local.
+
+A scratch copy removes the new value from the shared table, not from a different server table.
+The HTTP tests then give `2 failed, 2 passed` at `fallback_unavailable_server_accepted`.
+All HTTP checks use an actual server and SQLite store. Each check stops its server and closes its store.

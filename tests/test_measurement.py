@@ -56,12 +56,21 @@ def test_sentence_time_refuses_nonfinite_or_nonnumber(value):
         event("tts_sentence", data={"text_ms": value})
 
 
-@pytest.mark.parametrize(
-    "reason",
-    """health_timeout health_error server_unhealthy
+PUBLIC_FALLBACK_REASONS = """health_timeout health_error server_unhealthy
 stt_unsupported tts_unsupported not_local_only destination_not_local open_refused
-open_error stream_refused stream_closed stream_error message_timeout""".split(),
-)
+open_error stream_refused stream_closed stream_error message_timeout
+fallback_unavailable""".split()
+
+
+def test_public_fallback_reasons_match_shared_table():
+    from assist_live_client.models import FALLBACK_REASONS
+
+    assert set(PUBLIC_FALLBACK_REASONS) == set(FALLBACK_REASONS), (
+        "fallback_reason_list_matches_shared_table"
+    )
+
+
+@pytest.mark.parametrize("reason", PUBLIC_FALLBACK_REASONS)
 def test_all_fallback_reasons_are_kept(reason):
     assert safe_data(event("fallback_used", data={"reason": reason})) == {
         "reason": reason
