@@ -60,8 +60,10 @@ class AudioGateway:
     def checkpoint_failure(self, cause: str) -> None:
         if cause == "deadline":
             self.checkpoint_deadline_failures_total += 1
-        else:
+        elif cause == "wall_limit":
             self.checkpoint_wall_limit_failures_total += 1
+        else:
+            raise ValueError(f"unknown checkpoint failure cause: {cause}")
 
     async def stt(
         self,

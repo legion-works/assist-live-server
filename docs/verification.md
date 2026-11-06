@@ -4162,3 +4162,9 @@ The relative public-tree task gives `NOT CHECKED public tree` in this worktree l
 The canonical checker gives `PASS public data matches=0` and checks 82 commits.
 The streaming STT contract file runs ten times in new processes: `53 passed` each time, or 530 tests with no failure.
 All commands use `idle-run.sh`. No audio playback, hardware access, commit, or publication occurs.
+
+## DRIFT 35 notes (2026-11-06)
+
+- `checkpoint_failure` counts only the named causes `deadline` and `wall_limit`. An unknown cause gives a `ValueError`. Before this change, the server counted an unknown cause as a wall-limit failure.
+- Test: `tests/test_checkpoint_review_fixes.py::test_checkpoint_failure_counts_each_named_cause_and_refuses_others` gave a failure on `f8e154c` and is satisfactory after the change.
+- `docs/configuration.md` states that the server cancels queued checkpoint work before it sends the end decision.

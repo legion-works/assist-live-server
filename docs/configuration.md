@@ -129,7 +129,7 @@ This rule adds a greedy decode at each 400 ms prefix, also before command start.
 
 Across all turns, checkpoint decodes can hold at most three of the four decode admission slots.
 This keeps one slot for a `final` request. Other `final` requests can fill the pool.
-After an end decision, the server cancels queued checkpoint work for positions after the end sample and releases its slots.
+At the end decision, the server cancels queued checkpoint work for positions after the end sample and releases its slots. Then it sends the end decision.
 An active decode keeps its slot until the call finishes.
 Partial-mode admission and queue order stay unchanged.
 

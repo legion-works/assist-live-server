@@ -311,3 +311,18 @@ def test_final_admission_refusal_counter_is_exported_in_both_modes(tmp_path, end
             await asyncio.gather(*blockers, return_exceptions=True)
 
     asyncio.run(asyncio.wait_for(run(), 4))
+
+
+def test_checkpoint_failure_counts_each_named_cause_and_refuses_others():
+    gateway = AudioGateway.__new__(AudioGateway)
+    gateway.checkpoint_deadline_failures_total = 0
+    gateway.checkpoint_wall_limit_failures_total = 0
+
+    gateway.checkpoint_failure("deadline")
+    gateway.checkpoint_failure("wall_limit")
+
+    assert gateway.checkpoint_deadline_failures_total == 1
+    assert gateway.checkpoint_wall_limit_failures_total == 1
+    with pytest.raises(ValueError, match="unknown checkpoint failure cause"):
+        gateway.checkpoint_failure("other")
+    assert gateway.checkpoint_wall_limit_failures_total == 1
