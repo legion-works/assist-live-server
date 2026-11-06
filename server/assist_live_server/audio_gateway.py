@@ -207,9 +207,19 @@ class AudioGateway:
                 for task in done:
                     task.result()
                 await collector
-                text = await active_session.finish()
+                text = ""
                 replaced = False
-                if getattr(active_session, "final_redecodes", False) is True:
+                if onset:
+                    text = await active_session.finish()
+                else:
+                    # docs/design.md: noise without a command must not become text.
+                    decoder.cancel()
+                    await asyncio.gather(decoder, return_exceptions=True)
+                    active_session.cancel()
+                    close = getattr(active_session, "aclose", None)
+                    if close is not None:
+                        await close()
+                if onset and getattr(active_session, "final_redecodes", False) is True:
                     partial_words = transcript_words(partial)
                     final_words = transcript_words(text)
                     if (

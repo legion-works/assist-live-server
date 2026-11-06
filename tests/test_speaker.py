@@ -262,7 +262,8 @@ def test_real_speaker_reaches_client_and_record_without_transcript_change(
     from assist_live_server.providers.parakeet import ParakeetSession
     from assist_live_server.speaker import MurdockSpeaker
     from assist_live_server.store import SQLiteStore
-    from assist_live_server.turn.detector import TurnDetector
+
+    from tests.stt_fakes import FirstBlockCommandDetector
 
     audio = b"\x01\x00" * 512
     caplog.set_level(logging.DEBUG)
@@ -287,12 +288,10 @@ def test_real_speaker_reaches_client_and_record_without_transcript_change(
         async with fake_speaker(identify) as port:
             speaker = MurdockSpeaker(f"http://127.0.0.1:{port}/api/speakers/verify")
             gateway = AudioGateway(
-                lambda _: ParakeetSession(lambda _: "unchanged final"),
+                lambda _: ParakeetSession(lambda _: "", lambda _: "unchanged final"),
                 speaker=speaker,
                 destination="local",
-                detector_factory=lambda: TurnDetector(
-                    vad_probability=lambda _: 1, turn_probability=lambda _: 0
-                ),
+                detector_factory=FirstBlockCommandDetector,
             )
             options = {} if server_opt is None else {"record_transcripts": server_opt}
             runner = web.AppRunner(

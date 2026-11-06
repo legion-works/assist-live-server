@@ -434,7 +434,8 @@ def test_gateway_commit_follows_end_decision_and_failure_uses_existing_path(
     cloud_ws_server, failed
 ):
     from assist_live_server.audio_gateway import AudioGateway
-    from assist_live_server.turn.detector import TurnDetector
+
+    from tests.stt_fakes import FirstBlockCommandDetector
 
     module = adapter()
 
@@ -467,9 +468,7 @@ def test_gateway_commit_follows_end_decision_and_failure_uses_existing_path(
                 provider="openai",
                 destination="cloud",
                 local_only=False,
-                detector_factory=lambda: TurnDetector(
-                    vad_probability=lambda _: 1, turn_probability=lambda _: 0
-                ),
+                detector_factory=FirstBlockCommandDetector,
             )
 
             async def audio():

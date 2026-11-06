@@ -116,7 +116,8 @@ def test_configured_stt_factory_sends_only_to_selected_destination(monkeypatch):
     from assist_live_server.config import ProviderFactory, ServerConfig
     from assist_live_server.providers.deepgram import DeepgramProvider
     from assist_live_server.providers.parakeet import ParakeetProvider, ParakeetSession
-    from assist_live_server.turn.detector import TurnDetector
+
+    from tests.stt_fakes import FirstBlockCommandDetector
 
     sent = []
     local_audio = []
@@ -162,7 +163,7 @@ def test_configured_stt_factory_sends_only_to_selected_destination(monkeypatch):
                     local_audio.append(audio)
                     return "local final"
 
-                return ParakeetSession(decode)
+                return ParakeetSession(lambda _: "", decode)
 
         async def load(cls, cache):
             return Local()
@@ -181,9 +182,7 @@ def test_configured_stt_factory_sends_only_to_selected_destination(monkeypatch):
                     provider=name,
                     destination="local" if name == "parakeet" else "cloud",
                     local_only=False,
-                    detector_factory=lambda: TurnDetector(
-                        vad_probability=lambda _: 1, turn_probability=lambda _: 0
-                    ),
+                    detector_factory=FirstBlockCommandDetector,
                 )
 
                 async def audio():

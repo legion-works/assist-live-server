@@ -36,13 +36,11 @@ import asyncio
 from assist_live_server.providers import parakeet
 parakeet.MAX_AUDIO_BYTES = 1024
 from assist_live_server.audio_gateway import AudioGateway
-from assist_live_server.turn.detector import TurnDetector
+from tests.stt_fakes import FirstBlockCommandDetector
 async def run():
     gateway = AudioGateway(
         lambda _: parakeet.ParakeetSession(lambda pcm: str(len(pcm))),
-        detector_factory=lambda: TurnDetector(
-            vad_probability=lambda _: 1, turn_probability=lambda _: 0
-        ),
+        detector_factory=FirstBlockCommandDetector,
     )
     async def audio():
         yield bytes(1024)
@@ -270,7 +268,7 @@ def test_audio_bound_finishes_once_and_does_not_read_another_frame():
     asyncio.run(run())
 
 
-def test_wall_bound_calls_finish_with_no_frames(monkeypatch):
+def test_wall_bound_without_command_skips_finish(monkeypatch):
     import assist_live_server.audio_gateway as module
 
     monkeypatch.setattr(module, "TURN_TIMEOUT", 0.05)
@@ -292,7 +290,8 @@ def test_wall_bound_calls_finish_with_no_frames(monkeypatch):
             yield b""
 
         replies = [r async for r in gateway.stt(TURN, audio())]
-        assert finished == [True]
+        assert finished == []
+        assert [r["text"] for r in replies if r["type"] == "final"] == [""]
         assert [r["type"] for r in replies] == [
             "end_decision",
             "final",

@@ -3998,3 +3998,54 @@ The integration keeps refused events local.
 A scratch copy removes the new value from the shared table, not from a different server table.
 The HTTP tests then give `2 failed, 2 passed` at `fallback_unavailable_server_accepted`.
 All HTTP checks use an actual server and SQLite store. Each check stops its server and closes its store.
+
+## Empty transcript without a command start (2026-11-06 UTC)
+
+The gateway follows the command-start rule in `docs/design.md`.
+Without a command start, it sends an empty `final` for each provider and each type of turn end.
+It cancels the session without a `final` decode or a `partial` replacement.
+Cloud connection tests check closure without an OpenAI commit or a Deepgram `CloseStream` request.
+An empty `final` keeps the message fields and the `stt_final` event.
+
+The initial gateway tests gave `5 failed, 1 passed` on unchanged production code.
+The new gateway tests include noise, PCM with all samples at 0, a wake tail, input end, and the hard endpoint.
+The command control keeps its transcript after `max_silence`.
+Two scratch mutations gave `7 failed, 1 passed` without the gate and `4 failed, 4 passed` with an endpoint-based condition.
+
+The short-word check found command starts in 33 of 36 Piper cases.
+With no initial audio wait, fast `no` and the two rates of `stop` did not start a command in follow-up turns.
+A live `Stop!` command with a 192 ms voice run also had no command start.
+The operator accepted this limit. The test `test_accepted_short_command_limit_192ms_run_has_empty_final` keeps that behavior explicit.
+
+P1 sets the start rule with volunteer recordings. Detector thresholds, the start guard, and beam ranking stay unchanged.
+
+The archive check read 545 WAV paths without a copy, with 282 unique file hashes and 48 turns without a command start.
+It found 183 paths with stored transcript text. The other 362 paths have no transcript text from a mapped live event.
+Those paths have greedy decoder results, not human transcript records.
+No source audio changed or left its archive.
+
+The corpus check used the 250 rows with `status=final` in `correct_transcripts.jsonl`.
+The archive also has one `unintelligible` row, not in this set.
+Paired gateway replays used the pinned detector and Parakeet decoder on the same audio.
+All 250 recordings started commands and kept the same nonempty transcript with the gate.
+Each gateway made 250 `final` decode calls.
+
+The replay disabled `partial` decodes to keep endpoint inputs constant.
+It ran without real-time waits. This check does not measure live latency or transcript errors.
+
+`task check`, Python 3.14.2, and the network-isolated suite each gave `2244 passed, 1 skipped`.
+Ruff reported `130 files already formatted` and `All checks passed!`.
+Mypy reported no issues in 50 source files. Package, bootstrap, CI, asset, and secret checks were satisfactory.
+The relative public-tree task reported `NOT CHECKED public tree` because this worktree has no sibling integration checkout.
+The canonical privacy check gave `PASS public data matches=0` and a satisfactory history check for 79 commits.
+
+The initial `final`-size fixture could decode a `partial` before input end after its audio increased to 416 ms.
+That `partial` could add a message or cause a size error before an end decision.
+The same paths occur on the base gateway. The error occurs before an endpoint decision, not after it.
+The changed fixtures use a test detector that starts a command on the first PCM input.
+Final-only fixtures use an empty `partial` callback and a different `final` callback, with their initial short inputs.
+
+All 28 cases use the fixed-block detector. The production gateway stays unchanged during this fixture repair.
+The five changed test files each ran 20 times in new processes: 3240 tests gave satisfactory results, with no failure.
+A subsequent run on cores 4 and 5 used two busy workers on those same cores.
+All 162 tests gave satisfactory results during that load. The runner stopped and reaped the two workers.

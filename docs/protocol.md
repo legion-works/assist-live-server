@@ -654,13 +654,19 @@ The detector's first VAD onset calls `STTSession.speech_started()` one time. The
 
 The gateway flushes received detector samples at a stream stall without adding audio time.
 It stops input at the endpoint, at 15 seconds of audio, or 15 seconds after input starts.
-It calls `finish()` one time after input stops.
+With a command start, it calls `finish()` one time after input stops.
+Without a command start, it cancels the provider session and sends an empty `final` without a `final` decode.
+Cloud sessions close without a commit or a request for a last transcript.
+This rule applies to each provider and each type of turn end (see `docs/design.md`).
 
 The server sends `end_decision`, one `final`, then `speaker_result` before `end` and stream close.
 A provider failure sends one terminal `error` with code `stt_failed`, not a `final`.
 The server does not retry or use fallback after a `final`.
 
-For a session with `final_redecodes=True`, the gateway compares the `final` with the last `partial` sent in that turn.
+After a command start, the gateway checks sessions with `final_redecodes=True`.
+It compares the `final` with the last `partial` sent in that turn.
+Without a command start, the gateway does not use a `partial` as the `final`.
+
 Parakeet declares this function because `finish()` decodes all accepted audio again.
 Deepgram puts `final` stream segments together. Its `final` stays unchanged.
 Sessions without this optional attribute also keep their `final` unchanged.
@@ -670,7 +676,7 @@ It applies Unicode `casefold`, removes punctuation separators, and keeps interna
 Thus `don't` counts as one word. The count includes each word occurrence.
 The gateway uses the last `partial` only when it has two or more words and the two conditions below agree:
 
-- The `final` has fewer words than that `partial`. An empty `final` has 0 words. A `final` with only punctuation also has 0 words.
+- The `final` has fewer words than that `partial`. An empty `final` after a command start has 0 words. A `final` with only punctuation also has 0 words.
 - No word occurs in the `final` and the `partial`.
 
 In all other conditions, the `final` stays unchanged. A shorter `final` that removes `not` but keeps other words stays unchanged.

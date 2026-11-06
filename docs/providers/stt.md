@@ -24,6 +24,10 @@ The selection record is not a target-device or live-microphone result.
 It does not use only the last interval. Subsequent finish calls give the same result without one more decode.
 An empty session finishes with an empty string.
 
+The gateway calls `finish()` only after the turn detector finds a command start.
+Without a command start, it cancels the session and sends an empty `final` without a decode or a `partial` replacement.
+This rule applies to each provider and each type of turn end (see `docs/design.md`).
+
 ### Decode search for the `final` transcript
 
 `partial` transcripts use the pinned runtime's greedy TDT search.

@@ -17,6 +17,8 @@ from assist_live_server.providers.parakeet import ParakeetSession
 from assist_live_server.store import SQLiteStore
 from assist_live_server.turn.detector import TurnDetector
 
+from tests.stt_fakes import FirstBlockCommandDetector
+
 
 @asynccontextmanager
 async def service(tmp_path, factory=None, *, policy=False, gateway=None):
@@ -69,6 +71,37 @@ async def connect(session, turn):
     )
     assert (await ws.receive_json())["type"] == "negotiated"
     return ws
+
+
+def test_no_command_empty_final_keeps_wire_shape_and_stt_final_event(tmp_path):
+    def forbidden(pcm):
+        raise AssertionError("decode without command start")
+
+    async def run():
+        async with service(tmp_path, lambda _: ParakeetSession(forbidden)) as (
+            _,
+            session,
+            turn,
+            store,
+        ):
+            ws = await connect(session, turn)
+            await ws.send_bytes(encode_audio(turn.turn_id, 0, bytes(6400)))
+            await ws.send_json(encode_control("end", turn.turn_id))
+            replies = [message.json() async for message in ws]
+            final = next(reply for reply in replies if reply["type"] == "final")
+            assert final == encode_control("final", turn.turn_id, text="")
+            assert [r["type"] for r in replies if r["type"] != "heartbeat"] == [
+                "end_decision",
+                "final",
+                "speaker_result",
+                "end",
+            ]
+            events = (await store.get_turn(turn.turn_id))["events"]
+            assert sum(e["stage"] == "stt_final" for e in events) == 1
+            assert not any(e["stage"] in {"speech_start", "stt_failed"} for e in events)
+            assert not any(e["data"].get("replaced") for e in events)
+
+    asyncio.run(run())
 
 
 @pytest.mark.parametrize(
@@ -127,13 +160,10 @@ def test_final_redecode_replacement_contract(
     tmp_path, partial, final, expected, replaced
 ):
     async def run():
-        outputs = iter([partial, final] if partial else [final])
         gateway = AudioGateway(
-            lambda _: ParakeetSession(lambda _: next(outputs)),
+            lambda _: ParakeetSession(lambda _: partial, lambda _: final),
             provider="configured-local",
-            detector_factory=lambda: TurnDetector(
-                vad_probability=lambda _: 1, turn_probability=lambda _: 0
-            ),
+            detector_factory=FirstBlockCommandDetector,
         )
         async with service(tmp_path, gateway=gateway) as (_, session, turn, store):
             ws = await connect(session, turn)
@@ -232,9 +262,11 @@ def test_local_final_deliverable_bound(tmp_path, character, extra):
     )
 
     async def run():
-        async with service(
-            tmp_path, factory=lambda _: ParakeetSession(lambda _: text)
-        ) as (_, session, turn, store):
+        gateway = AudioGateway(
+            lambda _: ParakeetSession(lambda _: "", lambda _: text),
+            detector_factory=FirstBlockCommandDetector,
+        )
+        async with service(tmp_path, gateway=gateway) as (_, session, turn, store):
             ws = await connect(session, turn)
             await ws.send_bytes(encode_audio(turn.turn_id, 0, b"\x01\x00"))
             await ws.send_json(encode_control("end", turn.turn_id))
@@ -638,7 +670,11 @@ def test_provider_failure_sends_one_terminal_error_and_no_final(tmp_path):
         raise RuntimeError("synthetic sensitive error text")
 
     async def run():
-        async with service(tmp_path, lambda _: ParakeetSession(fail)) as (
+        gateway = AudioGateway(
+            lambda _: ParakeetSession(lambda _: "", fail),
+            detector_factory=FirstBlockCommandDetector,
+        )
+        async with service(tmp_path, gateway=gateway) as (
             _,
             session,
             turn,

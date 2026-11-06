@@ -14,7 +14,7 @@ The `safe` and `fast` settings use the same unmeasured `Profile` defaults:
 | Hard endpoint | 15 s |
 
 The detector ignores a voice run that ends at or before 400 ms.
-Silero gets each audio frame, and STT decodes all audio.
+Silero gets each audio frame, and the STT provider receives all audio.
 The guard uses audio time, not wall time.
 The public design record is `assist-live docs/design.md`.
 
@@ -27,13 +27,20 @@ After command start, the usual rules for time without voice apply.
 At 5 s of audio, the detector ends the turn with `max_silence` only if no voice run continues.
 An open voice run continues until it qualifies or stops.
 If it stops after 5 s and before command start, the detector ends the turn at that audio frame with `max_silence`.
-STT then sends the transcript of all audio.
+
+Without a command start, the gateway sends an empty `final` transcript.
+It cancels the provider session without a `final` decode or a `partial` replacement.
+This rule applies to each provider and each type of turn end (see `docs/design.md`).
 The hard endpoint stays 15 s.
 
 The guard applies to all turns, with follow-up turns and button input.
 A voice run that ends in the first 400 ms does not start the command, so the detector waits for a subsequent command.
 At 5 s, a turn without command start ends only when no voice run continues.
 Volunteer recordings must supply the measurements for these start values.
+
+A short word with less than 250 ms of continuous voice has no command start and no transcript.
+An initial word that ends in the first 400 ms can also have no transcript in a follow-up turn.
+P1 sets the start rule with volunteer recordings.
 
 The transcript guard is active in each `Profile`. Number endings can be complete.
 
