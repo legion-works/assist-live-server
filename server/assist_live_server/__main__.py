@@ -118,6 +118,7 @@ async def serve() -> None:
         record_transcripts=boolean("ASSIST_LIVE_RECORD_TRANSCRIPTS", "false"),
         speaker_url=os.environ.get("ASSIST_LIVE_SPEAKER_URL") or None,
         stt_hint_bonus=float(os.environ.get("ASSIST_LIVE_STT_HINT_BONUS", "1.0")),
+        end_rule=os.environ.get("ASSIST_LIVE_END_RULE", "partial"),
     )
     data = Path(os.environ.get("ASSIST_LIVE_DATA", "/data"))
     data.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -204,12 +205,16 @@ def main(argv: list[str] | None = None) -> int:
             print("PASS server: selected downloads checked")
         else:
             asyncio.run(serve())
-    except Exception:
+    except Exception as error:
         failure = (
             "FAIL health: server unavailable or health response invalid"
             if args.healthcheck
             else "FAIL server: startup configuration or model check failed"
         )
+        from .config import EndRuleError
+
+        if isinstance(error, EndRuleError):
+            failure += ": " + str(error)
         print(failure, flush=True)
         return 1
     return 0

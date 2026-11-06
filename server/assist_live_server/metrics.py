@@ -1,4 +1,34 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+
+@dataclass
+class EndDecisionWait:
+    bounds: tuple[float, ...] = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0)
+    counts: list[int] = field(default_factory=lambda: [0] * 8)
+    count: int = 0
+    total: float = 0.0
+
+    def observe(self, seconds: float) -> None:
+        seconds = max(0.0, seconds)
+        self.count += 1
+        self.total += seconds
+        for index, bound in enumerate(self.bounds):
+            if seconds <= bound:
+                self.counts[index] += 1
+
+    def render(self, end_rule: str) -> str:
+        name = "assist_live_end_decision_wait_seconds"
+        lines = [f"# TYPE {name} histogram"]
+        for bound, count in zip(self.bounds, self.counts, strict=True):
+            lines.append(f'{name}_bucket{{end_rule="{end_rule}",le="{bound}"}} {count}')
+        lines.extend(
+            [
+                f'{name}_bucket{{end_rule="{end_rule}",le="+Inf"}} {self.count}',
+                f'{name}_count{{end_rule="{end_rule}"}} {self.count}',
+                f'{name}_sum{{end_rule="{end_rule}"}} {self.total}',
+            ]
+        )
+        return "\n".join(lines) + "\n"
 
 
 @dataclass

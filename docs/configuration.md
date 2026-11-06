@@ -17,6 +17,7 @@ The store's initial value does not add a different switch when it runs in the se
 | Option | Default | Purpose |
 |---|---|---|
 | `stt_provider` | `parakeet` | Select `parakeet`, `deepgram`, `openai`, or `None` to disable STT. |
+| `end_rule` | `partial` | Select `partial` or `checkpoint`. |
 | `tts_provider` | `piper` | Select `piper`, `elevenlabs`, or `None` to disable TTS. |
 | `local_only` | `True` | Refuse cloud providers and non-local speaker addresses. |
 | `record_transcripts` | `False` | Store `final` transcripts only when the turn also opts in. |
@@ -90,6 +91,59 @@ The image does not install the optional `huggingface_hub`, `transformers`, `requ
 No offline setting for a missing package is necessary.
 The wheel-source check found no other `telemetry channel` or `update channel` in Piper, onnx-asr, NumPy, or the HTTP stack.
 This static check does not replace the real-provider test with external networking disabled.
+
+## End rule
+
+`ASSIST_LIVE_END_RULE` selects the turn detector rule. The app option is `end_rule`.
+The default, `partial`, keeps the current rule.
+Its early-end checks use the newest available `partial` transcript.
+
+With `checkpoint`, Parakeet decodes turn audio to each 400 ms checkpoint (6400 samples).
+Each decode starts when the server accepts that audio.
+The detector uses the newest checkpoint at or before its current audio position.
+It waits for that result, not an older result or a sent `partial` transcript.
+Only the audio and checkpoint text set the Smart Turn test positions.
+A short stream stop does not divide or fill a voice detector window.
+
+An explicit input end can finish a shorter window.
+
+Each checkpoint has a 1 s limit, with decode admission and queue wait.
+The session applies this limit, also to checkpoint calls without the turn detector.
+A missed limit stops the turn with `stt_failed`, without a different satisfactory end sample.
+The 15 s wall limit gives the same failure if the audio-based end is not available.
+The counters are `assist_live_checkpoint_deadline_failures_total` and `assist_live_checkpoint_wall_limit_failures_total`.
+Each counter counts turns with `stt_failed`, not checkpoint requests.
+
+The two rules keep the command-start guard and the end-sample cut for the `final` decode.
+Without a command start, the two rules send an empty `final` without a `final` decode.
+With `checkpoint`, transcript replacement uses the checkpoint at the end sample.
+The three early-end conditions and detector limits do not change.
+
+The checkpoint decodes also supply UI `partial` transcripts in sample order.
+The server does not run a second set of UI decodes.
+It publishes no `partial` before command start, for an unprocessed checkpoint position, or after the end decision.
+
+It keeps at most two unfinished checkpoint requests for each turn and applies input backpressure at that bound.
+This rule adds a greedy decode at each 400 ms prefix, also before command start.
+`final` decodes run before queued checkpoint decodes.
+
+Across all turns, checkpoint decodes can hold at most three of the four decode admission slots.
+This keeps one slot for a `final` request. Other `final` requests can fill the pool.
+After an end decision, the server cancels queued checkpoint work for positions after the end sample and releases its slots.
+An active decode keeps its slot until the call finishes.
+Partial-mode admission and queue order stay unchanged.
+
+`assist_live_stt_final_admission_refusals_total` counts refused `final` admission requests in the two modes.
+A refusal gives the current `stt_failed` error, without a new message field or a different endpoint.
+
+An unknown rule stops startup with an error that names `ASSIST_LIVE_END_RULE`.
+`checkpoint` is available only with Parakeet. With a different selected STT provider, startup also names that provider in the error.
+The server also accepts disabled STT (`none`).
+The configured factory selects one STT provider for all turns, not a provider for each satellite.
+
+In the two modes, `assist_live_end_decision_wait_seconds` records the time from end-sample arrival to end decision.
+This histogram has `end_rule` as its only Prometheus `label`. It contains no transcript text or turn identifiers.
+See [the public design, end-of-turn and STT fallback](https://github.com/legion-works/assist-live/blob/main/docs/design.md#end-of-turn-and-stt-fallback).
 
 ## Speaker destination checks
 
@@ -186,6 +240,7 @@ This stops ONNX Runtime from sending its default telemetry data. It also applies
 | Environment variable | Default | App option | Purpose |
 |---|---|---|---|
 | `ASSIST_LIVE_STT_PROVIDER` | `parakeet` | `stt_provider` | Select STT, or `none` to disable it. |
+| `ASSIST_LIVE_END_RULE` | `partial` | `end_rule` | Select `partial` or the Parakeet-only `checkpoint` rule. |
 | `ASSIST_LIVE_TTS_PROVIDER` | `piper` | `tts_provider` | Select TTS, or `none` to disable it. |
 | `ASSIST_LIVE_LOCAL_ONLY` | `true` | `local_only` | Refuse cloud providers. |
 | `ASSIST_LIVE_RECORD_TRANSCRIPTS` | `false` | `record_transcripts` | Set the server transcript policy. |

@@ -216,6 +216,7 @@ class TurnDetector:
         self.speech_started_at_ms: float | None = None
         self.last_turn_samples = -SMART_TURN_INTERVAL_SAMPLES
         self.last_turn_partial: str | None = None
+        self.checkpoint_text: Callable[[int], str] | None = None
 
     def candidate(self, silence_ms: int, probability: float, partial: str) -> bool:
         return (
@@ -288,6 +289,16 @@ class TurnDetector:
                     else 0
                 )
                 silence_ms = self.silent_samples / 16
+                # docs/design.md: only checkpoint text can change model test positions.
+                if (
+                    self.checkpoint_text is not None
+                    and self.speech_started_at_ms is not None
+                    and self.profile.early_enabled
+                    and self.profile.min_silence_ms
+                    <= silence_ms
+                    < self.profile.max_silence_ms
+                ):
+                    partial = self.checkpoint_text(self.samples)
                 if self.speech_started_at_ms is None:
                     if (
                         self.samples >= COMMAND_WAIT_MS * 16

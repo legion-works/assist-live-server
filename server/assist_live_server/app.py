@@ -46,7 +46,7 @@ from .protocol import (
     WebSocketTransport,
     stored_integer,
 )
-from .providers.stt import hint_build_waits_total
+from .providers.stt import final_admission_refusals_total, hint_build_waits_total
 from .providers.tts import TTSProvider
 from .store import (
     SPEAKER_NAME_DROPS,
@@ -120,6 +120,7 @@ def create_app(
                 if config.stt_provider == "parakeet"
                 else None,
                 hint_snapshot=hint_snapshot,
+                end_rule=config.end_rule,
             )
         if config.tts_provider is not None:
             tts_gateway = TTSGateway(
@@ -434,11 +435,29 @@ def create_app(
                         else 0
                     ),
                     "stt_hints_build_waits_total": hint_build_waits_total(),
+                    "stt_final_admission_refusals_total": (
+                        final_admission_refusals_total()
+                    ),
+                    "checkpoint_deadline_failures_total": (
+                        audio_gateway.checkpoint_deadline_failures_total
+                        if audio_gateway is not None
+                        else 0
+                    ),
+                    "checkpoint_wall_limit_failures_total": (
+                        audio_gateway.checkpoint_wall_limit_failures_total
+                        if audio_gateway is not None
+                        else 0
+                    ),
                     **{
                         "speaker_name_dropped_" + reason + "_total": count
                         for reason, count in SPEAKER_NAME_DROPS.items()
                     },
                 }
+            )
+            + (
+                audio_gateway.end_decision_wait.render(audio_gateway.end_rule)
+                if audio_gateway is not None
+                else ""
             ),
             headers={"Content-Type": "text/plain; version=0.0.4; charset=utf-8"},
         )

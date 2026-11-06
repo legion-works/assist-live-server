@@ -31,6 +31,10 @@ PROVIDER_DESTINATIONS = ChainMap(
 )
 
 
+class EndRuleError(ValueError):
+    pass
+
+
 def provider_destination(provider: str) -> Destination:
     try:
         return PROVIDER_DESTINATIONS[provider]
@@ -46,8 +50,23 @@ class ServerConfig:
     record_transcripts: bool = False
     speaker_url: str | None = None
     stt_hint_bonus: float = 1.0
+    end_rule: str = "partial"
 
     def __post_init__(self) -> None:
+        if self.end_rule not in {"partial", "checkpoint"}:
+            raise EndRuleError("invalid ASSIST_LIVE_END_RULE")
+        if self.end_rule == "checkpoint" and self.stt_provider not in {
+            None,
+            "parakeet",
+        }:
+            raise EndRuleError(
+                "ASSIST_LIVE_END_RULE=checkpoint requires parakeet, not "
+                + (
+                    self.stt_provider
+                    if self.stt_provider in {"deepgram", "openai"}
+                    else "unknown provider"
+                )
+            )
         if (
             type(self.stt_hint_bonus) not in (int, float)
             or not math.isfinite(self.stt_hint_bonus)
@@ -80,6 +99,7 @@ class ServerConfig:
         record_transcripts: bool = False,
         speaker_url: str | None = None,
         stt_hint_bonus: float = 1.0,
+        end_rule: str = "partial",
         resolver: Resolver = resolve_addresses,
     ) -> ServerConfig:
         config = cls(
@@ -89,6 +109,7 @@ class ServerConfig:
             record_transcripts,
             speaker_url,
             stt_hint_bonus,
+            end_rule,
         )
         if speaker_url is not None:
             await checked_addresses(
@@ -148,6 +169,7 @@ class ProviderFactory:
             record_transcripts=config.record_transcripts,
             speaker_url=config.speaker_url,
             stt_hint_bonus=config.stt_hint_bonus,
+            end_rule=config.end_rule,
             resolver=resolver,
         )
         stt: STTProvider | None = None

@@ -9,6 +9,7 @@ from assist_live_client.protocol import encode_control, encode_transcript
 
 from .destinations import Destination, require_destination
 from .hints import HintList
+from .metrics import EndDecisionWait
 from .providers.parakeet import MAX_AUDIO_BYTES
 from .providers.stt import STTSession
 from .speaker import SpeakerPlugin
@@ -36,7 +37,11 @@ class AudioGateway:
         hinted_factory: Callable[[HintList | tuple[str, ...]], STTSession]
         | None = None,
         hint_snapshot: Callable[[str], Awaitable[HintList]] | None = None,
+        end_rule: str = "partial",
     ) -> None:
+        if end_rule not in {"partial", "checkpoint"}:
+            raise ValueError("invalid ASSIST_LIVE_END_RULE")
+        self.end_rule = end_rule
         self.provider_factory = provider_factory
         self.provider = provider
         self.detector_factory = detector_factory
@@ -48,6 +53,15 @@ class AudioGateway:
         self.hint_snapshot = hint_snapshot
         self.stt_hints_lookup_misses_total = 0
         self.stt_final_replaced_total = 0
+        self.end_decision_wait = EndDecisionWait()
+        self.checkpoint_deadline_failures_total = 0
+        self.checkpoint_wall_limit_failures_total = 0
+
+    def checkpoint_failure(self, cause: str) -> None:
+        if cause == "deadline":
+            self.checkpoint_deadline_failures_total += 1
+        else:
+            self.checkpoint_wall_limit_failures_total += 1
 
     async def stt(
         self,
@@ -66,6 +80,9 @@ class AudioGateway:
         candidate = False
         total = 0
         speaker_audio = bytearray()
+        arrivals: list[tuple[int, float]] = []
+        received_samples = 0
+        detector: TurnDetector
 
         async def note(stage: str, **data: object) -> None:
             if record is not None:
@@ -88,11 +105,20 @@ class AudioGateway:
             if stopped:
                 return
             stopped = True
+            if self.end_rule == "partial" and detector.samples:
+                arrival = next(
+                    (stamp for end, stamp in arrivals if end >= detector.samples),
+                    None,
+                )
+                if arrival is not None:
+                    self.end_decision_wait.observe(
+                        asyncio.get_running_loop().time() - arrival
+                    )
             await note("end_decision", reason=reason, decision_source="server")
             await output.put(encode_control("end_decision", turn_id))
 
         async def work() -> None:
-            nonlocal session, stopped
+            nonlocal session, stopped, detector, partial, onset
             try:
                 # Select the provider before the iterator can supply its first frame.
                 require_destination(self.destination, self.local_only)
@@ -169,11 +195,15 @@ class AudioGateway:
                     await decide("hard")
 
                 async def collect() -> None:
-                    nonlocal total
+                    nonlocal total, received_samples
                     pending: asyncio.Task[bytes] | None = None
+                    received_at = 0.0
 
                     async def next_frame() -> bytes:
-                        return await anext(audio)
+                        nonlocal received_at
+                        frame = await anext(audio)
+                        received_at = asyncio.get_running_loop().time()
+                        return frame
 
                     try:
                         async with asyncio.timeout(TURN_TIMEOUT):
@@ -193,6 +223,13 @@ class AudioGateway:
                                     await decide("input_end")
                                     break
                                 pending = None
+                                received_samples += len(pcm) // 2
+                                arrivals.append(
+                                    (
+                                        received_samples,
+                                        received_at,
+                                    )
+                                )
                                 if len(pcm) % 2:
                                     raise ValueError("whole PCM samples required")
                                 pcm = pcm[: MAX_AUDIO_BYTES - total]
@@ -230,23 +267,58 @@ class AudioGateway:
                                 encode_transcript("partial", turn_id, text)
                             )
 
-                collector = asyncio.create_task(collect())
-                decoder = asyncio.create_task(decode())
-                tasks.extend([collector, decoder])
-                done, _ = await asyncio.wait(
-                    {collector, decoder}, return_when=asyncio.FIRST_COMPLETED
-                )
-                for task in done:
-                    task.result()
-                await collector
+                decoder: asyncio.Task[None] | None = None
+                if self.end_rule == "checkpoint":
+                    from .checkpoint_turn import CheckpointSession, CheckpointTurn
+
+                    async def publish(text: str) -> None:
+                        nonlocal partial
+                        if not stopped and text and text != partial:
+                            partial = text
+                            await output.put(
+                                encode_transcript("partial", turn_id, text)
+                            )
+
+                    if not isinstance(active_session, CheckpointSession):
+                        raise ValueError(
+                            "checkpoint provider cannot decode exact prefixes"
+                        )
+                    turn = CheckpointTurn(
+                        active_session,
+                        detector,
+                        note=note,
+                        decide=decide,
+                        publish=publish,
+                        failure=self.checkpoint_failure,
+                        observe=self.end_decision_wait.observe,
+                        speaker_audio=speaker_audio
+                        if self.speaker is not None
+                        else None,
+                        limit=MAX_AUDIO_BYTES,
+                    )
+                    partial = await turn.run(
+                        audio, timeout=TURN_TIMEOUT, grace=HARD_END_GRACE
+                    )
+                    onset = turn.onset
+                else:
+                    collector = asyncio.create_task(collect())
+                    decoder = asyncio.create_task(decode())
+                    tasks.extend([collector, decoder])
+                    done, _ = await asyncio.wait(
+                        {collector, decoder}, return_when=asyncio.FIRST_COMPLETED
+                    )
+                    for task in done:
+                        task.result()
+                    await collector
                 text = ""
                 replaced = False
                 if onset:
                     text = await active_session.finish()
                 else:
                     # docs/design.md: noise without a command must not become text.
-                    decoder.cancel()
-                    await asyncio.gather(decoder, return_exceptions=True)
+                    if decoder is not None:
+                        decoder.cancel()
+                        await asyncio.gather(decoder, return_exceptions=True)
                     active_session.cancel()
                     close = getattr(active_session, "aclose", None)
                     if close is not None:

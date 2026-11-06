@@ -16,6 +16,7 @@ ports_description:
   8099/tcp: Assist WebSocket and health endpoint
 options:
   stt_provider: parakeet
+  end_rule: partial
   tts_provider: piper
   local_only: true
   record_transcripts: false
@@ -30,6 +31,7 @@ options:
   elevenlabs_voice_language: ""
 schema:
   stt_provider: list(parakeet|deepgram|openai|none)
+  end_rule: list(partial|checkpoint)
   tts_provider: list(piper|elevenlabs|none)
   local_only: bool
   record_transcripts: bool

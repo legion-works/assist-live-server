@@ -13,12 +13,21 @@ import numpy as np
 from ..assets import load_asset_manifest
 from ..hints import HintList
 from ..turn.detector import verified_model
-from .stt import AudioLimitError, STTClosedError, run_decode, run_hint_build
+from .stt import (
+    AudioLimitError,
+    STTBusyError,
+    STTCheckpointDeadlineError,
+    STTClosedError,
+    run_checkpoint_decode,
+    run_decode,
+    run_hint_build,
+)
 
 if TYPE_CHECKING:
     from .name_context import NameContext
 
 INTERVAL_BYTES = 12800
+CHECKPOINT_TIMEOUT = 1.0
 MAX_AUDIO_BYTES = 480000
 MODEL_ID = "nvidia/parakeet-tdt-0.6b-v2"
 MODEL_FILES = {
@@ -238,3 +247,20 @@ class ParakeetSession:
             if self._partial_task is not None:
                 self._partial_task.cancel()
             raise
+
+    async def checkpoint(self, pcm: bytes) -> str:
+        self._check_open()
+        if not pcm or len(pcm) % INTERVAL_BYTES or len(pcm) > MAX_AUDIO_BYTES:
+            raise ValueError("checkpoint must end on the 400 ms sample grid")
+        try:
+            async with asyncio.timeout(CHECKPOINT_TIMEOUT):
+                while True:
+                    try:
+                        return await run_checkpoint_decode(partial(self._decode, pcm))
+                    except STTBusyError:
+                        # The session deadline includes admission and decode waits.
+                        await asyncio.sleep(0.005)
+        except TimeoutError:
+            raise STTCheckpointDeadlineError(
+                "checkpoint decode deadline expired"
+            ) from None

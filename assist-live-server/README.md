@@ -27,6 +27,8 @@ See [server configuration](../docs/configuration.md) for each provider setting a
 The app gives options through the environment, not through command arguments or log messages.
 
 `local_only` defaults to `true`. Cloud selection must have an explicit change.
+`end_rule` defaults to `partial`. Select `checkpoint` only with Parakeet.
+See [end-rule limits and metrics](../docs/configuration.md#end-rule) before you change this option.
 
 The app requests no HA API, Supervisor API, host network, or `privileged` option.
 Only TCP port `8099` accepts connections. The HA integration owns its own HA access.

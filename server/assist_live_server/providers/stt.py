@@ -6,7 +6,7 @@ import itertools
 import threading
 from collections.abc import Awaitable, Callable
 from concurrent.futures import Future, ThreadPoolExecutor
-from typing import Protocol
+from typing import Any, Protocol
 
 from ..destinations import Destination
 
@@ -21,6 +21,10 @@ class AudioLimitError(ValueError):
 
 class STTBusyError(RuntimeError):
     """The bounded executor cannot accept another job."""
+
+
+class STTCheckpointDeadlineError(RuntimeError):
+    """The checkpoint did not finish before its deadline."""
 
 
 class STTSession(Protocol):
@@ -45,24 +49,37 @@ class STTProvider(Protocol):
 # running and queued decodes together, including work whose caller cancelled.
 _EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="local-stt")
 _SLOTS = threading.BoundedSemaphore(4)
-_QUEUE: list[tuple[int, int, Callable[[], None]]] = []
+# Checkpoints must keep one decode slot for a `final` request.
+_CHECKPOINT_SLOTS = threading.BoundedSemaphore(3)
+_QUEUE: list[tuple[int, int, Callable[[], None], Future[Any], Callable[[], None]]] = []
 _SEQUENCE = itertools.count()
 # A fast worker can finish before callback registration. The callback can then
 # dispatch the next job in the caller thread while this lock is held.
 _LOCK = threading.RLock()
 _active = False
 _hint_build_waits_total = 0
+_final_admission_refusals_total = 0
 
 
 def _dispatch() -> None:
     global _active
-    if not _QUEUE:
-        _active = False
+    while _QUEUE:
+        _, _, work, result, release = heapq.heappop(_QUEUE)
+        if result.cancelled():
+            # Canceled queue entries must not start an executor task at shutdown.
+            work()
+            continue
+        try:
+            future = _EXECUTOR.submit(work)
+        except RuntimeError:
+            release()
+            if result.set_running_or_notify_cancel():
+                result.set_exception(STTClosedError("local STT executor closed"))
+            continue
+        _active = True
+        future.add_done_callback(_completed)
         return
-    _active = True
-    _, _, work = heapq.heappop(_QUEUE)
-    future = _EXECUTOR.submit(work)
-    future.add_done_callback(_completed)
+    _active = False
 
 
 def _completed(future: Future[None]) -> None:
@@ -71,9 +88,27 @@ def _completed(future: Future[None]) -> None:
 
 
 async def run_decode[T](operation: Callable[[], T], *, final: bool = False) -> T:
+    global _final_admission_refusals_total
     if not _SLOTS.acquire(blocking=False):
+        if final:
+            with _LOCK:
+                _final_admission_refusals_total += 1
         raise STTBusyError("local STT executor busy: four jobs admitted")
     return await _run_job(operation, priority=0 if final else 1, admitted=True)
+
+
+async def run_checkpoint_decode[T](operation: Callable[[], T]) -> T:
+    if not _CHECKPOINT_SLOTS.acquire(blocking=False):
+        raise STTBusyError("local STT checkpoint admission full")
+    if not _SLOTS.acquire(blocking=False):
+        _CHECKPOINT_SLOTS.release()
+        raise STTBusyError("local STT executor busy: four jobs admitted")
+    return await _run_job(operation, priority=1, admitted=True, checkpoint=True)
+
+
+def final_admission_refusals_total() -> int:
+    with _LOCK:
+        return _final_admission_refusals_total
 
 
 def hint_build_waits_total() -> int:
@@ -87,29 +122,36 @@ async def run_hint_build[T](operation: Callable[[], T]) -> T:
 
 
 async def _run_job[T](
-    operation: Callable[[], T], *, priority: int, admitted: bool
+    operation: Callable[[], T],
+    *,
+    priority: int,
+    admitted: bool,
+    checkpoint: bool = False,
 ) -> T:
     global _hint_build_waits_total
     result: Future[T] = Future()
 
+    def release() -> None:
+        if admitted:
+            _SLOTS.release()
+        if checkpoint:
+            _CHECKPOINT_SLOTS.release()
+
     def work() -> None:
         if not result.set_running_or_notify_cancel():
-            if admitted:
-                _SLOTS.release()
+            release()
             return
         try:
             value = operation()
         except BaseException as error:
-            if admitted:
-                _SLOTS.release()
+            release()
             result.set_exception(error)
         else:
-            if admitted:
-                _SLOTS.release()
+            release()
             result.set_result(value)
 
     with _LOCK:
-        entry = (priority, next(_SEQUENCE), work)
+        entry = (priority, next(_SEQUENCE), work, result, release)
         if not admitted and _active:
             _hint_build_waits_total += 1
         heapq.heappush(_QUEUE, entry)
@@ -118,13 +160,15 @@ async def _run_job[T](
     try:
         return await asyncio.wrap_future(result)
     except asyncio.CancelledError:
-        if not admitted:
+        if not admitted or checkpoint:
             with _LOCK:
                 result.cancel()
                 # A blocked worker must not keep superseded lists in the queue.
+                # Queued checkpoints must release slots before a `final` request.
                 if entry in _QUEUE:
                     _QUEUE.remove(entry)
                     heapq.heapify(_QUEUE)
+                    release()
         raise
 
 

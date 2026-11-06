@@ -652,24 +652,40 @@ Each turn has its own detector and session. Detection and STT decode run at the 
 
 The detector's command start calls `STTSession.speech_started()` one time. There is no second VAD.
 
-The gateway flushes received detector samples at a stream stall without adding audio time.
+With the default `partial` end rule, the gateway flushes received detector samples at a stream stall without adding audio time.
 It stops input at the endpoint, at 15 seconds of audio, or 15 seconds after input starts.
+With `ASSIST_LIVE_END_RULE=checkpoint`, stream stalls do not flush detector windows.
+The detector waits for the 400 ms checkpoint text at or before each early-end position.
+A checkpoint deadline or a wall limit before the audio-based end sends `stt_failed`, not a shorter satisfactory turn.
+See [end-rule settings and metrics](configuration.md#end-rule) and `docs/design.md` in the integration repository.
+
 With a command start, it calls `finish()` one time after input stops.
 Without a command start, it cancels the provider session and sends an empty `final` without a `final` decode.
 Cloud sessions close without a commit or a request for a last transcript.
 This rule applies to each provider and each type of turn end (see `docs/design.md`).
 
-The gateway sends each provider audio only to the end sample of the turn detector.
-It does not send audio after that sample when the same message contains that audio.
+The gateway puts audio in each provider session buffer only to the end sample of the turn detector.
+The session's `push()` method receives no audio after that sample, also when the message contains that audio.
 With the same end sample, different message sizes give the same audio prefix to the `final` decode.
 If the client stops audio before the detector ends the turn, the end sample is the last received sample.
+Checkpoint decodes can use accepted audio after the detector's current position. They do not extend the session's `final` audio buffer.
+
+The server publishes checkpoint `partial` text only after command start and after the detector processes that checkpoint position.
+It publishes none after the end decision or from a position after the end sample.
+It cancels queued checkpoint work for positions after that sample before it requests the `final` decode.
+
+Checkpoint decodes can hold at most three of the four shared decode admission slots.
+The fourth slot stays available for a `final` unless other `final` requests fill the pool.
+The metric `assist_live_stt_final_admission_refusals_total` counts refused `final` admission requests in the two modes.
+This metric does not add a control-message field or change the current `stt_failed` error.
 
 The server sends `end_decision`, one `final`, then `speaker_result` before `end` and stream close.
 A provider failure sends one terminal `error` with code `stt_failed`, not a `final`.
 The server does not retry or use fallback after a `final`.
 
 After a command start, the gateway checks sessions with `final_redecodes=True`.
-It compares the `final` with the last `partial` sent in that turn.
+With `partial`, it compares the `final` with the last `partial` sent in that turn.
+With `checkpoint`, it uses the checkpoint text at the end sample.
 Without a command start, the gateway does not use a `partial` as the `final`.
 
 Parakeet declares this function because `finish()` decodes all accepted audio again.
@@ -679,13 +695,15 @@ Sessions without this optional attribute also keep their `final` unchanged.
 The gateway uses the same word tokenizer as the transcript guard.
 It applies Unicode `casefold`, removes punctuation separators, and keeps internal straight or curly apostrophes.
 Thus `don't` counts as one word. The count includes each word occurrence.
-The gateway uses the last `partial` only when it has two or more words and the two conditions below agree:
+The gateway uses this replacement text only when it has two or more words and the two conditions below agree:
 
-- The `final` has fewer words than that `partial`. An empty `final` after a command start has 0 words. A `final` with only punctuation also has 0 words.
-- No word occurs in the `final` and the `partial`.
+- The `final` has fewer words than the replacement text. An empty `final` after a command start has 0 words. A `final` with only punctuation also has 0 words.
+- No word occurs in the `final` and the replacement text.
 
 In all other conditions, the `final` stays unchanged. A shorter `final` that removes `not` but keeps other words stays unchanged.
-The replacement adds no decode or audio wait. The gateway does not use a `partial` from a different turn or an unsent decode.
+With `partial`, replacement adds no decode or audio wait and does not use an unsent decode.
+With `checkpoint`, replacement can wait for its necessary checkpoint before that checkpoint's 1 s deadline.
+The two rules do not use text from a different turn.
 The transcript control fields stay unchanged.
 
 The transcript limit is 16000 JSON-escaped bytes, without the two outer quotation marks.
@@ -950,6 +968,11 @@ Each removal logs only `absent` or `other_satellite`, without event data or pare
 The counter `assist_live_stt_final_replaced_total` counts `final` replacements for the audio gateway instance.
 Its initial value is 0. It has no `labels` and contains no transcript text or turn identifiers.
 Unchanged `final` results do not increase this counter.
+
+The histogram `assist_live_end_decision_wait_seconds` measures end-sample arrival to end decision in each mode.
+Its `end_rule` Prometheus `label` is `partial` or `checkpoint`.
+The counters `assist_live_checkpoint_deadline_failures_total` and `assist_live_checkpoint_wall_limit_failures_total` count checkpoint-mode failures.
+These metrics contain no transcript text or turn identifiers.
 
 Invalid stored rows do not stop maintenance, turn opening, queries, exports, or subscriptions.
 The server deletes invalid pending rows. It skips invalid event and turn rows on read, but does not delete them because of these read errors.

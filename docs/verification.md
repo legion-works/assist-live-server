@@ -4095,3 +4095,70 @@ Package, bootstrap, CI, asset, and secret checks were satisfactory.
 The relative public-tree task reported `NOT CHECKED public tree` because this worktree has no sibling integration checkout.
 The canonical checker gave `PASS public data matches=0` and a satisfactory history check for 81 commits.
 The streaming STT contract file ran ten times in new processes: `530 passed`, with no failure.
+
+## Checkpoint end rule
+
+The [public design](https://github.com/legion-works/assist-live/blob/main/docs/design.md#end-of-turn-and-stt-fallback) specifies the optional checkpoint rule.
+`ASSIST_LIVE_END_RULE=partial` stays the default. The app also supplies the `end_rule` option.
+Checkpoint text uses 6400-sample positions. Only that text and the audio can change Smart Turn test positions.
+Stream stops do not flush a voice detector window in checkpoint mode.
+The command-start guard, detector limits, and end-sample cut for the `final` decode stay unchanged.
+
+The initial tests gave `18 failed` before implementation.
+Eight synthetic command/no-command event streams, at four message sizes, agree byte for byte with the baseline.
+The unchanged suite gave `2280 passed, 1 skipped` on the baseline.
+
+Offline inference agrees with D22 rule C for all 250 corpus recordings and all 80 subset inputs.
+The sets share 38 inputs, so this is 292 unique inputs, not 330.
+The 80-input paced test gives the same end sample and `final` text at 320, 640, 1024, and 2048 bytes.
+All 320 checkpoint turns agree with D22 rule C. No checkpoint deadline or wall-limit failure occurs.
+The `partial` comparator uses 1024 bytes on the same 80 inputs.
+
+The table values come from the end-decision wait histogram, not the `final` decode time.
+ASR uses intra/inter-op `threads` 2/1 for the D22 test. Each turn model uses 1/1.
+Each accepted replay has at most 35% CPU busy in the 2 s window before it and at most 50% during replay.
+
+| Mode and layouts | Turns | Wait median / p90 / maximum (ms) | Sent-partial interval median / p90 (ms) |
+|---|---:|---|---|
+| `checkpoint`, four layouts | 320 | 24.46 / 75.62 / 168.74 | 408.18 / 460.79 |
+| `checkpoint`, 1024 bytes | 80 | 24.17 / 88.76 / 150.14 | 409.90 / 453.71 |
+| `partial`, 1024 bytes | 80 | 23.99 / 27.23 / 34.71 | 425.17 / 433.09 |
+
+At 1024 bytes, checkpoint mode makes 705 greedy calls, versus 484 for `partial` mode.
+Their summed greedy decode times are 57.06 s and 43.10 s. UI `partial` transcripts use the checkpoint results.
+Four bound tests show the same audio and all checkpoints when the reader pauses.
+The `queue` capacity is 16, and at most two checkpoint requests are unfinished.
+A held checkpoint gives `stt_failed` at its deadline or wall limit, not a different satisfactory end sample.
+
+Five batches at each concurrency use the same quiet-host gates.
+At the production ASR setting, intra/inter-op `threads` 4/1, the load results are:
+
+| Mode | Concurrent turns | Total turns | Wait median / p90 / maximum (ms) | Deadline / wall failures | Other failures |
+|---|---:|---:|---|---|---|
+| `checkpoint` | 2 | 10 | 24.85 / 78.62 / 104.07 | 0 / 0 | 0 |
+| `checkpoint` | 4 | 20 | 25.05 / 79.66 / 157.31 | 0 / 0 | 0 |
+| `partial` | 2 | 10 | 25.03 / 33.01 / 33.04 | 0 / 0 | 0 |
+| `partial` | 4 | 20 | 25.98 / 27.30 / 32.34 | 0 / 0 | 0 |
+
+At the 2/1 ASR study setting, one of 20 four-way checkpoint turns gives `stt_failed` after its end decision.
+A replay of the same input group records `STTBusyError` at `final` admission.
+The two results do not select a different satisfactory endpoint.
+The other 2/1 batches have no error. These small batches do not give a production capacity limit.
+
+Three scratch mutations give failures at named tests: use of sent `partial` text for checkpoint text, no checkpoint wait, and UI-driven cadence changes.
+A usual app-lifecycle test also finds a shutdown callback error with canceled checkpoint work.
+The queue repair consumes canceled entries without an executor submission and releases their slots in queue order.
+
+An executor that refuses a non-canceled entry gives a clean session error and releases its slot.
+App-lifecycle tests examine the two modes. A fourth mutation sends canceled entries to the executor again and gives a named-test failure.
+The queue, lifecycle, and provider checks give `79 passed`. The partial-mode event files stay byte-identical.
+
+`task check`, the Python 3.14.2 suite, and the network-isolated suite each give `2323 passed, 1 skipped`.
+The initial `task check` stops at four long test lines. After the line-only corrections, the three gates give exit 0.
+Ruff gives `138 files already formatted` and `All checks passed!`. Mypy finds no issues in 51 source files.
+Package, bootstrap, CI, asset, and secret checks are satisfactory.
+
+The relative public-tree task gives `NOT CHECKED public tree` in this worktree layout.
+The canonical checker gives `PASS public data matches=0` and checks 82 commits.
+The streaming STT contract file runs ten times in new processes: `53 passed` each time, or 530 tests with no failure.
+All commands use `idle-run.sh`. No audio playback, hardware access, commit, or publication occurs.
