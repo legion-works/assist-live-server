@@ -650,7 +650,7 @@ Load a local provider before the service starts, then supply its `session` metho
 
 Each turn has its own detector and session. Detection and STT decode run at the same time.
 
-The detector's first VAD onset calls `STTSession.speech_started()` one time. There is no second VAD.
+The detector's command start calls `STTSession.speech_started()` one time. There is no second VAD.
 
 The gateway flushes received detector samples at a stream stall without adding audio time.
 It stops input at the endpoint, at 15 seconds of audio, or 15 seconds after input starts.
