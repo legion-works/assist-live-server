@@ -20,9 +20,15 @@ It usually measures filler text, not the first correct command word.
 The interval itself can add a maximum of 400 ms before a decode starts.
 The selection record is not a target-device or live-microphone result.
 
-`await finish()` decodes the complete buffer, with the first sample and the short last chunk.
+`await finish()` decodes the complete accepted buffer, with the first sample and the short last chunk.
 It does not use only the last interval. Subsequent finish calls give the same result without one more decode.
 An empty session finishes with an empty string.
+
+The gateway supplies audio only to the end sample of the turn detector (see `docs/design.md`).
+It keeps received samples until the detector processes them, then sends only that prefix to the provider.
+Audio after the end sample in the same message does not go to the provider or the `final` decode.
+With the same end sample, different message sizes give the same audio to the `final` decode.
+If the client stops audio before the detector ends the turn, the end sample is the last received sample.
 
 The gateway calls `finish()` only after the turn detector finds a command start.
 Without a command start, it cancels the session and sends an empty `final` without a decode or a `partial` replacement.

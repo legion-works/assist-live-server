@@ -659,6 +659,11 @@ Without a command start, it cancels the provider session and sends an empty `fin
 Cloud sessions close without a commit or a request for a last transcript.
 This rule applies to each provider and each type of turn end (see `docs/design.md`).
 
+The gateway sends each provider audio only to the end sample of the turn detector.
+It does not send audio after that sample when the same message contains that audio.
+With the same end sample, different message sizes give the same audio prefix to the `final` decode.
+If the client stops audio before the detector ends the turn, the end sample is the last received sample.
+
 The server sends `end_decision`, one `final`, then `speaker_result` before `end` and stream close.
 A provider failure sends one terminal `error` with code `stt_failed`, not a `final`.
 The server does not retry or use fallback after a `final`.

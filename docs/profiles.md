@@ -14,7 +14,7 @@ The `safe` and `fast` settings use the same unmeasured `Profile` defaults:
 | Hard endpoint | 15 s |
 
 The detector ignores a voice run that ends at or before 400 ms.
-Silero gets each audio frame, and the STT provider receives all audio.
+Silero gets each audio frame, and the STT provider receives all audio to the detector's end sample.
 The guard uses audio time, not wall time.
 The public design record is `assist-live docs/design.md`.
 

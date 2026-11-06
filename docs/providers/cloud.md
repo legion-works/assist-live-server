@@ -29,6 +29,10 @@ The adapter changes it to 24 kHz with continuous linear interpolation and sends 
 Only `finish`, after the server end decision, sends `input_audio_buffer.commit`.
 No provider event ends the turn.
 
+For each cloud STT provider, the gateway sends audio only to the turn detector's end sample (see `docs/design.md`).
+Audio after that sample in the same message does not go to the cloud provider.
+If the client stops audio before the detector ends the turn, the end sample is the last received sample.
+
 The adapter collects delta text independently for each `item_id`.
 The adapter accepts a `completed` event only for the `item_id` from `input_audio_buffer.committed`.
 It does not use event arrival order. A `completed` event for a different item cannot replace the selected result.

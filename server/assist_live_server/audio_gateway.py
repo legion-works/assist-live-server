@@ -16,6 +16,7 @@ from .turn.detector import TurnDetector
 from .turn.transcript_guard import transcript_words
 
 TURN_TIMEOUT = 15.0
+HARD_END_GRACE = 0.5
 STALL_INTERVAL = 0.1
 LOGGER = logging.getLogger(__name__)
 
@@ -111,9 +112,14 @@ class AudioGateway:
                 )
                 detector = await asyncio.to_thread(self.detector_factory)
                 active_session = session
+                pending_audio = bytearray()
+                sent_bytes = 0
+                in_flight: asyncio.Task[None] | None = None
 
-                async def detect(pcm: bytes | None) -> None:
-                    nonlocal onset, candidate
+                async def process_detection(pcm: bytes | None) -> None:
+                    nonlocal onset, candidate, sent_bytes
+                    if pcm is not None:
+                        pending_audio.extend(pcm)
                     events = await asyncio.to_thread(
                         lambda: (
                             detector.flush(partial)
@@ -121,6 +127,13 @@ class AudioGateway:
                             else detector.push(pcm, partial)
                         )
                     )
+                    # docs/design.md: no provider can receive audio after the end.
+                    count = detector.samples * 2 - sent_bytes
+                    if count:
+                        await active_session.push(bytes(pending_audio[:count]))
+                        del pending_audio[:count]
+                        sent_bytes += count
+                        changed.set()
                     if not onset and detector.speech_started_at_ms is not None:
                         onset = True
                         active_session.speech_started()
@@ -136,6 +149,24 @@ class AudioGateway:
                         await note("end_candidate")
                     if events:
                         await decide(events[-1]["reason"])
+
+                async def detect(pcm: bytes | None) -> None:
+                    nonlocal in_flight
+                    # Recovery must not race the detector or repeat a provider push.
+                    in_flight = asyncio.create_task(process_detection(pcm))
+                    await asyncio.shield(in_flight)
+                    in_flight = None
+
+                async def hard_end() -> None:
+                    try:
+                        async with asyncio.timeout(HARD_END_GRACE):
+                            if in_flight is not None:
+                                await asyncio.shield(in_flight)
+                            await detect(None)
+                    except TimeoutError:
+                        # A running detector makes another flush unsafe.
+                        pass
+                    await decide("hard")
 
                 async def collect() -> None:
                     nonlocal total
@@ -167,19 +198,20 @@ class AudioGateway:
                                 pcm = pcm[: MAX_AUDIO_BYTES - total]
                                 for offset in range(0, len(pcm), 1024):
                                     block = pcm[offset : offset + 1024]
-                                    await active_session.push(block)
                                     if self.speaker is not None:
                                         speaker_audio.extend(block)
                                     total += len(block)
-                                    changed.set()
                                     await detect(block)
                                     if stopped:
                                         break
                                 if total >= MAX_AUDIO_BYTES:
-                                    await decide("hard")
+                                    await hard_end()
                     except TimeoutError:
-                        await decide("hard")
+                        await hard_end()
                     finally:
+                        if in_flight is not None:
+                            in_flight.cancel()
+                            await asyncio.gather(in_flight, return_exceptions=True)
                         if pending is not None:
                             pending.cancel()
                             await asyncio.gather(pending, return_exceptions=True)

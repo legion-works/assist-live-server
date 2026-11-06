@@ -4049,3 +4049,49 @@ All 28 cases use the fixed-block detector. The production gateway stays unchange
 The five changed test files each ran 20 times in new processes: 3240 tests gave satisfactory results, with no failure.
 A subsequent run on cores 4 and 5 used two busy workers on those same cores.
 All 162 tests gave satisfactory results during that load. The runner stopped and reaped the two workers.
+
+## `final` audio at the detector end sample (2026-11-06 UTC)
+
+The gateway follows the end-sample rule in `docs/design.md`, revision 32.
+It sends each STT provider only the audio that the detector processes, through the end sample.
+Audio after that sample in the same message does not go to the provider or the `final` decode.
+When the client stops audio first, the last received sample ends the turn.
+Without a command start, the gateway makes no `final` decode.
+No detector threshold, start guard, beam ranking, protocol, or store schema changed.
+
+The initial tests on unchanged production code gave `6 failed, 22 passed`.
+The failures show more audio in the local decode and in actual OpenAI and Deepgram sessions with test WebSocket servers.
+The same tests after the repair gave `28 passed` across 320-, 640-, 1024-, and 2048-byte messages.
+An archive of the base source with the completed tests gave the same six failures.
+Two scratch mutations send the complete pending buffer or do not send the last 512 samples.
+They gave `6 failed, 22 passed` and `24 failed, 4 passed` at the audio-prefix assertions.
+
+Real-model replays used the 80-input subset from the R1 test, 1024-byte messages, and real-time waits.
+Each replay starts only after two seconds at no more than 35% host CPU use.
+During the replay, the limit is 50%.
+Eight model-file hash checks were satisfactory before and after the runs.
+The maximum host CPU use was 42.87% across 83 accepted runs.
+
+All 78 inputs with the same end sample gave the same text as R1.
+Two inputs had different end samples. Their text also stayed the same, for the same text on all 80 inputs.
+The audio length at the provider equaled the detector end sample in all 83 runs.
+
+Q11 slot 4 gave `Set timer for 1 hour 30 minutes.` in all four message sizes.
+The end sample was 65920 for 320 and 1024 bytes, and 61440 for 640 and 2048 bytes.
+The `reference` says three minutes. The repair does not correct that recognition error or guarantee the same detector endpoint with different message sizes.
+
+For the 74 inputs with `partial` decodes in the two runs, the first decode used the same sample count.
+The total `partial` count changed from 491 to 483. Each turn changed by at most one `partial` decode.
+The median end-decision wall-time change was -9.83 ms for the 78 inputs with the same end sample.
+Its range was -73.50 to +35.94 ms.
+
+These timing values use different run times and host loads. They do not isolate the timing effect of the repair.
+The gateway waits for detector processing before each provider push. It keeps less than 32 ms of unprocessed audio between pushes.
+
+`task check`, Python 3.14.2, and the network-isolated suite each gave `2273 passed, 1 skipped`.
+Ruff reported `132 files already formatted` and `All checks passed!`. Mypy found no issues in 50 source files.
+Package, bootstrap, CI, asset, and secret checks were satisfactory.
+
+The relative public-tree task reported `NOT CHECKED public tree` because this worktree has no sibling integration checkout.
+The canonical checker gave `PASS public data matches=0` and a satisfactory history check for 81 commits.
+The streaming STT contract file ran ten times in new processes: `530 passed`, with no failure.
