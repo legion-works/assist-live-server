@@ -118,6 +118,8 @@ The two rules keep the command-start guard and the end-sample cut for the `final
 Without a command start, the two rules send an empty `final` without a `final` decode.
 With `checkpoint`, transcript replacement uses the checkpoint at the end sample.
 The three early-end conditions and detector limits do not change.
+The [transcript guard](profiles.md) accepts object-final particles but keeps turns open after opening verb-particle pairs.
+This rule applies to the two end rules (see `docs/design.md` in the integration repository).
 
 The checkpoint decodes also supply UI `partial` transcripts in sample order.
 The server does not run a second set of UI decodes.

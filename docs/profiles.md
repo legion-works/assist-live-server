@@ -45,11 +45,33 @@ P1 sets the start rule with volunteer recordings.
 The transcript guard is active in each `Profile`. Number endings can be complete.
 
 Articles, prepositions, and conjunctions at the end cause a longer wait.
-This word-class rule also causes a longer wait for complete particle endings, such as "turn the lights on".
+The particles `on`, `off`, `up`, `down`, `out`, and `over` can complete a command after its object.
+Examples are "turn the lights on", "turn it off", and "is the light on".
+The other words in the incomplete-ending list, such as `in`, keep the longer wait.
 
-The same cost applies to "off", "up", and "down" endings.
-The word-class list has no particle-specific rule.
-The human pause and prefix measurements must quantify this latency cost before `Profile` acceptance.
+A particle directly after an opening command verb keeps the turn open, also after "please" or an initial filler.
+The guard uses these pairs from the Home Assistant English intent templates:
+
+| Particle | Opening verbs |
+|---|---|
+| `on` | `turn`, `switch`, `change`, `bring`, `replay`, `skip` |
+| `off` | `turn`, `switch`, `change`, `bring`, `check`, `complete`, `delete`, `remove` |
+| `up` | `turn`, `close`, `shut`, `lower`, `open`, `raise`, `lift`, `light` |
+| `down` | `turn`, `close`, `shut`, `lower` |
+| `out` | `turn`, `switch`, `change`, `bring` |
+| `over` | None in the templates |
+
+The source is `home-assistant-intents` 2026.10.6, `data/en.json`, lines 2466, 2531, 2689, 3196, 3561, 3955–3956, and 4942–4946.
+Each particle has its own verb set. Thus "is the light on" can end, but "light up" cannot.
+An earlier verb from that set lets an object use a verb word, as in "turn the switch off".
+A bare opening verb or particle cannot complete a command.
+
+The words "skip" and "replay" are complete media commands in the templates, so they can end alone.
+See the [public design](https://github.com/legion-works/assist-live/blob/ab31458/docs/design.md#end-of-turn-and-stt-fallback), `docs/design.md`.
+
+This text rule does not parse grammar. For example, "turn off the light and turn on" contains an earlier verb from that set.
+The rule can accept that unfinished command. Smart Turn and the minimum time without voice apply.
+The human pause and prefix measurements stay necessary before `Profile` acceptance.
 
 After the minimum time without voice, Smart Turn checks a changed complete transcript on the next processed frame.
 For an unchanged transcript, audio growth can cause a new check each 160 ms.

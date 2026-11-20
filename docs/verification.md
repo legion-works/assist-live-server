@@ -4168,3 +4168,55 @@ All commands use `idle-run.sh`. No audio playback, hardware access, commit, or p
 - `checkpoint_failure` counts only the named causes `deadline` and `wall_limit`. An unknown cause gives a `ValueError`. Before this change, the server counted an unknown cause as a wall-limit failure.
 - Test: `tests/test_checkpoint_review_fixes.py::test_checkpoint_failure_counts_each_named_cause_and_refuses_others` gave a failure on `f8e154c` and is satisfactory after the change.
 - `docs/configuration.md` states that the server cancels queued checkpoint work before it sends the end decision.
+
+## Object-final particles
+
+The [public design](https://github.com/legion-works/assist-live/blob/ab31458/docs/design.md#end-of-turn-and-stt-fallback), `docs/design.md`, lets six particles complete a command after its object.
+The guard accepts `on`, `off`, `up`, `down`, `out`, and `over` in that position.
+Opening verb-particle pairs keep the turn open. The verb sets use `home-assistant-intents` 2026.10.6 English templates (see `docs/profiles.md`).
+The other 86 words in `INCOMPLETE_ENDINGS` keep their effect. The `Profile` settings, thresholds, and command-start guard stay unchanged.
+
+Tests on `cbac0e9` gave `15 failed, 102 passed` before implementation.
+An isolated archive with the new tests gave the same result after implementation.
+The repaired turn suite gave `199 passed`.
+The detector test ends "turn the light on" after 416 ms without voice, with a satisfactory Smart Turn score.
+
+Offline detector replay uses the pinned Silero and Smart Turn models, with greedy transcript checkpoints at 400 ms positions.
+The audio clock supplies end times. This test isolates the text rule, not wall-time arrival of `partial` text.
+All 250 corpus inputs keep the same end sample and `reason`: 128 `early`, 122 `input_end`.
+Their median end time stays 3600 ms from input start.
+All 24 recent device A/B inputs and 31 wake-test inputs also keep their end samples and `reason` fields.
+
+Six archived device inputs end in `on`. Before the repair, all six end with `max_silence`.
+After the repair, five end `early`, each 1088 ms sooner. The sixth keeps `max_silence` because its highest Smart Turn score is 0.588.
+Their median end time changes from 3632 ms to 2544 ms.
+
+A different test uses 22 preferred operator recordings: six object-final commands, six pause commands, six short commands, two follow-ups, and two compound commands.
+For wake-word recordings, input starts 200 ms before the estimated wake-word end. This is a device-history simulation.
+Each recording also has a test with two seconds of recorded room noise after its initial end.
+The unextended recordings all end at `input_end`, with no change.
+
+With the room-noise tail, four object-final commands change from `max_silence` to `early`, each 1088 ms sooner.
+A fifth command ends `early` 32 ms sooner.
+One object-final command and the object-final pause command keep `max_silence`. Their highest Smart Turn scores are 0.296 and 0.012.
+No decision in the six pause commands occurs in its estimated natural pause or before its remaining voice, with or without the tail.
+These single-speaker simulations do not replace human pause acceptance.
+
+The rule does not parse grammar. It can accept "turn off the light and turn on" because an earlier verb uses the same particle.
+It keeps the previous longer wait for "is the switch on", where the object is also a word in the verb set.
+A transcript that is only one opening verb keeps the longer wait.
+The words "skip" and "replay" can end alone, because the templates use them as complete commands.
+`test_single_word_media_command_can_complete` gave two failures before this change.
+
+Two isolated mutations give behavioral failures at named tests:
+
+- Without the verb check, `test_particle_directly_after_command_verb_stays_incomplete` and `test_particle_after_prefixed_command_verb_stays_incomplete` give 21 failures.
+- With the previous full-list rule, `test_particle_after_object_can_complete_command` and `test_particle_after_object_ends_early_with_silence_and_smart_turn` give 14 failures.
+
+`task check`, the Python 3.14.2 floor suite, and the network-isolated suite each give `2378 passed, 1 skipped`.
+Ruff reports `139 files already formatted` and `All checks passed!`. Mypy finds no issues in 51 source files.
+Package, bootstrap, CI, asset, and secret checks are satisfactory.
+
+The relative public-tree task gives `NOT CHECKED public tree` in this worktree layout.
+The canonical checker gives `PASS public data matches=0` and checks 84 commits.
+All test, gate, and replay commands use `idle-run.sh`. No audio playback, device access, commit, or publication occurs.

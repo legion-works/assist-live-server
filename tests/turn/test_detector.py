@@ -45,6 +45,26 @@ def test_incomplete_transcript_blocks_early_end(detector):
 
 
 @pytest.mark.parametrize("profile", ["safe", "fast"])
+def test_particle_after_object_ends_early_with_silence_and_smart_turn(profile):
+    detector = TurnDetector(
+        profile,
+        vad_probability=lambda audio: float(np.any(audio)),
+        turn_probability=lambda _: 0.99,
+    )
+    partial = "turn the light on"
+    assert detector.push(np.ones(12800, dtype="<i2").tobytes(), partial) == []
+    assert detector.push(pcm(384), partial) == []
+    assert detector.push(pcm(32), partial) == [
+        {
+            "type": "end_decision",
+            "reason": "early",
+            "audio_ms": 1216.0,
+            "silence_ms": 416.0,
+        }
+    ]
+
+
+@pytest.mark.parametrize("profile", ["safe", "fast"])
 def test_three_conditions(profile):
     detector = TurnDetector(
         profile, vad_probability=lambda _: 0, turn_probability=lambda _: 1
