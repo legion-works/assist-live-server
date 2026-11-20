@@ -4209,7 +4209,7 @@ The rule can accept a particle that starts a phrase after the object, for exampl
 A transcript that is only one opening verb keeps the longer wait.
 The words "next", "skip", and "replay" can end alone, because the templates use them as complete commands.
 `test_single_word_media_command_can_complete` gives no failure on `cbac0e9`.
-It gave two failures with the earlier S41 version that did not let "skip" and "replay" end alone.
+It gave two failures with an earlier version of this change that did not let "skip" and "replay" end alone.
 The word `next` is also an opening verb for `on`, from template line 2530.
 
 Two isolated mutations give behavioral failures at named tests:
