@@ -15,7 +15,7 @@ INCOMPLETE_ENDINGS = frozenset(
 
 # HA English intent templates pair these command verbs with each particle.
 PARTICLE_COMMAND_VERBS = {
-    "on": frozenset("turn switch change bring replay skip".split()),
+    "on": frozenset("turn switch change bring replay skip next".split()),
     "off": frozenset("turn switch change bring check complete delete remove".split()),
     "up": frozenset("turn close shut lower open raise lift light".split()),
     "down": frozenset("turn close shut lower".split()),

@@ -54,14 +54,14 @@ The guard uses these pairs from the Home Assistant English intent templates:
 
 | Particle | Opening verbs |
 |---|---|
-| `on` | `turn`, `switch`, `change`, `bring`, `replay`, `skip` |
+| `on` | `turn`, `switch`, `change`, `bring`, `replay`, `skip`, `next` |
 | `off` | `turn`, `switch`, `change`, `bring`, `check`, `complete`, `delete`, `remove` |
 | `up` | `turn`, `close`, `shut`, `lower`, `open`, `raise`, `lift`, `light` |
 | `down` | `turn`, `close`, `shut`, `lower` |
 | `out` | `turn`, `switch`, `change`, `bring` |
 | `over` | None in the templates |
 
-The source is `home-assistant-intents` 2026.10.6, `data/en.json`, lines 2466, 2531, 2689, 3196, 3561, 3955–3956, and 4942–4946.
+The source is `home-assistant-intents` 2026.10.6, `data/en.json`, lines 2466, 2530, 2531, 2689, 3196, 3561, 3955–3956, and 4942–4946.
 Each particle has its own verb set. Thus "is the light on" can end, but "light up" cannot.
 An earlier verb from that set lets an object use a verb word, as in "turn the switch off".
 A bare opening verb or particle cannot complete a command.
@@ -71,6 +71,8 @@ See the [public design](https://github.com/legion-works/assist-live/blob/ab31458
 
 This text rule does not parse grammar. For example, "turn off the light and turn on" contains an earlier verb from that set.
 The rule can accept that unfinished command. Smart Turn and the minimum time without voice apply.
+The rule can also accept a particle that starts a phrase after the object.
+Examples are "turn on the lights on" before "the porch" and "next track on" before a speaker name.
 The human pause and prefix measurements stay necessary before `Profile` acceptance.
 
 After the minimum time without voice, Smart Turn checks a changed complete transcript on the next processed frame.

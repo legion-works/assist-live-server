@@ -127,7 +127,7 @@ def test_particle_after_prefixed_command_verb_stays_incomplete(partial):
 
 @pytest.mark.parametrize(
     "partial",
-    ["turn", "turn on the", "set a timer for", "turn on the lights in"],
+    ["turn", "turn on the", "set a timer for", "turn on the lights in", "next on"],
 )
 def test_command_opening_stays_incomplete(partial):
     assert not complete_partial(partial)

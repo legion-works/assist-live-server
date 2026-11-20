@@ -4178,7 +4178,7 @@ The other 86 words in `INCOMPLETE_ENDINGS` keep their effect. The `Profile` sett
 
 Tests on `cbac0e9` gave `15 failed, 102 passed` before implementation.
 An isolated archive with the new tests gave the same result after implementation.
-The repaired turn suite gave `199 passed`.
+The final turn suite gives `202 passed`.
 The detector test ends "turn the light on" after 416 ms without voice, with a satisfactory Smart Turn score.
 
 Offline detector replay uses the pinned Silero and Smart Turn models, with greedy transcript checkpoints at 400 ms positions.
@@ -4206,14 +4206,17 @@ The rule does not parse grammar. It can accept "turn off the light and turn on" 
 It keeps the previous longer wait for "is the switch on", where the object is also a word in the verb set.
 A transcript that is only one opening verb keeps the longer wait.
 The words "skip" and "replay" can end alone, because the templates use them as complete commands.
-`test_single_word_media_command_can_complete` gave two failures before this change.
+`test_single_word_media_command_can_complete` gives no failure on `cbac0e9`.
+It gave two failures with the earlier S41 version that did not let "skip" and "replay" end alone.
+The word `next` is also an opening verb for `on`, from template line 2530.
+The rule can accept a particle that starts a phrase after the object, for example "turn on the lights on" before "the porch".
 
 Two isolated mutations give behavioral failures at named tests:
 
 - Without the verb check, `test_particle_directly_after_command_verb_stays_incomplete` and `test_particle_after_prefixed_command_verb_stays_incomplete` give 21 failures.
 - With the previous full-list rule, `test_particle_after_object_can_complete_command` and `test_particle_after_object_ends_early_with_silence_and_smart_turn` give 14 failures.
 
-`task check`, the Python 3.14.2 floor suite, and the network-isolated suite each give `2378 passed, 1 skipped`.
+`task check`, the Python 3.14.2 floor suite, and the network-isolated suite each give `2381 passed, 1 skipped`.
 Ruff reports `139 files already formatted` and `All checks passed!`. Mypy finds no issues in 51 source files.
 Package, bootstrap, CI, asset, and secret checks are satisfactory.
 
