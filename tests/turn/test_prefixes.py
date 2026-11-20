@@ -133,7 +133,7 @@ def test_command_opening_stays_incomplete(partial):
     assert not complete_partial(partial)
 
 
-@pytest.mark.parametrize("partial", ["skip", "Replay."])
+@pytest.mark.parametrize("partial", ["skip", "Replay.", "next"])
 def test_single_word_media_command_can_complete(partial):
     assert complete_partial(partial)
 

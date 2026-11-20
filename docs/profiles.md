@@ -66,11 +66,12 @@ Each particle has its own verb set. Thus "is the light on" can end, but "light u
 An earlier verb from that set lets an object use a verb word, as in "turn the switch off".
 A bare opening verb or particle cannot complete a command.
 
-The words "skip" and "replay" are complete media commands in the templates, so they can end alone.
+The words "next", "skip", and "replay" are complete media commands in the templates, so they can end alone.
 See the [public design](https://github.com/legion-works/assist-live/blob/ab31458/docs/design.md#end-of-turn-and-stt-fallback), `docs/design.md`.
 
 This text rule does not parse grammar. For example, "turn off the light and turn on" contains an earlier verb from that set.
 The rule can accept that unfinished command. Smart Turn and the minimum time without voice apply.
+
 The rule can also accept a particle that starts a phrase after the object.
 Examples are "turn on the lights on" before "the porch" and "next track on" before a speaker name.
 The human pause and prefix measurements stay necessary before `Profile` acceptance.

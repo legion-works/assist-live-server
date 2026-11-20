@@ -22,8 +22,12 @@ PARTICLE_COMMAND_VERBS = {
     "out": frozenset("turn switch change bring".split()),
     "over": frozenset(),
 }
-# "skip" and "replay" are complete media commands in the HA English templates.
-OPENING_VERBS = frozenset().union(*PARTICLE_COMMAND_VERBS.values()) - {"replay", "skip"}
+# "next", "skip", and "replay" are complete media commands in the HA English templates.
+OPENING_VERBS = frozenset().union(*PARTICLE_COMMAND_VERBS.values()) - {
+    "next",
+    "replay",
+    "skip",
+}
 
 
 def transcript_words(text: str) -> list[str]:
