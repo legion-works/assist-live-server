@@ -4300,7 +4300,12 @@ With this change, the turn also stays open for an opening verb at the end of a t
 The same rule applies to a particle at the end, as in "please on" and "uh off".
 
 The start words are `please` and the request words `can`, `could`, `would`, `will`, and `you`.
-The fillers `uh`, `um`, `er`, `erm`, `ah`, `hmm`, `so`, `well`, `okay`, and `ok` are also start words.
+The fillers `uh`, `um`, `er`, `erm`, `ah`, `hmm`, `so`, `okay`, and `ok` are also start words.
+
+A start word must not be a likely device name.
+The templates accept "well on" for a switch with the name "Well" (`data/en.json` lines 3861 and 4267), so "well" is not a start word.
+A follow-up can use the name hints of the satellite to find the difference between an object and a start word.
+
 The media commands "next", "skip", and "replay" can end after start words, as in "please skip".
 The word `set` is also an opening verb, so "set" and "please set" keep the turn open.
 
@@ -4325,6 +4330,10 @@ With `set` as an opening verb, `tests/turn/test_prefixes.py` gives `108 passed` 
 The particle tests on `da4a340` gave `5 failed, 111 passed`.
 The five failures are "please on", "uh off", "could you up", "Um, please down…", and "so out".
 After the particle repair, `tests/turn/test_prefixes.py` gives `116 passed` and `tests/turn/test_detector.py` gives `35 passed`.
+
+The device-name tests on `0a7c5ef` gave `3 failed, 116 passed`.
+The three failures are "well on", "well off", and "uh well on".
+Without "well" as a start word, `tests/turn/test_prefixes.py` gives `119 passed`.
 
 A scratch mutation, `any-final-verb`, keeps the turn open for each opening verb at the end.
 `test_verb_word_after_an_object_can_complete` kills it with three failures: "is the door open", "turn on the kitchen light", and "turn off the switch".

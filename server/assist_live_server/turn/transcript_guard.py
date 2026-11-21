@@ -30,7 +30,7 @@ OPENING_VERBS = (
 # Only these words can come before an opening verb or a particle that stays open,
 # because verb words such as "light" and "open" can also end a command after an object.
 LEADING_WORDS = frozenset(
-    "please uh um er erm ah hmm so well okay ok can could would will you".split()
+    "please uh um er erm ah hmm so okay ok can could would will you".split()
 )
 
 

@@ -52,7 +52,9 @@ The other words in the incomplete-ending list, such as `in`, keep the longer wai
 A particle directly after an opening command verb keeps the turn open.
 This rule also applies when only start words come before the verb.
 The start words are `please` and the request words `can`, `could`, `would`, `will`, and `you`.
-The fillers `uh`, `um`, `er`, `erm`, `ah`, `hmm`, `so`, `well`, `okay`, and `ok` are also start words.
+The fillers `uh`, `um`, `er`, `erm`, `ah`, `hmm`, `so`, `okay`, and `ok` are also start words.
+A start word must not be a likely device name. Thus "well" is not a start word, and "well on" can complete a command for a switch with the name "Well".
+
 The guard uses these pairs from the Home Assistant English intent templates:
 
 | Particle | Opening verbs |
