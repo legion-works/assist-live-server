@@ -266,7 +266,9 @@ def check_records(document: dict[str, Any]) -> list[str]:
     return errors
 
 
-def check_wheel(path: Path) -> tuple[list[str], list[str]]:
+def check_wheel(
+    path: Path, expected_version: str | None = None
+) -> tuple[list[str], list[str]]:
     errors = []
     with zipfile.ZipFile(path) as archive:
         metadata = [
@@ -278,6 +280,8 @@ def check_wheel(path: Path) -> tuple[list[str], list[str]]:
         dependencies = list(message.get_all("Requires-Dist", []))
         if message.get("Name") != "assist-live-client":
             errors.append("not an assist-live-client wheel")
+        if expected_version is not None and message.get("Version") != expected_version:
+            errors.append("client wheel version differs from requested version")
         names = {
             re.split(r"[\s<>=!~;\[]", dependency, maxsplit=1)[0]
             .lower()
@@ -595,7 +599,7 @@ def check_image(
     return list(dict.fromkeys(errors)), inventory
 
 
-def check_pypi(version: str) -> list[str]:
+def check_pypi(version: str, *, require_published: bool = True) -> list[str]:
     if not re.fullmatch(r"\d+\.\d+\.\d+(?:(?:a|b|rc)\d+)?", version):
         return ["invalid PyPI version"]
     try:
@@ -603,6 +607,8 @@ def check_pypi(version: str) -> list[str]:
             f"https://pypi.org/pypi/assist-live-client/{version}/json", timeout=20
         ) as response:
             document = json.load(response)
+        if not require_published:
+            return ["client version already published"]
         if (
             document["info"]["name"] != "assist-live-client"
             or document["info"]["version"] != version
@@ -615,8 +621,14 @@ def check_pypi(version: str) -> list[str]:
             return ["PyPI version has no available wheel"]
     except HTTPError as error:
         error.close()
+        if not require_published:
+            if error.code == 404:
+                return []
+            return [f"PyPI availability check failed (HTTP {error.code})"]
         return ["required client version is not available on PyPI"]
     except OSError, ValueError, KeyError, TypeError:
+        if not require_published:
+            return ["PyPI availability check failed (network or metadata error)"]
         return ["required client version is not available on PyPI"]
     return []
 
@@ -666,7 +678,7 @@ def main(argv: list[str] | None = None) -> int:
             if len(wheels) != 1:
                 errors.append("exactly one client wheel required")
             else:
-                failures, dependencies = check_wheel(wheels[0])
+                failures, dependencies = check_wheel(wheels[0], args.pypi_version)
                 errors.extend(failures)
                 print("Client dependencies: " + json.dumps(dependencies))
         if args.image:
@@ -693,7 +705,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.require_published and not args.pypi_version:
             errors.append("--require-published needs --pypi-version")
         if args.pypi_version:
-            errors.extend(check_pypi(args.pypi_version))
+            errors.extend(
+                check_pypi(args.pypi_version, require_published=args.require_published)
+            )
     except (
         OSError,
         ValueError,

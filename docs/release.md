@@ -1,7 +1,7 @@
 # Release artifacts
 
-The project is experimental and has no release.
-Local builds and CI checks do not publish an artifact.
+The project is experimental. The client pre-release is for testing only.
+Local builds and `release-artifacts.yml` do not publish an artifact.
 
 ## Build and check
 
@@ -107,3 +107,41 @@ uv run python tools/check_release.py --pypi-version "$CLIENT_VERSION" --require-
 
 After new approval, publication commands include `uv publish`, `docker login`, `docker push`, and `docker buildx build --push`.
 They are not part of the local gate or the CI image check.
+
+## Client pre-release on PyPI
+
+The manual `publish-client.yml` workflow publishes the client pre-release `0.1.0a1` to PyPI.
+It does not publish the server or a container image.
+The `build` task checks the client package, asset records, and wheel before publication.
+Its PyPI check accepts only HTTP `404` for a missing version. A published version or a different error stops publication.
+
+Only the `publish` task gets `id-token: write`. It uses PyPI trusted publishing without a token or secret.
+
+Before the first publication, complete these steps:
+
+1. On PyPI, open the account tab **Publishing**, then **Add a new pending publisher**.
+2. Select GitHub as the publisher.
+3. Record these values:
+   - PyPI project name: `assist-live-client`.
+   - GitHub owner: `legion-works`.
+   - Repository name: `assist-live-server`.
+   - Workflow name: `publish-client.yml`.
+   - Environment name: `pypi`.
+4. In the GitHub repository settings, make the environment `pypi`.
+5. Add a `required reviewer` to that environment before publication.
+6. Set the repository `variable` `ASSIST_LIVE_RELEASES_APPROVED` to `true` only after operator approval.
+
+To publish, open **Actions → Publish client to PyPI → Run workflow** on the approved revision.
+Give approval for the `pypi` environment after the `build` task succeeds.
+
+After publication, run **Actions → Release artifact checks → Run workflow** on the same revision.
+Its client check uses `--require-published` to check that PyPI supplies a wheel for the specified version.
+The complete artifact workflow also checks server images. It does not publish them.
+Set `ASSIST_LIVE_RELEASES_APPROVED` to `false` after the checks.
+
+This pre-release does not use release-please.
+Its manifest keeps the client at `0.0.0`. The next release-please release selects a usual client version from that value.
+Release-please uses SemVer pre-releases, not the PEP 440 version `0.1.0a1`.
+Its Python updater writes that SemVer string directly to `project.version`.
+Sources: [versioning strategies](https://github.com/googleapis/release-please/blob/main/docs/customizing.md#versioning-strategies)
+and the [Python updater](https://github.com/googleapis/release-please/blob/main/src/updaters/python/pyproject-toml.ts).

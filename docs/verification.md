@@ -4224,3 +4224,35 @@ Package, bootstrap, CI, asset, and secret checks are satisfactory.
 The relative public-tree task gives `NOT CHECKED public tree` in this worktree layout.
 The canonical checker gives `PASS public data matches=0` and checks 84 commits.
 All test, gate, and replay commands use `idle-run.sh`. No audio playback, device access, commit, or publication occurs.
+
+## Client PyPI pre-release workflow
+
+The client version is `0.1.0a1`. The server dependency selects that same version.
+The manual `publish-client.yml` workflow checks and builds the client before PyPI trusted publishing.
+Each task first checks publication approval. Only the `publish` task gets `id-token: write`.
+The release-please metadata task keeps its named permissions.
+
+The release-please manifest stays at `0.0.0` for the client. This PEP 440 pre-release does not use release-please.
+
+The initial CI permission tests give `8 failed, 1 passed` before the checker change.
+The initial pre-publication tests give `5 failed, 4 passed` before the release-checker change.
+The complete CI and release-checker tests give `67 passed` after the changes.
+The pre-publication check accepts only HTTP `404`. A published version or a different error stops the check.
+
+The tests use a synthetic PyPI response. The wheel metadata must agree with the requested version.
+The `--require-published` check accepts a PyPI wheel only if it is not yanked.
+
+A parsed scratch mutation lets a second task get `id-token: write`.
+The named `second-token` assertion finds that mutation, with `1 failed, 29 deselected`.
+
+All test and gate commands use `idle-run.sh`.
+`task check`, the Python `3.14.2` floor suite, and the network-isolated suite each give `2400 passed, 1 skipped`.
+The floor and network-isolated suites use the same model-cache setting as `task check`.
+Ruff reports `139 files already formatted` and `All checks passed!`. Mypy finds no issues in 51 source files.
+`actionlint`, package checks, asset checks, and secret checks give exit code `0`.
+
+The build makes `assist_live_client-0.1.0a1-py3-none-any.whl`. Its metadata version is `0.1.0a1`.
+`check_release.py --wheel dist` gives `PASS release checks`.
+The relative public-tree task gives `NOT CHECKED public tree` in this worktree layout.
+The explicit canonical checker uses the private denylist and gives `PASS public data matches=0` for 88 commits.
+No workflow dispatch, repository-setting change, commit, or publication occurs in these checks.

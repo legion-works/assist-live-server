@@ -302,6 +302,91 @@ def test_pypi_requires_exact_available_version(monkeypatch):
     assert module.check_pypi("1.2.4")
 
 
+@pytest.mark.parametrize(
+    "require_published, response, expected",
+    [
+        (False, 404, None),
+        (False, 200, "client version already published"),
+        (False, 500, "PyPI availability check failed (HTTP 500)"),
+        (
+            False,
+            "network",
+            "PyPI availability check failed (network or metadata error)",
+        ),
+        (True, 200, None),
+        (True, 404, "required client version is not available on PyPI"),
+        (True, "yanked", "PyPI version has no available wheel"),
+    ],
+)
+def test_release_cli_checks_prepublication_availability(
+    tmp_path, monkeypatch, capsys, require_published, response, expected
+):
+    from urllib.error import HTTPError
+
+    module = checker()
+    wheel = tmp_path / "assist_live_client-0.1.0a1-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr(
+            "assist_live_client-0.1.0a1.dist-info/METADATA",
+            "Name: assist-live-client\nVersion: 0.1.0a1\nRequires-Dist: aiohttp\n",
+        )
+    calls = []
+
+    def urlopen(url, timeout):
+        calls.append((url, timeout))
+        if response == "network":
+            raise OSError("synthetic network error")
+        if response in (404, 500):
+            raise HTTPError(url, response, "synthetic HTTP error", None, None)
+        return io.BytesIO(
+            json.dumps(
+                {
+                    "info": {"name": "assist-live-client", "version": "0.1.0a1"},
+                    "urls": [{"filename": wheel.name, "yanked": response == "yanked"}],
+                }
+            ).encode()
+        )
+
+    monkeypatch.setattr(module, "urlopen", urlopen)
+    result = module.main(
+        ["--wheel", str(wheel), "--pypi-version", "0.1.0a1"]
+        + (["--require-published"] if require_published else [])
+    )
+    output = capsys.readouterr().out
+    assert calls == [("https://pypi.org/pypi/assist-live-client/0.1.0a1/json", 20)]
+    assert result == (0 if expected is None else 1), output
+    if expected is not None:
+        assert f"FAIL release: {expected}" in output
+
+
+@pytest.mark.parametrize(
+    "version, expected",
+    [
+        ("0.1.0a2", "client wheel version differs from requested version"),
+        ("not-a-version", "invalid PyPI version"),
+    ],
+)
+def test_release_cli_refuses_wrong_wheel_version(
+    tmp_path, monkeypatch, capsys, version, expected
+):
+    from urllib.error import HTTPError
+
+    module = checker()
+    wheel = tmp_path / "assist_live_client-0.1.0a1-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr(
+            "assist_live_client-0.1.0a1.dist-info/METADATA",
+            "Name: assist-live-client\nVersion: 0.1.0a1\nRequires-Dist: aiohttp\n",
+        )
+
+    def urlopen(url, timeout):
+        raise HTTPError(url, 404, "synthetic missing version", None, None)
+
+    monkeypatch.setattr(module, "urlopen", urlopen)
+    assert module.main(["--wheel", str(wheel), "--pypi-version", version]) == 1
+    assert f"FAIL release: {expected}" in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("bad", [False, True])
 def test_build_sources_require_matching_installed_wheel(tmp_path, bad):
     document = asset_document()

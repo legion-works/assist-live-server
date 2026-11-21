@@ -18,7 +18,7 @@ APPROVAL = "${{ vars.ASSIST_LIVE_RELEASES_APPROVED }}"
 def check_ci(root: Path = ROOT) -> list[str]:
     errors: list[str] = []
     workflows = {}
-    for name in ("ci", "release-please", "release-artifacts"):
+    for name in ("ci", "release-please", "release-artifacts", "publish-client"):
         path = root / f".github/workflows/{name}.yml"
         try:
             text = path.read_text()
@@ -26,7 +26,22 @@ def check_ci(root: Path = ROOT) -> list[str]:
             workflows[name] = workflow
             if workflow.get("permissions") != {"contents": "read"}:
                 errors.append(f"{name}: top-level read-only permissions required")
-            for job in workflow["jobs"].values():
+            for job_name, job in workflow["jobs"].items():
+                permissions = job.get("permissions", {"contents": "read"})
+                if (name, job_name) == ("publish-client", "publish"):
+                    if job.get("permissions") != {"id-token": "write"}:
+                        errors.append(
+                            f"{name}: {job_name}: id-token-only permissions required"
+                        )
+                elif (name, job_name) == ("release-please", "release-please"):
+                    if permissions != {"contents": "write", "pull-requests": "write"}:
+                        errors.append(
+                            f"{name}: {job_name}: release metadata permissions required"
+                        )
+                elif permissions != {"contents": "read"}:
+                    errors.append(
+                        f"{name}: {job_name}: read-only job permissions required"
+                    )
                 for step in job["steps"]:
                     if "uses" in step and not re.fullmatch(
                         r"[\w.-]+/[\w./-]+@[a-f0-9]{40}", step["uses"]

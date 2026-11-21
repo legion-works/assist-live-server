@@ -418,6 +418,100 @@ def test_ci_structure_and_pins():
     assert not check_ci(ROOT)
 
 
+@pytest.mark.parametrize(
+    "mutation, expected",
+    [
+        ("none", None),
+        ("second-token", "publish-client: build: read-only job permissions required"),
+        (
+            "contents-write",
+            "publish-client: publish: id-token-only permissions required",
+        ),
+        (
+            "missing-gate",
+            "publish-client: fail-closed first-step release guard required",
+        ),
+        ("unpinned", "publish-client: full action commit required"),
+        ("pull-request", "publish-client: manual dispatch only"),
+        (
+            "release-permissions",
+            "publish-client: build: read-only job permissions required",
+        ),
+        ("other-workflow-token", "ci: checks: read-only job permissions required"),
+        (
+            "other-release-job",
+            "release-please: other: read-only job permissions required",
+        ),
+    ],
+)
+def test_publish_permissions_are_scoped_to_one_job(tmp_path, mutation, expected):
+    import shutil
+
+    from tools.check_ci import check_ci
+
+    shutil.copytree(ROOT / ".github", tmp_path / ".github")
+    for filename in ("release-please-config.json", ".release-please-manifest.json"):
+        shutil.copyfile(ROOT / filename, tmp_path / filename)
+    guard = (
+        "      - name: Require publication approval\n"
+        "        env:\n"
+        "          RELEASES_APPROVED: ${{ vars.ASSIST_LIVE_RELEASES_APPROVED }}\n"
+        '        run: test "$RELEASES_APPROVED" = "true"\n'
+    )
+    workflow = (
+        "on:\n  workflow_dispatch:\npermissions:\n  contents: read\njobs:\n"
+        "  build:\n    runs-on: ubuntu-latest\n    steps:\n"
+        + guard
+        + "      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5"
+        " # v4.3.1\n"
+        "  publish:\n    needs: build\n    environment: pypi\n"
+        "    runs-on: ubuntu-latest\n    permissions:\n      id-token: write\n"
+        "    steps:\n" + guard
+    )
+    if mutation == "second-token":
+        workflow = workflow.replace(
+            "  build:\n", "  build:\n    permissions:\n      id-token: write\n"
+        )
+    elif mutation == "contents-write":
+        workflow = workflow.replace(
+            "      id-token: write\n", "      id-token: write\n      contents: write\n"
+        )
+    elif mutation == "missing-gate":
+        workflow = workflow.replace(guard, "      - run: echo no-guard\n", 1)
+    elif mutation == "unpinned":
+        workflow = workflow.replace("34e114876b0b11c390a56381ad16ebd13914f8d5", "v4")
+    elif mutation == "pull-request":
+        workflow = workflow.replace("  workflow_dispatch:\n", "  pull_request:\n")
+    elif mutation == "release-permissions":
+        workflow = workflow.replace(
+            "  build:\n",
+            "  build:\n    permissions:\n      contents: write\n"
+            "      pull-requests: write\n",
+        )
+    elif mutation == "other-workflow-token":
+        path = tmp_path / ".github/workflows/ci.yml"
+        path.write_text(
+            path.read_text().replace(
+                "  checks:\n", "  checks:\n    permissions:\n      id-token: write\n"
+            )
+        )
+    elif mutation == "other-release-job":
+        path = tmp_path / ".github/workflows/release-please.yml"
+        original = path.read_text()
+        path.write_text(
+            original
+            + original[original.index("  release-please:\n") :].replace(
+                "  release-please:\n", "  other:\n", 1
+            )
+        )
+    (tmp_path / ".github/workflows/publish-client.yml").write_text(workflow)
+    errors = check_ci(tmp_path)
+    if expected is None:
+        assert not errors
+    else:
+        assert expected in errors
+
+
 @pytest.mark.parametrize("result", ["failure", "skipped", "cancelled", "success"])
 def test_ci_complete_fails_unless_all_jobs_succeed(tmp_path, result):
     import json
@@ -468,7 +562,7 @@ def test_release_guard_runs_fail_closed(tmp_path, approval):
     import os
     import subprocess
 
-    for name in ("release-please", "release-artifacts"):
+    for name in ("release-please", "release-artifacts", "publish-client"):
         workflow = yaml.safe_load((ROOT / f".github/workflows/{name}.yml").read_text())
         for job in workflow["jobs"].values():
             guard = job["steps"][0]
