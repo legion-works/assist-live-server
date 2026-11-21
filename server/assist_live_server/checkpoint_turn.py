@@ -79,9 +79,14 @@ class CheckpointTurn:
 
         async def checkpoint(prefix: bytes) -> str:
             try:
-                async with asyncio.timeout(CHECKPOINT_TIMEOUT):
+                async with asyncio.timeout(CHECKPOINT_TIMEOUT) as deadline:
                     return await self.session.checkpoint(prefix)
-            except TimeoutError, STTCheckpointDeadlineError:
+            except TimeoutError:
+                if not deadline.expired():
+                    raise
+                self.fail("deadline")
+                raise CheckpointDeadline from None
+            except STTCheckpointDeadlineError:
                 self.fail("deadline")
                 raise CheckpointDeadline from None
 

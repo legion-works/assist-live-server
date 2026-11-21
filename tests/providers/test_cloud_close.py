@@ -7,8 +7,9 @@ from assist_live_server.providers.openai_stt import OpenAIProvider
 
 
 @pytest.mark.parametrize("provider", [DeepgramProvider, OpenAIProvider])
-def test_cancel_after_successful_finish_does_not_start_second_close(
-    cloud_ws_server, monkeypatch, provider
+@pytest.mark.parametrize("outcome", ["success", "failed"])
+def test_cancel_after_finish_does_not_start_second_close(
+    cloud_ws_server, monkeypatch, provider, outcome
 ):
     async def run():
         async def handler(request):
@@ -18,6 +19,12 @@ def test_cancel_after_successful_finish_does_not_start_second_close(
                 if message.type != WSMsgType.TEXT:
                     continue
                 kind = message.json()["type"]
+                if outcome == "failed" and kind in {
+                    "CloseStream",
+                    "input_audio_buffer.commit",
+                }:
+                    await ws.close()
+                    continue
                 if kind == "CloseStream":
                     await ws.send_json({"type": "Metadata"})
                     await ws.close()
@@ -48,9 +55,16 @@ def test_cancel_after_successful_finish_does_not_start_second_close(
             monkeypatch.setattr(session, "aclose", tracked_close)
             try:
                 await session.push(bytes(1024))
-                await session.finish()
+                if outcome == "failed":
+                    with pytest.raises(RuntimeError, match="finalization failed"):
+                        await session.finish()
+                else:
+                    await session.finish()
+                assert session._client.closed
+                assert session._ws.closed
+                assert session._reader.done()
                 session.cancel()
-                assert session._closing is None, "FINISHED_SESSION_STARTED_CLOSE_TASK"
+                assert session._closing is None, "CLOSED_SESSION_STARTED_CLOSE_TASK"
                 assert calls == [True]
             finally:
                 if session._closing is not None:

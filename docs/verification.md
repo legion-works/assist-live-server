@@ -4437,3 +4437,28 @@ The relative public-tree step reports `NOT CHECKED public tree` because the work
 
 The STE check gives no errors. Its two advisories name unchanged earlier records.
 No audio playback, device access, cloud call, commit, or publication occurs.
+
+### Cross-family review repairs
+
+The close-limit text specifies one 100 ms limit for the complete audio close operation: frame write, drain, and peer reply wait.
+It does not specify a second 100 ms interval for the reply.
+
+The checkpoint scope counts `deadline` only when its own timer expires or the session reports `STTCheckpointDeadlineError`.
+A callee's ordinary `TimeoutError` sends `stt_failed` without a checkpoint deadline or wall-limit count.
+The regression checks the callee error, actual timer expiry, and the typed session-deadline error.
+Before the repair, the callee case gave `CALLEE_TIMEOUT_IS_NOT_CHECKPOINT_TIMER_EXPIRY`, with `1 failed, 8 passed`.
+After the repair, the file gives `9 passed`.
+
+The cloud adapters use `_closed` to record their close state, not `_finished`.
+A refused `finish()` awaits its close operation before it gives an error.
+The reader stops, the adapter closes the socket and the client, and cancellation starts no second close task.
+Before the repair, the two failure cases gave `CLOSED_SESSION_STARTED_CLOSE_TASK`, with `2 failed, 2 passed`.
+After the repair, the file gives `4 passed`.
+
+Two isolated source mutations parse and give failures at those same assertions:
+
+- `m05-checkpoint-callee` removes the checkpoint timer-expiry check. The callee test gives one failure. The two timer cases stay satisfactory.
+- `m06-failed-close` uses `_finished` as the close guard. The two failed-finalization tests give failures.
+
+The last gate sequence runs each changed test file through `idle-run.sh`, then the three complete suites from the earlier record.
+Each suite runs alone, with a 40-minute limit. No source edit follows that last sequence.

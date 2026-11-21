@@ -511,7 +511,8 @@ After input ends or the detector ends the turn, each read has a 15 s limit while
 An earlier live-input read can expire one time before the reader starts that 15 s wait.
 
 On expiry, the server tries the `audio timeout` close, cancels the turn tasks, and releases the connection and turn slots.
-The audio route also limits the close-frame write to 100 ms. If that write stalls, it closes the transport without a peer reply.
+The audio route limits the complete close operation to 100 ms: the frame write, drain, and peer reply wait.
+If that operation stalls, it closes the transport without a peer reply.
 
 Each audio frame has a constant 21-byte header:
 

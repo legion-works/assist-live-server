@@ -70,6 +70,7 @@ class OpenAISession:
         self._ws: aiohttp.ClientWebSocketResponse | None = None
         self._reader: asyncio.Task[None] | None = None
         self._closing: asyncio.Task[None] | None = None
+        self._closed = False
         self._lock = asyncio.Lock()
         self._changed = asyncio.Event()
         self._items: dict[str, str] = {}
@@ -337,10 +338,12 @@ class OpenAISession:
         self._final = ""
         if self._reader is not None:
             self._reader.cancel()
-        if self._client is not None and self._closing is None and not self._finished:
+        if self._client is not None and self._closing is None and not self._closed:
             self._closing = asyncio.create_task(self.aclose())
 
     async def aclose(self) -> None:
+        if self._closed:
+            return
         if self._closing is not None and self._closing is not asyncio.current_task():
             await asyncio.shield(self._closing)
             return
@@ -354,3 +357,4 @@ class OpenAISession:
         if self._client is not None:
             with suppress(Exception):
                 await self._client.close()
+        self._closed = True

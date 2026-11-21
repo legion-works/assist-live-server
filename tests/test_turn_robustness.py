@@ -1,7 +1,7 @@
 import asyncio
 
 import pytest
-from assist_live_server import audio_gateway
+from assist_live_server import audio_gateway, checkpoint_turn
 from assist_live_server.audio_gateway import AudioGateway
 from assist_live_server.providers import stt
 from assist_live_server.providers.parakeet import ParakeetSession
@@ -144,5 +144,43 @@ def test_callee_timeout_during_hard_end_is_not_a_grace_expiry(monkeypatch):
         replies = [r async for r in gateway.stt(TURN, audio())]
         assert [r["type"] for r in replies] == ["error"]
         assert replies[0]["code"] == "stt_failed"
+
+    asyncio.run(asyncio.wait_for(run(), 2))
+
+
+@pytest.mark.parametrize("cause", ["callee", "timer", "session_timer"])
+def test_only_checkpoint_timer_expiry_counts_as_deadline(monkeypatch, cause):
+    monkeypatch.setattr(checkpoint_turn, "CHECKPOINT_TIMEOUT", 0.03)
+
+    async def run():
+        entered = asyncio.Event()
+
+        class Session(ParakeetSession):
+            async def checkpoint(self, pcm):
+                entered.set()
+                if cause == "callee":
+                    raise TimeoutError("synthetic callee timeout")
+                if cause == "session_timer":
+                    raise stt.STTCheckpointDeadlineError("checkpoint deadline expired")
+                await asyncio.Event().wait()
+
+        gateway = AudioGateway(
+            lambda _: Session(lambda _: ""),
+            detector_factory=FirstBlockCommandDetector,
+            end_rule="checkpoint",
+        )
+
+        async def audio():
+            yield bytes(12800)
+            await asyncio.Event().wait()
+
+        replies = [r async for r in gateway.stt(TURN, audio())]
+        assert entered.is_set()
+        assert [r["type"] for r in replies] == ["error"]
+        assert replies[0]["code"] == "stt_failed"
+        assert gateway.checkpoint_deadline_failures_total == (cause != "callee"), (
+            "CALLEE_TIMEOUT_IS_NOT_CHECKPOINT_TIMER_EXPIRY"
+        )
+        assert gateway.checkpoint_wall_limit_failures_total == 0
 
     asyncio.run(asyncio.wait_for(run(), 2))
