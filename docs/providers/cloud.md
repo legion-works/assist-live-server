@@ -236,11 +236,14 @@ The caller can start a new session. `aclose` waits for resource cleanup after ca
 `ElevenLabsProvider(api_key).stream(text, voice)` follows the typed TTS interface.
 It selects `eleven_flash_v2_5` and declares mono 16 kHz little-endian signed int16 PCM.
 It sends an initial space with `chunk_length_schedule=[50]`.
-Each nonempty input part goes to the service immediately and unchanged.
-There is no second input-text buffer. Empty parts do not close the connection.
+
+The shared spoken-text normalizer removes Markdown marks before the adapter sends text to the service.
+It sends available normalized text without a wait for a complete sentence.
+The normalizer can hold Markdown or HTML text until a closing mark or the documented limit.
+Empty parts do not close the connection. See [spoken-text rules](../protocol.md#spoken-text).
 
 The API recommends a trailing space for each text message.
-Input parts can divide a word. The adapter does not add spaces between those parts.
+Input parts can divide a word. The adapter does not add spaces between input parts.
 At input end, it sends `{"text":" ","flush":true}` and then `{"text":""}`.
 It receives audio until `isFinal=true`. `synthesize` supplies the same audio as bytes.
 

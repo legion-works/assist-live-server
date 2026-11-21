@@ -131,6 +131,7 @@ This rule adds a greedy decode at each 400 ms prefix, also before command start.
 
 Across all turns, checkpoint decodes can hold at most three of the four decode admission slots.
 This keeps one slot for a `final` request. Other `final` requests can fill the pool.
+
 At the end decision, the server cancels queued checkpoint work for positions after the end sample and releases its slots. Then it sends the end decision.
 An active decode keeps its slot until the call finishes.
 Partial-mode admission and queue order stay unchanged.
@@ -242,6 +243,7 @@ This stops ONNX Runtime from sending its default telemetry data. It also applies
 | Environment variable | Default | App option | Purpose |
 |---|---|---|---|
 | `ASSIST_LIVE_STT_PROVIDER` | `parakeet` | `stt_provider` | Select STT, or `none` to disable it. |
+| `ASSIST_LIVE_STT_HINT_BONUS` | `1.0` | none | Set the last Parakeet transcript's name bonus, from `0` through `4`. |
 | `ASSIST_LIVE_END_RULE` | `partial` | `end_rule` | Select `partial` or the Parakeet-only `checkpoint` rule. |
 | `ASSIST_LIVE_TTS_PROVIDER` | `piper` | `tts_provider` | Select TTS, or `none` to disable it. |
 | `ASSIST_LIVE_LOCAL_ONLY` | `true` | `local_only` | Refuse cloud providers. |

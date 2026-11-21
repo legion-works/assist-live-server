@@ -10,6 +10,8 @@ The runtime uses int8 models, `intra_op_num_threads=4`, `inter_op_num_threads=1`
 
 Each session accepts mono 16 kHz little-endian int16 PCM through `await push(pcm)`.
 Call `await partial()` after each audio push.
+This polling contract is for the default `partial` end rule. The optional `checkpoint` rule uses [audio-based checkpoints](../configuration.md#end-rule).
+
 A new `partial` starts only after 400 ms or more of new audio since the previous decode snapshot.
 The decoder reads the complete buffer each time. It does not supply previous samples to a streaming cache.
 Less frequent polling adds time to this interval.
@@ -130,7 +132,7 @@ Deepgram and OpenAI receive no names and report `stt_hints=false`.
 
 `partial()` gives an empty string until the caller calls `speech_started()`.
 It does not decode before that signal.
-The gateway must connect that signal to the turn detector's VAD.
+The gateway connects that signal to the turn detector's command start, not the first VAD voice signal.
 Without that connection, `partial` results stay empty.
 `finish()` decodes all accepted audio, with or without an onset signal.
 The gate does not remove the initial audio or the first word.

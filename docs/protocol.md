@@ -758,8 +758,11 @@ Each open audio turn has one heartbeat task, with an interval of 100 ms.
 The task also runs while the backend waits for a result.
 The client stops after 600 ms without a message.
 
-The streaming STT gateway stops input after 600 ms without input, flushes received samples, and finishes recognition.
-It does not add audio samples during that wait. The heartbeat continues during input and result waits.
+The streaming STT gateway stops input after 600 ms without input and finishes recognition.
+Before input ends, only the `partial` rule flushes detector samples during short stream stalls.
+Input end flushes remaining samples in the two modes.
+
+These waits do not add audio samples. The heartbeat continues during input and result waits.
 After input ends, the receiver drops late audio and control frames while STT finishes.
 The legacy backend path closes after 600 ms without input until it gets `end`.
 
@@ -774,6 +777,8 @@ Close cancels and awaits the heartbeat, input, output, and client sender tasks.
 | Audio WebSocket | 32,021 bytes | 16 input chunks |
 | JSON control or HTTP body | 16,384 bytes | Bounded read, no queue |
 | Subscription or export record | 16,384 bytes | One record at a time |
+
+The name-hint HTTP route has a different body limit of 386002 bytes. Turn queries use the larger response bound below.
 
 WebSocket compression is off. The frame parser has a set message limit before JSON decoding.
 The audio maximum is inclusive. The server and client accept a correct 32,021-byte frame.

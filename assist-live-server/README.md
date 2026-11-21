@@ -23,7 +23,7 @@ The [HA app configuration document](https://developers.home-assistant.io/docs/ap
 ## Options and access
 
 See [server configuration](../docs/configuration.md) for each provider setting and `environment variable`.
-`deepgram_api_key` and `elevenlabs_api_key` use password fields.
+`deepgram_api_key`, `openai_api_key`, and `elevenlabs_api_key` use password fields.
 The app gives options through the environment, not through command arguments or log messages.
 
 `local_only` defaults to `true`. Cloud selection must have an explicit change.

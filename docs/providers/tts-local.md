@@ -9,7 +9,8 @@ The voice is `en_US-lessac-medium`, with ONNX `intra_op_num_threads=4` and `inte
 The [selection record](../research/q7t-local-tts.md) gives the engine measurements and component rights records.
 
 The manifest declares this voice. No other voice or runtime default can load.
-An unknown voice gives an error by name. This also applies to an empty voice name.
+A provider call with an unknown or empty voice gives an error by name.
+On the server route, an omitted or empty voice selects the configured default voice.
 
 `PiperProvider.load(cache)` reads the asset manifest and checks the SHA-256 of the two voice files before it loads ONNX Runtime.
 Put `en_US-lessac-medium.onnx` and `en_US-lessac-medium.onnx.json` in the external cache directory.
@@ -34,6 +35,8 @@ An empty or whitespace-only input gives no audio or sentence-completion marker.
 The unfinished fragment has a limit of 16384 characters.
 
 The assembler examines each input character one time and keeps boundary state across text parts.
+It removes Markdown marks before synthesis but keeps sentence positions in the initial request. See [spoken-text rules](../protocol.md#spoken-text).
+
 Abbreviation lookup uses a bounded token spelling, not the complete sentence prefix.
 A constant-state check identifies dotted initials without a token-length limit. Opening quotation marks and brackets do not change abbreviation lookup.
 The assembler makes text from the sentence characters only for output. It does not examine previous text again for one-character input parts.

@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+The project is experimental. No package or image release is available.
+
+### Server
+
+- Add authenticated audio and timing routes, signed device events, durable replay protection, and per-satellite access checks.
+- Add SQLite turn storage, clock estimates, JSON Lines export, Prometheus metrics, and 30-day retention by default.
+- Add `stage` ownership, sentence timing, late turn opens, per-turn size limits, and safe retries of the same turn open.
+- Add guarded turn detection with command-start checks and English transcript-ending checks. Human pause and prefix acceptance stays pending.
+- Add the optional Parakeet `checkpoint` end rule with audio-based checkpoints, decode deadlines, backpressure, and failure counters.
+- Add local Parakeet STT, beam search for the last transcript, and satellite-specific name hints for that transcript only.
+- Cut STT audio at the detector's end sample. Send an empty transcript without a command start.
+- Replace a shorter, unrelated `final` with earlier text when the replacement guard accepts it.
+- Keep a turn open when an optional `partial` decode has no admission slot. Limit stalled audio sends and keep different checkpoint failure counters.
+- Add local sentence-level Piper TTS, typed audio formats, request-text positions, and voice metadata in health responses.
+- Remove Markdown marks before voice synthesis without changes to request-text positions.
+- Add explicit Deepgram and OpenAI STT options and ElevenLabs TTS. Keep cloud services off by default.
+- Add local-only destination checks, optional Murdock speaker metadata, and transcript storage with server and turn permission.
+- Accept the firmware's pre-roll length in microphone-open timing events. Keep the store available when historical rows are invalid.
+- Add standalone and Home Assistant app container targets for amd64 and arm64, pinned model downloads, and artifact license checks.
+
+### Client `0.1.0a1` (not published)
+
+- Add the asynchronous protocol client with turn, event, query, export, STT, and TTS methods.
+- Add typed TTS items, optional request-text positions, default-voice requests, and health metadata for voices, destinations, and name hints.
+- Add satellite name-list updates, late-open timestamps, sentence timing records, and the `fallback_unavailable` code.
+- Classify protocol errors as refused, closed, timeout, or malformed. Retry a DNS failure one time through a new system lookup before the initial deadline.
+- Accept the Home Assistant-compatible `aiohttp>=3.14.4,<4` dependency without server model runtimes.
+
+### Packaging
+
 - Add different server and client Python packages.
 - Add the Home Assistant app repository descriptor.
 - Add package boundary and bootstrap checks.

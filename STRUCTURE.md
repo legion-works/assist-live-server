@@ -14,7 +14,7 @@ The `tests/` directory holds package tests.
 
 The `tools/` directory holds repository checks.
 
-The `docs/` directory holds verification records.
+The `docs/` directory holds configuration, protocol, provider, release, and verification documents.
 
 The root Python project is a uv workspace. It installs the two Python packages for local development.
 
@@ -55,9 +55,10 @@ The root Python project is a uv workspace. It installs the two Python packages f
 - `server/assist_live_server/turn/detector.py`: local ONNX models and guarded endpoints.
 - `server/assist_live_server/turn/transcript_guard.py`: English transcript-ending checks.
 - `server/assist_live_server/turn/profiles.py`: unmeasured defaults and `Profile` limits.
+- `server/assist_live_server/checkpoint_turn.py`: audio-based checkpoints, decode deadlines, and bounded input backpressure.
 - `tools/tune_profiles.py`: partial-trajectory schema, replay, tuning, and held-out checks.
 - `tests/turn/`: synthetic policy tests and pinned-model inference tests.
-- `docs/profiles.md`: defaults, particle-ending guard, inference throttle, and stream-stall contract.
+- `docs/profiles.md`: command-start defaults, transcript-ending guard, inference throttle, and stream-stall contract.
 
 Privacy checks use the canonical `assist-live/tools/check_public_tree.py`, not a server copy.
 
@@ -68,6 +69,9 @@ The client package has no model runtime or asset manifest.
 
 - `server/assist_live_server/providers/stt.py`: session interface, bounded executor, and provider registry.
 - `server/assist_live_server/providers/parakeet.py`: pinned local model and onset-gated complete-buffer decode.
+- `server/assist_live_server/providers/parakeet_beam.py`: bounded TDT beam search for the last transcript.
+- `server/assist_live_server/providers/name_context.py`: shared sparse name-prefix trees and spelling tokenization.
+- `server/assist_live_server/hints.py`: memory-only name lists, validation, and digests.
 - `server/assist_live_server/providers/streaming_local.py`: no streaming default.
 - `tests/providers/`: input order, first word, onset, cancellation, buffer, and queue limits.
 - `docs/providers/stt.md`: compatible-mode contract, decode cost, and replay limits.
@@ -79,6 +83,7 @@ The client package has no model runtime or asset manifest.
 
 - `server/assist_live_server/providers/tts.py`: TTS interface, registry, sentence assembly, and isolated bounded executor.
 - `server/assist_live_server/providers/piper.py`: hash-checked Piper voice and sentence-level native PCM.
+- `server/assist_live_server/spoken.py`: Markdown removal before synthesis, with request positions unchanged.
 - `tests/providers/test_piper.py`: text boundaries, voice selection, hashes, cancellation, and STT queue separation.
 - `tests/contract/test_streaming_tts.py`: typed stream, legacy bytes, format refusal, and route contracts.
 - `docs/providers/tts-local.md`: local voice, audio format, executor limits, fallback, and latency measurements.
@@ -88,8 +93,10 @@ The client `models.py` also holds the typed TTS items. The client has no Piper d
 ## Cloud voice adapters
 
 - `server/assist_live_server/providers/deepgram.py`: explicit Nova-3 STT sessions with per-connection opt-out and header authentication.
+- `server/assist_live_server/providers/openai_stt.py`: explicit live transcription, 24 kHz conversion, and server-controlled commit.
 - `server/assist_live_server/providers/elevenlabs.py`: explicit Flash TTS with text streaming, flush, PCM, and service character times.
 - `tests/providers/test_deepgram.py`: fake WebSocket protocol, reconnect options, cancellation, credential protection, and local defaults.
+- `tests/providers/test_openai_stt.py`: fake transcription sessions, resampling, item selection, limits, and cancellation.
 - `tests/providers/test_elevenlabs.py`: fake WebSocket protocol, first audio, text order, flush, cancellation, and credential protection.
 - `tests/providers/conftest.py`: local decode fixtures and a fake-server network limit.
 - `docs/providers/cloud.md`: adapter contracts, provider data use, and public source text with retrieval dates.

@@ -4462,3 +4462,7 @@ Two isolated source mutations parse and give failures at those same assertions:
 
 The last gate sequence runs each changed test file through `idle-run.sh`, then the three complete suites from the earlier record.
 Each suite runs alone, with a 40-minute limit. No source edit follows that last sequence.
+
+Correction (2026-11-21 UTC) to "Test time limits that include startup work": the change also removed eight outer `asyncio.wait_for(run(), N)` limits.
+The files are `tests/test_speaker.py`, `tests/contract/test_streaming_stt.py`, `tests/test_checkpoint_wire.py`, `tests/test_checkpoint_review_fixes.py`, and `tests/contract/test_hints.py`.
+Those tests apply inner behavior limits after startup. Some inner limits also include cleanup.
