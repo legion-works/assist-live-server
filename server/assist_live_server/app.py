@@ -29,7 +29,7 @@ from assist_live_client.protocol import (
     parse_json,
 )
 
-from .audio_gateway import AudioGateway
+from .audio_gateway import TURN_TIMEOUT, AudioGateway
 from .auth import Registry
 from .config import ProviderFactory, provider_destination
 from .destinations import Destination
@@ -429,6 +429,11 @@ def create_app(
                         if audio_gateway is not None
                         else 0
                     ),
+                    "stt_partial_refusals_total": (
+                        audio_gateway.stt_partial_refusals_total
+                        if audio_gateway is not None
+                        else 0
+                    ),
                     "stt_hints_lookup_misses_total": (
                         audio_gateway.stt_hints_lookup_misses_total
                         if audio_gateway is not None
@@ -633,6 +638,15 @@ def create_app(
         await ws.prepare(request)
         tasks: list[asyncio.Task[None]] = []
         claimed_turn: str | None = None
+
+        async def close(*, code: int = 1000, message: bytes = b"") -> None:
+            try:
+                async with asyncio.timeout(WS_CLOSE_TIMEOUT):
+                    await ws.close(code=code, message=message)
+            except TimeoutError:
+                if request.transport is not None:
+                    request.transport.close()
+
         try:
             first = await ws.receive(timeout=MESSAGE_DEADLINE)
             if first.type != WSMsgType.TEXT:
@@ -653,15 +667,16 @@ def create_app(
             if turn_value is None or turn_value["satellite"] not in satellites:
                 raise ValueError("turn refused")
             if turn_id in active_audio_turns:
-                await ws.close(code=1008, message=b"audio turn active")
+                await close(code=1008, message=b"audio turn active")
                 return ws
             active_audio_turns.add(turn_id)
             claimed_turn = turn_id
-            await ws.send_json(
-                encode_control(
-                    "negotiated", turn_id, capabilities=negotiation["capabilities"]
+            async with asyncio.timeout(MESSAGE_DEADLINE):
+                await ws.send_json(
+                    encode_control(
+                        "negotiated", turn_id, capabilities=negotiation["capabilities"]
+                    )
                 )
-            )
             queue: asyncio.Queue[bytes | str | None] = asyncio.Queue(maxsize=16)
             lock = asyncio.Lock()
             input_stopped = asyncio.Event()
@@ -696,8 +711,9 @@ def create_app(
                     raise
 
             async def send(value: dict[str, Any]) -> None:
-                async with lock:
-                    await ws.send_json(decode_control(json.dumps(value), turn_id))
+                async with asyncio.timeout(MESSAGE_DEADLINE):
+                    async with lock:
+                        await ws.send_json(decode_control(json.dumps(value), turn_id))
 
             async def heartbeat() -> None:
                 while True:
@@ -710,7 +726,7 @@ def create_app(
                 while True:
                     try:
                         message = await ws.receive(
-                            timeout=None
+                            timeout=TURN_TIMEOUT
                             if ended or input_stopped.is_set()
                             else (
                                 TEXT_IDLE_TIMEOUT
@@ -719,10 +735,15 @@ def create_app(
                             )
                         )
                     except TimeoutError:
-                        if negotiation["mode"] != "stt" or audio_gateway is None:
+                        if (
+                            ended
+                            or negotiation["mode"] != "stt"
+                            or audio_gateway is None
+                        ):
                             raise
                         ended = True
-                        await queue.put(None)
+                        if not input_stopped.is_set():
+                            await queue.put(None)
                         continue
                     if (ended or input_stopped.is_set()) and message.type in {
                         WSMsgType.BINARY,
@@ -870,10 +891,11 @@ def create_app(
                         try:
                             async for item in tts_stream:
                                 if isinstance(item, bytes):
-                                    async with lock:
-                                        await ws.send_bytes(
-                                            encode_audio(turn_id, seq, item)
-                                        )
+                                    async with asyncio.timeout(MESSAGE_DEADLINE):
+                                        async with lock:
+                                            await ws.send_bytes(
+                                                encode_audio(turn_id, seq, item)
+                                            )
                                     seq += 1
                                 else:
                                     await send(item)
@@ -893,14 +915,16 @@ def create_app(
                 task.result()
             if producer not in done:
                 await producer
-        except ValueError, KeyError, TypeError, TimeoutError, ConnectionError:
-            await ws.close(code=1008, message=b"audio refused")
+        except TimeoutError:
+            await close(code=1008, message=b"audio timeout")
+        except ValueError, KeyError, TypeError, ConnectionError:
+            await close(code=1008, message=b"audio refused")
         finally:
             try:
                 for task in tasks:
                     task.cancel()
                 await asyncio.gather(*tasks, return_exceptions=True)
-                await ws.close()
+                await close()
             finally:
                 if claimed_turn is not None:
                     active_audio_turns.discard(claimed_turn)

@@ -11,7 +11,7 @@ from .destinations import Destination, require_destination
 from .hints import HintList
 from .metrics import EndDecisionWait
 from .providers.parakeet import MAX_AUDIO_BYTES
-from .providers.stt import STTSession
+from .providers.stt import STTBusyError, STTSession
 from .speaker import SpeakerPlugin
 from .turn.detector import TurnDetector
 from .turn.transcript_guard import transcript_words
@@ -53,6 +53,7 @@ class AudioGateway:
         self.hint_snapshot = hint_snapshot
         self.stt_hints_lookup_misses_total = 0
         self.stt_final_replaced_total = 0
+        self.stt_partial_refusals_total = 0
         self.end_decision_wait = EndDecisionWait()
         self.checkpoint_deadline_failures_total = 0
         self.checkpoint_wall_limit_failures_total = 0
@@ -187,11 +188,13 @@ class AudioGateway:
 
                 async def hard_end() -> None:
                     try:
-                        async with asyncio.timeout(HARD_END_GRACE):
+                        async with asyncio.timeout(HARD_END_GRACE) as grace_deadline:
                             if in_flight is not None:
                                 await asyncio.shield(in_flight)
                             await detect(None)
                     except TimeoutError:
+                        if not grace_deadline.expired():
+                            raise
                         # A running detector makes another flush unsafe.
                         pass
                     await decide("hard")
@@ -208,7 +211,7 @@ class AudioGateway:
                         return frame
 
                     try:
-                        async with asyncio.timeout(TURN_TIMEOUT):
+                        async with asyncio.timeout(TURN_TIMEOUT) as wall_deadline:
                             while not stopped:
                                 if pending is None:
                                     pending = asyncio.create_task(next_frame())
@@ -246,6 +249,8 @@ class AudioGateway:
                                 if total >= MAX_AUDIO_BYTES:
                                     await hard_end()
                     except TimeoutError:
+                        if not wall_deadline.expired():
+                            raise
                         await hard_end()
                     finally:
                         if in_flight is not None:
@@ -262,7 +267,11 @@ class AudioGateway:
                         changed.clear()
                         if stopped:
                             break
-                        text = await active_session.partial()
+                        try:
+                            text = await active_session.partial()
+                        except STTBusyError:
+                            self.stt_partial_refusals_total += 1
+                            continue
                         if not stopped and text and text != partial:
                             partial = text
                             await output.put(

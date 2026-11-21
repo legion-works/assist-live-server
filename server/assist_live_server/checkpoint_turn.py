@@ -211,7 +211,8 @@ class CheckpointTurn:
                         await failed
                     return await processor
             except TimeoutError:
-                self.fail("wall_limit")
+                if wall_deadline is not None and wall_deadline.expired():
+                    self.fail("wall_limit")
                 raise
         finally:
             for task in self.tasks:

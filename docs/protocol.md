@@ -495,6 +495,7 @@ The server uses these close frames for control refusals:
 | Path | Code | `reason` |
 |---|---:|---|
 | `/v1/audio`, malformed input or refused turn | `1008` | `audio refused` |
+| `/v1/audio`, send or receive deadline | `1008` | `audio timeout` |
 | `/v1/audio`, a stream holds the turn | `1008` | `audio turn active` |
 | `/v1/events`, refused subscription | `1008` | `subscription refused` |
 | `/v1/device`, refused event or slot | `1008` | `event refused` |
@@ -502,6 +503,15 @@ The server uses these close frames for control refusals:
 
 All three WebSocket routes use one close timeout of 100 ms.
 If the peer does not reply to a close frame, the server closes the transport and releases its slot after that timeout.
+
+Each `/v1/audio` send has a 600 ms limit, with the wait for the send lock.
+This limit applies to negotiation, heartbeats, control messages, and TTS audio frames.
+It stops a stalled transport. It is not a network latency promise.
+After input ends or the detector ends the turn, each read has a 15 s limit while the server prepares the last results.
+An earlier live-input read can expire one time before the reader starts that 15 s wait.
+
+On expiry, the server tries the `audio timeout` close, cancels the turn tasks, and releases the connection and turn slots.
+The audio route also limits the close-frame write to 100 ms. If that write stalls, it closes the transport without a peer reply.
 
 Each audio frame has a constant 21-byte header:
 
@@ -678,6 +688,12 @@ Checkpoint decodes can hold at most three of the four shared decode admission sl
 The fourth slot stays available for a `final` unless other `final` requests fill the pool.
 The metric `assist_live_stt_final_admission_refusals_total` counts refused `final` admission requests in the two modes.
 This metric does not add a control-message field or change the current `stt_failed` error.
+
+With the `partial` end rule, a refused optional decode keeps the last published `partial` and does not stop the turn.
+The next audio change requests a `partial` again. The metric `assist_live_stt_partial_refusals_total` counts these refusals without transcript text.
+The `final` decode keeps its admission and failure rules.
+A provider's own `TimeoutError` gives `stt_failed`, not a hard end or a checkpoint wall-limit count.
+Only expiry of the turn's wall timer gives that wall-limit cause.
 
 The server sends `end_decision`, one `final`, then `speaker_result` before `end` and stream close.
 A provider failure sends one terminal `error` with code `stt_failed`, not a `final`.

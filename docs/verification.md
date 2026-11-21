@@ -4346,3 +4346,94 @@ A scratch mutation, `any-final-verb`, keeps the turn open for each opening verb 
 
 The repository tests contain no corpus replay, so this change has no new corpus replay.
 All test commands use `idle-run.sh`. No audio playback, device access, commit, or publication occurs.
+
+## Turn robustness (2026-11-21 UTC)
+
+The public [design, "End-of-turn and STT fallback"](https://github.com/legion-works/assist-live/blob/main/docs/design.md#end-of-turn-and-stt-fallback) specifies the turn limits and optional transcripts.
+A full decode pool does not make an optional `partial` refusal terminal.
+The gateway keeps the last text, counts the refusal without text, and tries again on the next audio change.
+The `final` admission and failure rules stay unchanged.
+
+Each audio WebSocket send has a 600 ms limit, with its send-lock wait.
+This limit agrees with the client's 600 ms receive deadline. It stops a stalled transport, not slow network transmission.
+After input end, each read has a 15 s limit for the last results.
+An in-flight live-input read can expire one time before that wait starts, without cutting a correct `final` decode.
+
+On expiry, the route tries a `1008` close with `audio timeout` and releases the turn and connection slots.
+The close operation has its own 100 ms limit, also when the close-frame write stalls.
+
+After a satisfactory cloud `finish()`, cancellation starts no second close task.
+A callee's `TimeoutError` stays a provider failure, not a hard end or a checkpoint wall-limit count.
+The timeout tests also check actual wall expiry in each end-rule mode and a callee error during the hard-end grace.
+
+The new tests first gave these intended failures:
+
+| Repair | Before the repair | Result after the repair |
+|---|---|---|
+| Refused optional decode | `partial`, then `error` | Last text stays available, retry and `final` complete |
+| Stalled send or `final` wait | Handler does not release its slots | Timeout close and subsequent slot use |
+| Cloud close after `finish()` | Each adapter starts a second close task | One close, no second task |
+| Timeout cause | Hard `final` or incorrect wall-limit count | Callee failure, actual wall expiry keeps its cause |
+
+Four named, isolated source mutations put those defects back.
+`m01-partial-fatal`, `m02-unbounded-send`, `m03-close-again`, and `m04-false-wall` each parse and give failures in their target behavioral tests.
+The mutation runner checks the imported package path. No mutation changes the working source.
+
+### First detector frame
+
+Twenty sequential turns use actual Silero and Smart Turn models, with a new detector and two new ONNX sessions for each turn.
+The test starts its monotonic clock before the HTTP turn-open request and stops it after the detector processes its first 512-sample frame.
+The route uses a local socket and a synthetic silent frame. The STT callback is a test double and does no ASR decode.
+
+The ONNX module import occurs before the test. The model files use the filesystem cache. This is not a cold-disk test.
+
+| Measurement | p50 | p90 |
+|---|---:|---:|
+| Turn open to first processed frame | 40.89 ms | 44.23 ms |
+| Model-file reads | 2.08 ms | 2.39 ms |
+| SHA-256 computation | 4.24 ms | 4.35 ms |
+| Reads and hashing together | 6.36 ms | 6.64 ms |
+| ONNX session creation | 31.79 ms | 34.38 ms |
+| Reads and hashing, share of each turn | 15.40% | 16.25% |
+| ONNX creation, share of each turn | 78.06% | 79.18% |
+
+The p50 is the median. The p90 is the eighteenth sorted value of twenty, by the nearest-rank rule.
+The share rows use each turn's ratio, not a ratio of different percentiles.
+Model verification, with path checks, has a p50/p90 time of 6.47/6.91 ms.
+
+Python is 3.14.3 and ONNX Runtime is 1.31.0. The host reports 32 logical CPUs and a one-minute load of 5.87 after the run.
+The run interval is `2026-11-21T11:40:58.086901+00:00` through `2026-11-21T11:40:58.962205+00:00`.
+
+Audio waits in a buffer during this startup time. These values do not measure added reply latency.
+No runtime pool, hash cache, or model-loading change is part of this repair.
+The gate commands below use `idle-run.sh`, which forwards to the host runner.
+
+### Repository gates
+
+The gates run one at a time, each with a 40-minute limit:
+
+```sh
+idle-run.sh task check
+idle-run.sh uv run --locked --python 3.14.2 pytest tests/ -q
+idle-run.sh unshare -rn sh -c 'ip link set lo up && UV_OFFLINE=1 uv run --locked pytest tests/ -q'
+```
+
+Each command sets `ASSIST_LIVE_MODEL_CACHE` to the external turn-model cache.
+The floor command also sets `UV_PROJECT_ENVIRONMENT` to an isolated Python 3.14.2 environment.
+The project gate uses the external private-term denylist.
+
+| Gate | Result |
+|---|---|
+| New gateway regression file | `6 passed` |
+| New route regression file | `6 passed` |
+| New cloud-close regression file | `2 passed` |
+| `task check`, Python 3.14.3 | `2460 passed, 1 skipped` in 62.58 s |
+| Python 3.14.2 floor | `2460 passed, 1 skipped` in 48.09 s |
+| Network-isolated suite | `2460 passed, 1 skipped` in 49.61 s |
+
+Ruff checks 142 formatted files. Mypy reports no issues in 51 source files.
+The CI, package, bootstrap, model-pin, asset, and two Gitleaks checks give satisfactory results.
+The relative public-tree step reports `NOT CHECKED public tree` because the worktree has no sibling integration checkout.
+
+The STE check gives no errors. Its two advisories name unchanged earlier records.
+No audio playback, device access, cloud call, commit, or publication occurs.

@@ -264,7 +264,7 @@ class DeepgramSession:
         self._interim = ""
         if self._reader is not None:
             self._reader.cancel()
-        if self._client is not None and self._closing is None:
+        if self._client is not None and self._closing is None and not self._finished:
             self._closing = asyncio.create_task(self.aclose())
 
     async def aclose(self) -> None:
