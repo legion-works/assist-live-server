@@ -4297,6 +4297,7 @@ Complete gates, one at a time, each with a limit of 40 minutes:
 Before this change, the guard kept the turn open only when the transcript was one opening verb.
 Thus "please turn" could complete a command before the object.
 With this change, the turn also stays open for an opening verb at the end of a transcript after only start words.
+The same rule applies to a particle at the end, as in "please on" and "uh off".
 
 The start words are `please` and the request words `can`, `could`, `would`, `will`, and `you`.
 The fillers `uh`, `um`, `er`, `erm`, `ah`, `hmm`, `so`, `well`, `okay`, and `ok` are also start words.
@@ -4321,8 +4322,12 @@ The `set` tests on the module without `set` gave `4 failed, 104 passed`.
 The four failures are "set", "please set", "could you set", and "Uh, set…".
 With `set` as an opening verb, `tests/turn/test_prefixes.py` gives `108 passed` and `tests/turn/test_detector.py` gives `35 passed`.
 
+The particle tests on `da4a340` gave `5 failed, 111 passed`.
+The five failures are "please on", "uh off", "could you up", "Um, please down…", and "so out".
+After the particle repair, `tests/turn/test_prefixes.py` gives `116 passed` and `tests/turn/test_detector.py` gives `35 passed`.
+
 A scratch mutation, `any-final-verb`, keeps the turn open for each opening verb at the end.
 `test_verb_word_after_an_object_can_complete` kills it with three failures: "is the door open", "turn on the kitchen light", and "turn off the switch".
 
 The repository tests contain no corpus replay, so this change has no new corpus replay.
-All test commands use `idle.sh`. No audio playback, device access, commit, or publication occurs.
+All test commands use `idle-run.sh`. No audio playback, device access, commit, or publication occurs.

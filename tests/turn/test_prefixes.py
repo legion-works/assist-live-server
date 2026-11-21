@@ -151,6 +151,20 @@ def test_opening_verb_after_leading_words_stays_incomplete(partial):
     assert not complete_partial(partial)
 
 
+@pytest.mark.parametrize(
+    "partial", ["please on", "uh off", "could you up", "Um, please down…", "so out"]
+)
+def test_particle_after_only_leading_words_stays_incomplete(partial):
+    assert not complete_partial(partial)
+
+
+@pytest.mark.parametrize(
+    "partial", ["is the fan on", "turn the light on", "please turn the light on"]
+)
+def test_particle_after_object_and_leading_words_can_complete(partial):
+    assert complete_partial(partial)
+
+
 @pytest.mark.parametrize("partial", ["set", "please set", "could you set", "Uh, set…"])
 def test_set_without_object_stays_incomplete(partial):
     assert not complete_partial(partial)

@@ -68,7 +68,7 @@ The source is `home-assistant-intents` 2026.10.6, `data/en.json`, lines 2466, 25
 Each particle has its own verb set. Thus "is the light on" can end, but "light up" cannot.
 An earlier verb from that set lets an object use a verb word, as in "turn the switch off".
 
-A particle alone cannot complete a command.
+A particle cannot complete a command when no words or only start words come before it, as in "on" or "please on".
 The opening verbs are the verbs in the table, without "next", "skip", and "replay", and also `set`.
 Each template with `set` has an object or a value after the verb, as in "set a timer for five minutes".
 An opening verb at the end of a transcript cannot complete a command when no words or only start words come before it.

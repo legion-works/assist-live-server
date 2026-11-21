@@ -27,8 +27,8 @@ PARTICLE_COMMAND_VERBS = {
 OPENING_VERBS = (
     frozenset().union(*PARTICLE_COMMAND_VERBS.values()) - {"next", "replay", "skip"}
 ) | {"set"}
-# Only these words can come before an opening verb that stays open, because
-# verb words such as "light" and "open" can also end a command after an object.
+# Only these words can come before an opening verb or a particle that stays open,
+# because verb words such as "light" and "open" can also end a command after an object.
 LEADING_WORDS = frozenset(
     "please uh um er erm ah hmm so well okay ok can could would will you".split()
 )
@@ -45,7 +45,7 @@ def complete_partial(partial: str, *, language: str = "en") -> bool:
     if not words:
         return False
     if words[-1] in PARTICLE_COMMAND_VERBS:
-        if len(words) < 2:
+        if all(word in LEADING_WORDS for word in words[:-1]):
             return False
         verbs = PARTICLE_COMMAND_VERBS[words[-1]]
         # An earlier verb from the same set marks an object in "turn the switch off".
