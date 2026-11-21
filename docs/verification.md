@@ -4291,3 +4291,38 @@ Complete gates, one at a time, each with a limit of 40 minutes:
 - `task check`: `2402 passed, 1 skipped`.
 - Python 3.14.2 floor suite: `2402 passed, 1 skipped`.
 - Network-isolated suite: `2402 passed, 1 skipped`.
+
+## Opening verb after start words
+
+Before this change, the guard kept the turn open only when the transcript was one opening verb.
+Thus "please turn" could complete a command before the object.
+With this change, the turn also stays open for an opening verb at the end of a transcript after only start words.
+
+The start words are `please` and the request words `can`, `could`, `would`, `will`, and `you`.
+The fillers `uh`, `um`, `er`, `erm`, `ah`, `hmm`, `so`, `well`, `okay`, and `ok` are also start words.
+The media commands "next", "skip", and "replay" can end after start words, as in "please skip".
+The word `set` is also an opening verb, so "set" and "please set" keep the turn open.
+
+The source for `set` is `home-assistant-intents` 2026.10.6, `data/en.json`, with the same SHA-256 hash as the cited source.
+The rules `set` (line 4945) and `numeric_value_set` (line 4943) contain the word `set`.
+A script with `hassil` 3.12.1 expanded the 861 English templates. 119 templates can contain `set`.
+In each of them, a minimum of two tokens comes after `set`.
+No expansion with three or fewer tokens ends in `set`.
+
+The same script finds the one-word templates "skip", "next", and "replay". Thus it can find a one-word template.
+The `hassil` recognizer accepts no intent for "set", "please set", or "could you set".
+The template skip words include "please", "can you", and "could you" (line 202).
+
+The new tests on `d92b124` gave `7 failed, 94 passed` before the repair.
+The seven failures are "please turn", "uh turn", "so switch", "could you turn", "can you open", "um please close", and "Please, turn…".
+After the repair, `tests/turn/test_prefixes.py` gives `101 passed`.
+
+The `set` tests on the module without `set` gave `4 failed, 104 passed`.
+The four failures are "set", "please set", "could you set", and "Uh, set…".
+With `set` as an opening verb, `tests/turn/test_prefixes.py` gives `108 passed` and `tests/turn/test_detector.py` gives `35 passed`.
+
+A scratch mutation, `any-final-verb`, keeps the turn open for each opening verb at the end.
+`test_verb_word_after_an_object_can_complete` kills it with three failures: "is the door open", "turn on the kitchen light", and "turn off the switch".
+
+The repository tests contain no corpus replay, so this change has no new corpus replay.
+All test commands use `idle.sh`. No audio playback, device access, commit, or publication occurs.

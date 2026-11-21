@@ -23,11 +23,15 @@ PARTICLE_COMMAND_VERBS = {
     "over": frozenset(),
 }
 # "next", "skip", and "replay" are complete media commands in the HA English templates.
-OPENING_VERBS = frozenset().union(*PARTICLE_COMMAND_VERBS.values()) - {
-    "next",
-    "replay",
-    "skip",
-}
+# Each HA English template with "set" also needs an object or a value after it.
+OPENING_VERBS = (
+    frozenset().union(*PARTICLE_COMMAND_VERBS.values()) - {"next", "replay", "skip"}
+) | {"set"}
+# Only these words can come before an opening verb that stays open, because
+# verb words such as "light" and "open" can also end a command after an object.
+LEADING_WORDS = frozenset(
+    "please uh um er erm ah hmm so well okay ok can could would will you".split()
+)
 
 
 def transcript_words(text: str) -> list[str]:
@@ -46,6 +50,6 @@ def complete_partial(partial: str, *, language: str = "en") -> bool:
         verbs = PARTICLE_COMMAND_VERBS[words[-1]]
         # An earlier verb from the same set marks an object in "turn the switch off".
         return words[-2] not in verbs or any(word in verbs for word in words[:-2])
-    if len(words) == 1 and words[0] in OPENING_VERBS:
+    if words[-1] in OPENING_VERBS and all(word in LEADING_WORDS for word in words[:-1]):
         return False
     return words[-1] not in INCOMPLETE_ENDINGS

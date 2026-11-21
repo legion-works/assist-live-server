@@ -133,7 +133,48 @@ def test_command_opening_stays_incomplete(partial):
     assert not complete_partial(partial)
 
 
-@pytest.mark.parametrize("partial", ["skip", "Replay.", "next"])
+@pytest.mark.parametrize(
+    "partial",
+    [
+        "please turn",
+        "uh turn",
+        "so switch",
+        "could you turn",
+        "can you open",
+        "um please close",
+        "Please, turn…",
+        "please turn off",
+        "uh switch on",
+    ],
+)
+def test_opening_verb_after_leading_words_stays_incomplete(partial):
+    assert not complete_partial(partial)
+
+
+@pytest.mark.parametrize("partial", ["set", "please set", "could you set", "Uh, set…"])
+def test_set_without_object_stays_incomplete(partial):
+    assert not complete_partial(partial)
+
+
+@pytest.mark.parametrize(
+    "partial",
+    ["set a timer for five minutes", "set the temperature to 20", "set volume five."],
+)
+def test_set_command_with_object_can_complete(partial):
+    assert complete_partial(partial)
+
+
+@pytest.mark.parametrize(
+    "partial",
+    ["is the door open", "turn on the kitchen light", "turn off the switch"],
+)
+def test_verb_word_after_an_object_can_complete(partial):
+    assert complete_partial(partial)
+
+
+@pytest.mark.parametrize(
+    "partial", ["skip", "Replay.", "next", "please skip", "uh next", "could you replay"]
+)
 def test_single_word_media_command_can_complete(partial):
     assert complete_partial(partial)
 

@@ -49,7 +49,10 @@ The particles `on`, `off`, `up`, `down`, `out`, and `over` can complete a comman
 Examples are "turn the lights on", "turn it off", and "is the light on".
 The other words in the incomplete-ending list, such as `in`, keep the longer wait.
 
-A particle directly after an opening command verb keeps the turn open, also after "please" or an initial filler.
+A particle directly after an opening command verb keeps the turn open.
+This rule also applies when only start words come before the verb.
+The start words are `please` and the request words `can`, `could`, `would`, `will`, and `you`.
+The fillers `uh`, `um`, `er`, `erm`, `ah`, `hmm`, `so`, `well`, `okay`, and `ok` are also start words.
 The guard uses these pairs from the Home Assistant English intent templates:
 
 | Particle | Opening verbs |
@@ -64,9 +67,15 @@ The guard uses these pairs from the Home Assistant English intent templates:
 The source is `home-assistant-intents` 2026.10.6, `data/en.json`, lines 2466, 2530, 2531, 2689, 3196, 3561, 3955–3956, and 4942–4946.
 Each particle has its own verb set. Thus "is the light on" can end, but "light up" cannot.
 An earlier verb from that set lets an object use a verb word, as in "turn the switch off".
-A bare opening verb or particle cannot complete a command.
 
-The words "next", "skip", and "replay" are complete media commands in the templates, so they can end alone.
+A particle alone cannot complete a command.
+The opening verbs are the verbs in the table, without "next", "skip", and "replay", and also `set`.
+Each template with `set` has an object or a value after the verb, as in "set a timer for five minutes".
+An opening verb at the end of a transcript cannot complete a command when no words or only start words come before it.
+Examples are "turn", "please turn", "could you open", and "please set".
+After an object, a verb word can complete a command, as in "turn on the kitchen light".
+
+The words "next", "skip", and "replay" are complete media commands in the templates, so they can end alone or after start words, as in "please skip".
 See the [public design](https://github.com/legion-works/assist-live/blob/ab31458/docs/design.md#end-of-turn-and-stt-fallback), `docs/design.md`.
 
 This text rule does not parse grammar. For example, "turn off the light and turn on" contains an earlier verb from that set.
