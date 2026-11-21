@@ -48,9 +48,6 @@ async def main():
 
     stt._EXECUTOR.submit = guarded
     blocker = None
-    if SCENARIO == "executor_closed":
-        blocker = asyncio.create_task(stt.run_decode(lambda: decode(b"")))
-        assert await asyncio.to_thread(entered.wait, 2)
 
     class Session(ParakeetSession):
         async def checkpoint(self, prefix):
@@ -70,6 +67,11 @@ async def main():
     try:
         async with service(Path(__DIRECTORY__), gateway=gateway) as bundle:
             _, session, turn, _ = bundle
+            if SCENARIO == "executor_closed":
+                # Start the blocking decode after service startup, so the
+                # 5 s release bound does not include startup time.
+                blocker = asyncio.create_task(stt.run_decode(lambda: decode(b"")))
+                assert await asyncio.to_thread(entered.wait, 2)
             ws = await connect(session, turn)
             await ws.send_bytes(encode_audio(turn.turn_id, 0, b"\x01\x00"*16000))
             if SCENARIO == "executor_closed":
