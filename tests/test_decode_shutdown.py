@@ -117,7 +117,9 @@ asyncio.run(main())
         [sys.executable, "-c", source],
         capture_output=True,
         text=True,
-        timeout=10,
+        # SQLite setup and close can be slow with CPU and I/O load.
+        # This is a hang guard. The behavior deadlines stay in the subprocess.
+        timeout=60,
         env={**os.environ, "PYTHONUNBUFFERED": "1"},
     )
     assert result.returncode == 0, result.stdout + result.stderr

@@ -285,18 +285,22 @@ def test_final_admission_refusal_counter_is_exported_in_both_modes(tmp_path, end
             ),
             end_rule=end_rule,
         )
-        blockers = [asyncio.create_task(stt.run_decode(held)) for _ in range(4)]
-        try:
-            assert await asyncio.to_thread(entered.wait, 1)
-            await asyncio.sleep(0)
-            async with service(tmp_path, gateway=gateway) as (_, session, turn, _):
-                ws = await connect(session, turn)
-                await ws.send_bytes(encode_audio(turn.turn_id, 0, PCM[:18006]))
-                await ws.send_json(encode_control("end", turn.turn_id))
-                replies = [message.json() async for message in ws]
-                assert any(r.get("code") == "stt_failed" for r in replies)
-                assert not any(r["type"] == "final" for r in replies)
-                assert stt.final_admission_refusals_total() == before + 1
+        async with service(tmp_path, gateway=gateway) as (_, session, turn, _):
+            ws = await connect(session, turn)
+            async with asyncio.timeout(4):
+                blockers = [asyncio.create_task(stt.run_decode(held)) for _ in range(4)]
+                try:
+                    assert await asyncio.to_thread(entered.wait, 1)
+                    await asyncio.sleep(0)
+                    await ws.send_bytes(encode_audio(turn.turn_id, 0, PCM[:18006]))
+                    await ws.send_json(encode_control("end", turn.turn_id))
+                    replies = [message.json() async for message in ws]
+                    assert any(r.get("code") == "stt_failed" for r in replies)
+                    assert not any(r["type"] == "final" for r in replies)
+                    assert stt.final_admission_refusals_total() == before + 1
+                finally:
+                    release.set()
+                    await asyncio.gather(*blockers, return_exceptions=True)
                 async with session.get(
                     "http://service.invalid/metrics",
                     headers={"Authorization": "Bearer synthetic-token"},
@@ -306,11 +310,8 @@ def test_final_admission_refusal_counter_is_exported_in_both_modes(tmp_path, end
                     f"assist_live_stt_final_admission_refusals_total {before + 1}"
                     in metrics
                 )
-        finally:
-            release.set()
-            await asyncio.gather(*blockers, return_exceptions=True)
 
-    asyncio.run(asyncio.wait_for(run(), 4))
+    asyncio.run(run())
 
 
 def test_checkpoint_failure_counts_each_named_cause_and_refuses_others():

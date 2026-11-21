@@ -314,55 +314,60 @@ def test_real_speaker_reaches_client_and_record_without_transcript_change(
                     async def frames():
                         yield audio
 
-                    replies = [
-                        reply async for reply in client.stt(turn.turn_id, frames())
-                    ]
-                    assert (
-                        next(r["text"] for r in replies if r["type"] == "final")
-                        == "unchanged final"
-                    )
-                    result = next(
-                        (r for r in replies if r["type"] == "speaker_result"), None
-                    )
-                    assert result is not None
-                    assert (
-                        result["name"],
-                        result["distance"],
-                        result["destination"],
-                    ) == ("Spéaker A" if is_match else "", distance, "local")
-                    record = await store.get_turn(turn.turn_id)
-                    stored = next(
-                        e["data"]
-                        for e in record["events"]
-                        if e["stage"] == "speaker_result"
-                    )
-                    assert stored.get("name", "") == ("Spéaker A" if is_match else "")
-                    assert stored.get("distance") == distance
-                    final = next(
-                        e["data"] for e in record["events"] if e["stage"] == "stt_final"
-                    )
-                    assert final["destination"] == "local"
-                    assert final.get("transcript") == (
-                        "unchanged final" if server_opt and turn_opt else None
-                    )
-                    assert all(
-                        not ({"audio", "pcm"} & e["data"].keys())
-                        for e in record["events"]
-                    )
-                    async with session.get(
-                        "http://service.invalid/metrics",
-                        headers={"Authorization": "Bearer synthetic-token"},
-                    ) as response:
-                        assert response.status == 200
-                        metrics = await response.text()
-                        assert "Spéaker A" not in metrics
-                        assert "speaker_name_dropped_empty_total" in metrics
+                    async with asyncio.timeout(10):
+                        replies = [
+                            reply async for reply in client.stt(turn.turn_id, frames())
+                        ]
+                        assert (
+                            next(r["text"] for r in replies if r["type"] == "final")
+                            == "unchanged final"
+                        )
+                        result = next(
+                            (r for r in replies if r["type"] == "speaker_result"), None
+                        )
+                        assert result is not None
+                        assert (
+                            result["name"],
+                            result["distance"],
+                            result["destination"],
+                        ) == ("Spéaker A" if is_match else "", distance, "local")
+                        record = await store.get_turn(turn.turn_id)
+                        stored = next(
+                            e["data"]
+                            for e in record["events"]
+                            if e["stage"] == "speaker_result"
+                        )
+                        assert stored.get("name", "") == (
+                            "Spéaker A" if is_match else ""
+                        )
+                        assert stored.get("distance") == distance
+                        final = next(
+                            e["data"]
+                            for e in record["events"]
+                            if e["stage"] == "stt_final"
+                        )
+                        assert final["destination"] == "local"
+                        assert final.get("transcript") == (
+                            "unchanged final" if server_opt and turn_opt else None
+                        )
+                        assert all(
+                            not ({"audio", "pcm"} & e["data"].keys())
+                            for e in record["events"]
+                        )
+                        async with session.get(
+                            "http://service.invalid/metrics",
+                            headers={"Authorization": "Bearer synthetic-token"},
+                        ) as response:
+                            assert response.status == 200
+                            metrics = await response.text()
+                            assert "Spéaker A" not in metrics
+                            assert "speaker_name_dropped_empty_total" in metrics
             finally:
                 await runner.cleanup()
                 store.close()
         assert audio not in (tmp_path / "turns.db").read_bytes()
 
-    asyncio.run(asyncio.wait_for(run(), 10))
+    asyncio.run(run())
     assert "Spéaker A" not in caplog.text
 
 

@@ -1,6 +1,8 @@
 import asyncio
+import gc
 import sqlite3
 import threading
+import warnings
 from contextlib import asynccontextmanager
 from uuid import uuid7
 
@@ -38,10 +40,10 @@ async def service(tmp_path, factory=None, *, policy=False, gateway=None):
         create_app(registry, store, audio_gateway=gateway, record_transcripts=policy),
         access_log=None,
     )
-    await runner.setup()
-    path = tmp_path / "stream.sock"
-    await web.UnixSite(runner, path).start()
     try:
+        await runner.setup()
+        path = tmp_path / "stream.sock"
+        await web.UnixSite(runner, path).start()
         async with ClientSession(connector=UnixConnector(path=path)) as session:
             async with AssistLiveClient(
                 "http://service.invalid", "synthetic-token", session=session
@@ -52,8 +54,10 @@ async def service(tmp_path, factory=None, *, policy=False, gateway=None):
                 await client.open_turn(turn)
                 yield client, session, turn, store
     finally:
-        await runner.cleanup()
-        store.close()
+        try:
+            await runner.cleanup()
+        finally:
+            store.close()
 
 
 async def connect(session, turn):
@@ -71,6 +75,58 @@ async def connect(session, turn):
     )
     assert (await ws.receive_json())["type"] == "negotiated"
     return ws
+
+
+@pytest.mark.parametrize("outcome", ["cancelled", "failed"])
+def test_service_closes_database_when_startup_does_not_complete(
+    tmp_path, monkeypatch, outcome
+):
+    cleaned = []
+    cleanup = web.AppRunner.cleanup
+
+    async def tracked_cleanup(runner):
+        await cleanup(runner)
+        cleaned.append(runner)
+
+    monkeypatch.setattr(web.AppRunner, "cleanup", tracked_cleanup)
+
+    async def run():
+        entered = asyncio.Event()
+
+        async def held(store, registry):
+            entered.set()
+            if outcome == "failed":
+                raise RuntimeError("synthetic startup failure")
+            await asyncio.Event().wait()
+
+        monkeypatch.setattr(SQLiteStore, "configure_registry", held)
+
+        async def use():
+            async with service(tmp_path):
+                pytest.fail("startup must stay blocked")
+
+        task = asyncio.create_task(use())
+        try:
+            await asyncio.wait_for(entered.wait(), 30)
+            if outcome == "cancelled":
+                task.cancel()
+            if outcome == "cancelled":
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+            else:
+                with pytest.raises(RuntimeError, match="synthetic startup failure"):
+                    await task
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    with warnings.catch_warnings(record=True) as captured:
+        warnings.simplefilter("always", ResourceWarning)
+        asyncio.run(run())
+        assert len(cleaned) == 1
+        cleaned.clear()
+        gc.collect()
+    assert not captured, [str(warning.message) for warning in captured]
 
 
 def test_no_command_empty_final_keeps_wire_shape_and_stt_final_event(tmp_path):
@@ -268,30 +324,31 @@ def test_local_final_deliverable_bound(tmp_path, character, extra):
         )
         async with service(tmp_path, gateway=gateway) as (_, session, turn, store):
             ws = await connect(session, turn)
-            await ws.send_bytes(encode_audio(turn.turn_id, 0, b"\x01\x00"))
-            await ws.send_json(encode_control("end", turn.turn_id))
-            replies = [message.json() async for message in ws]
-            meaningful = [r for r in replies if r["type"] != "heartbeat"]
-            if extra:
-                assert [r["type"] for r in meaningful] == [
-                    "end_decision",
-                    "error",
-                    "end",
-                ]
-                assert meaningful[1]["code"] == "stt_failed"
-            else:
-                assert [r["type"] for r in meaningful] == [
-                    "end_decision",
-                    "final",
-                    "speaker_result",
-                    "end",
-                ]
-                assert meaningful[1]["text"] == text
-            assert [
-                e["stage"] for e in (await store.get_turn(turn.turn_id))["events"]
-            ].count("stt_final") == (0 if extra else 1)
+            async with asyncio.timeout(3):
+                await ws.send_bytes(encode_audio(turn.turn_id, 0, b"\x01\x00"))
+                await ws.send_json(encode_control("end", turn.turn_id))
+                replies = [message.json() async for message in ws]
+                meaningful = [r for r in replies if r["type"] != "heartbeat"]
+                if extra:
+                    assert [r["type"] for r in meaningful] == [
+                        "end_decision",
+                        "error",
+                        "end",
+                    ]
+                    assert meaningful[1]["code"] == "stt_failed"
+                else:
+                    assert [r["type"] for r in meaningful] == [
+                        "end_decision",
+                        "final",
+                        "speaker_result",
+                        "end",
+                    ]
+                    assert meaningful[1]["text"] == text
+                assert [
+                    e["stage"] for e in (await store.get_turn(turn.turn_id))["events"]
+                ].count("stt_final") == (0 if extra else 1)
 
-    asyncio.run(asyncio.wait_for(run(), 3))
+    asyncio.run(run())
 
 
 def test_silence_without_frames_keeps_five_heartbeats(tmp_path):

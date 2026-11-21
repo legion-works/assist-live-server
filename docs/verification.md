@@ -4256,3 +4256,38 @@ The build makes `assist_live_client-0.1.0a1-py3-none-any.whl`. Its metadata vers
 The relative public-tree task gives `NOT CHECKED public tree` in this worktree layout.
 The explicit canonical checker uses the private denylist and gives `PASS public data matches=0` for 88 commits.
 No workflow dispatch, repository-setting change, commit, or publication occurs in these checks.
+
+## Test time limits that include startup work (2026-11-21)
+
+Some tests put startup, connection, or cleanup work in the same time limit as the behavior that the test checks.
+With a high host load, that work can use the full time limit. The test then gives a failure, but the server has no defect.
+
+The repair moves startup and explicit connections before the time limit of the behavior.
+Each design deadline and each assertion stays the same.
+Two time limits are hang guards, not design limits, and they increase:
+
+- The outer limit of the decode shutdown test increases from 10 s to 60 s.
+- The event-writer observation in the device connection test increases from 1 s to 10 s, because SQLite maintenance can run before the write.
+
+The test helper also closes the SQLite store when startup stops or gives an error.
+Before this change, a stopped startup left an open database, and a subsequent test gave a failure on the `ResourceWarning`.
+
+| Test | Controlled delay | Before | After |
+|---|---|---|---|
+| Speaker contract | 10.5 s startup pause, 10.5 s cleanup pause | Two timeouts | Satisfactory |
+| Device connection count | 1.25 s SQLite writer pause | Timeout at 1 s | Satisfactory |
+| Local transcript budget | 3.5 s startup pause | Timeout at 3 s | Satisfactory, budget stays 3 s |
+| Checkpoint failure protocol | 4.5 s startup pause | Timeout at 4 s | Satisfactory, budget stays 4 s |
+| Hint decode order | 5.5 s and 10.5 s startup pauses | Queue assertion and timeout | Satisfactory, barrier stays 5 s |
+| Hint replacement and shutdown | 10.5 s startup pause | Queue assertion | Satisfactory, barrier stays 10 s |
+| Removed-turn hint snapshot | 8.5 s startup pause | Timeout at 8 s | Satisfactory, budget stays 8 s |
+
+The controlled-delay probe gives `9 failed` before the repair and `9 passed` after the repair.
+A script compares the syntax trees and finds all 341 assertions and `pytest.raises` checks in the 82 earlier test functions unchanged.
+With CPU and disk load, the four tests that the first repair changed gave a satisfactory result in 30 of 30 batches (390 test runs).
+
+Complete gates, one at a time, each with a limit of 40 minutes:
+
+- `task check`: `2402 passed, 1 skipped`.
+- Python 3.14.2 floor suite: `2402 passed, 1 skipped`.
+- Network-isolated suite: `2402 passed, 1 skipped`.

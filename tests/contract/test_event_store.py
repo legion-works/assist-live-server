@@ -670,7 +670,9 @@ def test_150_idle_device_connections_are_capped_and_memory_bounded(tmp_path, cap
                     "http://service.invalid/v1/device"
                 ) as replacement:
                     await replacement.send_bytes(packet(0))
-                    async with asyncio.timeout(1):
+                    # SQLite maintenance can run before this write.
+                    # This is a hang guard.
+                    async with asyncio.timeout(10):
                         await store.changed.wait()
                         await ingress.queue.join()
                     assert ingress.accepted == 1
