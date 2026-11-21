@@ -51,9 +51,11 @@ The other words in the incomplete-ending list, such as `in`, keep the longer wai
 
 A particle directly after an opening command verb keeps the turn open.
 This rule also applies when only start words come before the verb.
-The start words are `please` and the request words `can`, `could`, `would`, `will`, and `you`.
-The fillers `uh`, `um`, `er`, `erm`, `ah`, `hmm`, `so`, `okay`, and `ok` are also start words.
-A start word must not be a likely device name. Thus "well" is not a start word, and "well on" can complete a command for a switch with the name "Well".
+
+The start words are `please`, `you`, and the fillers `uh`, `um`, `er`, `erm`, `ah`, `hmm`, `so`, `okay`, and `ok`.
+The request words `can`, `could`, `would`, and `will` are start words only directly before `you`, as in "could you set".
+A start word must not be a likely device name. Thus "well on" and "can on" can complete a command for devices with the names "Well" and "Can".
+A bare `you` is a start word, because a short first word such as "can" can have no transcript.
 
 The guard uses these pairs from the Home Assistant English intent templates:
 
@@ -78,7 +80,7 @@ Examples are "turn", "please turn", "could you open", and "please set".
 After an object, a verb word can complete a command, as in "turn on the kitchen light".
 
 The words "next", "skip", and "replay" are complete media commands in the templates, so they can end alone or after start words, as in "please skip".
-See the [public design](https://github.com/legion-works/assist-live/blob/ab31458/docs/design.md#end-of-turn-and-stt-fallback), `docs/design.md`.
+See the [public design](https://github.com/legion-works/assist-live/blob/6f067ba/docs/design.md#end-of-turn-and-stt-fallback), `docs/design.md`.
 
 This text rule does not parse grammar. For example, "turn off the light and turn on" contains an earlier verb from that set.
 The rule can accept that unfinished command. Smart Turn and the minimum time without voice apply.

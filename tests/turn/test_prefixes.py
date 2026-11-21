@@ -167,10 +167,30 @@ def test_particle_after_only_leading_words_stays_incomplete(partial):
         "well on",
         "well off",
         "uh well on",
+        "can on",
+        "can off",
+        "will on",
+        "please can on",
     ],
 )
 def test_particle_after_object_and_leading_words_can_complete(partial):
     assert complete_partial(partial)
+
+
+@pytest.mark.parametrize(
+    "partial",
+    [
+        "can you turn",
+        "could you set",
+        "please could you turn",
+        "uh can you on",
+        "Would you, um, open…",
+        "will you off",
+        "you turn",
+    ],
+)
+def test_request_word_with_you_stays_incomplete(partial):
+    assert not complete_partial(partial)
 
 
 @pytest.mark.parametrize("partial", ["set", "please set", "could you set", "Uh, set…"])

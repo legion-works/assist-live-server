@@ -4299,11 +4299,13 @@ Thus "please turn" could complete a command before the object.
 With this change, the turn also stays open for an opening verb at the end of a transcript after only start words.
 The same rule applies to a particle at the end, as in "please on" and "uh off".
 
-The start words are `please` and the request words `can`, `could`, `would`, `will`, and `you`.
-The fillers `uh`, `um`, `er`, `erm`, `ah`, `hmm`, `so`, `okay`, and `ok` are also start words.
+The start words are `please`, `you`, and the fillers `uh`, `um`, `er`, `erm`, `ah`, `hmm`, `so`, `okay`, and `ok`.
+The request words `can`, `could`, `would`, and `will` are start words only directly before `you`.
+A bare `you` is a start word, because a short first word such as "can" can have no transcript.
 
 A start word must not be a likely device name.
 The templates accept "well on" for a switch with the name "Well" (`data/en.json` lines 3861 and 4267), so "well" is not a start word.
+The same templates accept "can on" for a light with the name "Can". Thus "can" alone is not a start word.
 A follow-up can use the name hints of the satellite to find the difference between an object and a start word.
 
 The media commands "next", "skip", and "replay" can end after start words, as in "please skip".
@@ -4334,6 +4336,10 @@ After the particle repair, `tests/turn/test_prefixes.py` gives `116 passed` and 
 The device-name tests on `0a7c5ef` gave `3 failed, 116 passed`.
 The three failures are "well on", "well off", and "uh well on".
 Without "well" as a start word, `tests/turn/test_prefixes.py` gives `119 passed`.
+
+The request-word tests on `dea0dff` gave `4 failed, 126 passed`.
+The four failures are "can on", "can off", "will on", and "please can on".
+With request words only before `you`, `tests/turn/test_prefixes.py` gives `130 passed` and `tests/turn/test_detector.py` gives `35 passed`.
 
 A scratch mutation, `any-final-verb`, keeps the turn open for each opening verb at the end.
 `test_verb_word_after_an_object_can_complete` kills it with three failures: "is the door open", "turn on the kitchen light", and "turn off the switch".

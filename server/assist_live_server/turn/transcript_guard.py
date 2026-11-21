@@ -29,13 +29,22 @@ OPENING_VERBS = (
 ) | {"set"}
 # Only these words can come before an opening verb or a particle that stays open,
 # because verb words such as "light" and "open" can also end a command after an object.
-LEADING_WORDS = frozenset(
-    "please uh um er erm ah hmm so okay ok can could would will you".split()
-)
+# A bare "you" stays, because a short first word such as "can" can have no transcript.
+LEADING_WORDS = frozenset("please uh um er erm ah hmm so okay ok you".split())
+# These words are start words only before "you", because a light can be named "Can".
+REQUEST_WORDS = frozenset("can could would will".split())
 
 
 def transcript_words(text: str) -> list[str]:
     return re.findall(r"[^\W_]+(?:['’][^\W_]+)*", text.casefold())
+
+
+def only_leading_words(words: list[str]) -> bool:
+    return all(
+        word in LEADING_WORDS
+        or (word in REQUEST_WORDS and words[index + 1 : index + 2] == ["you"])
+        for index, word in enumerate(words)
+    )
 
 
 def complete_partial(partial: str, *, language: str = "en") -> bool:
@@ -45,11 +54,11 @@ def complete_partial(partial: str, *, language: str = "en") -> bool:
     if not words:
         return False
     if words[-1] in PARTICLE_COMMAND_VERBS:
-        if all(word in LEADING_WORDS for word in words[:-1]):
+        if only_leading_words(words[:-1]):
             return False
         verbs = PARTICLE_COMMAND_VERBS[words[-1]]
         # An earlier verb from the same set marks an object in "turn the switch off".
         return words[-2] not in verbs or any(word in verbs for word in words[:-2])
-    if words[-1] in OPENING_VERBS and all(word in LEADING_WORDS for word in words[:-1]):
+    if words[-1] in OPENING_VERBS and only_leading_words(words[:-1]):
         return False
     return words[-1] not in INCOMPLETE_ENDINGS
