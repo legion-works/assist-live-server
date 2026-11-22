@@ -40,6 +40,38 @@ def test_empty_and_incomplete_partial(partial):
 
 @pytest.mark.parametrize(
     "partial",
+    [
+        "please",
+        "uh",
+        "um",
+        "er",
+        "erm",
+        "ah",
+        "hmm",
+        "so",
+        "okay",
+        "ok",
+        "you",
+        "can you",
+        "could you",
+        "would you",
+        "will you",
+        "so okay",
+        "Um, please…",
+        "PLEASE, could you, um?",
+    ],
+)
+def test_only_start_words_stay_incomplete(partial):
+    assert not complete_partial(partial)
+
+
+@pytest.mark.parametrize("partial", ["can", "could", "would", "will"])
+def test_request_word_without_you_can_complete_name(partial):
+    assert complete_partial(partial)
+
+
+@pytest.mark.parametrize(
+    "partial",
     ["turn on lights", "set volume five.", "stop!", "turn off lights in five minutes"],
 )
 def test_complete_partial(partial):
@@ -203,6 +235,100 @@ def test_set_without_object_stays_incomplete(partial):
     ["set a timer for five minutes", "set the temperature to 20", "set volume five."],
 )
 def test_set_command_with_object_can_complete(partial):
+    assert complete_partial(partial)
+
+
+@pytest.mark.parametrize(
+    "verb",
+    [
+        "activate",
+        "add",
+        "adjust",
+        "announce",
+        "broadcast",
+        "clean",
+        "create",
+        "deactivate",
+        "decrease",
+        "get",
+        "go",
+        "illuminate",
+        "increase",
+        "lock",
+        "make",
+        "play",
+        "press",
+        "push",
+        "put",
+        "return",
+        "run",
+        "start",
+        "take",
+        "tell",
+        "transition",
+        "unlock",
+        "vacuum",
+    ],
+)
+@pytest.mark.parametrize("start", ["", "please ", "could you ", "So, "])
+def test_template_opening_verb_without_object_stays_incomplete(verb, start):
+    assert not complete_partial(f"{start}{verb}…")
+
+
+@pytest.mark.parametrize(
+    "partial",
+    [
+        "activate test scene",
+        "add bread to the shopping list",
+        "adjust the volume to 20",
+        "announce dinner is ready",
+        "broadcast dinner is ready",
+        "clean the kitchen",
+        "create a timer for five minutes",
+        "deactivate test scene",
+        "decrease the volume to 20",
+        "get the temperature",
+        "go to the next track",
+        "illuminate the kitchen",
+        "increase the volume to 20",
+        "lock the test door",
+        "make the light blue",
+        "play the next track",
+        "press the test button",
+        "push the test button",
+        "put the timer on hold",
+        "return to base",
+        "run test script",
+        "start a timer for five minutes",
+        "take bread off the shopping list",
+        "tell me the time",
+        "transition to test scene",
+        "unlock the test door",
+        "vacuum the kitchen",
+    ],
+)
+def test_template_opening_verb_with_object_can_complete(partial):
+    assert complete_partial(partial)
+
+
+@pytest.mark.parametrize(
+    "partial",
+    [
+        "dock",
+        "mow",
+        "mute",
+        "pause",
+        "resume",
+        "stop",
+        "unmute",
+        "unpause",
+        "cancel",
+        "continue",
+        "please cancel",
+        "could you continue",
+    ],
+)
+def test_complete_template_verbs_and_dialog_replies_can_complete(partial):
     assert complete_partial(partial)
 
 

@@ -23,10 +23,16 @@ PARTICLE_COMMAND_VERBS = {
     "over": frozenset(),
 }
 # "next", "skip", and "replay" are complete media commands in the HA English templates.
-# Each HA English template with "set" also needs an object or a value after it.
+# No HA English template of three words or fewer ends with one of these verbs
+# (home-assistant-intents 2026.10.6 and 2026.10.27). "cancel" and "continue" stay
+# out, because a person frequently says them alone as a reply.
 OPENING_VERBS = (
     frozenset().union(*PARTICLE_COMMAND_VERBS.values()) - {"next", "replay", "skip"}
-) | {"set"}
+) | frozenset(
+    """set activate add adjust announce broadcast clean create deactivate decrease
+    get go illuminate increase lock make play press push put return run start take
+    tell transition unlock vacuum""".split()
+)
 # Only these words can come before an opening verb or a particle that stays open,
 # because verb words such as "light" and "open" can also end a command after an object.
 # A bare "you" stays, because a short first word such as "can" can have no transcript.
@@ -51,7 +57,7 @@ def complete_partial(partial: str, *, language: str = "en") -> bool:
     if language != "en":
         return False
     words = transcript_words(partial)
-    if not words:
+    if not words or only_leading_words(words):
         return False
     if words[-1] in PARTICLE_COMMAND_VERBS:
         if only_leading_words(words[:-1]):

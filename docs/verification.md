@@ -4526,3 +4526,68 @@ The relative public-tree step reports `NOT CHECKED public tree` because the work
 No audio playback, device access, cloud call, commit, or publication occurs.
 
 The STE check gives no errors. Its two advisories name unchanged earlier text.
+
+## Start words without a command (2026-11-22 UTC)
+
+A transcript with only start words keeps the turn open.
+The named test `test_only_start_words_stay_incomplete` checks each start word, each request phrase, mixed case, and punctuation.
+Before the change, the file gave `17 failed, 135 passed`. After the change, it gave `152 passed`.
+Before the change, the case "so" kept the turn open. Bare request words can complete a name.
+
+The opening-verb set includes 27 new command verbs, with `make`, `press`, and `push`.
+The named test `test_template_opening_verb_without_object_stays_incomplete` checks each verb alone and after three types of start words.
+Before the change, the file gave `108 failed, 191 passed`. After the change, it gave `299 passed`.
+
+The tests keep complete commands with objects, complete one-word template commands, and the dialog replies `cancel` and `continue`.
+Those replies stay complete because an opening-verb rule can increase their wait time in a dialog.
+The query verbs `are`, `do`, and `is` are not in this command rule.
+
+Hassil 3.12.1 expands the English templates from two installed `home-assistant-intents` versions:
+
+| Version | Templates | SHA-256 of `data/en.json` |
+|---|---|---|
+| 2026.10.6 | 861 | `68003e5a8d7b2807dcaf817b2bf66f5e39fea80b0ee03c5fb7a37045f5ab1140` |
+| 2026.10.27 | 862 | `0b9d606a216b1712409a3d822a8edfb9ff4458e51e421792882ea24e0ce1d456` |
+
+The expansion resolves rule names, optional words, alternatives, and all permutation orders.
+It keeps word fragments together and shows each slot as one necessary word.
+No complete expansion of three words or fewer ends in one of the 27 new verbs in the two versions.
+The verbs `press` and `push` are not in 2026.10.6. Each starts the new button template in 2026.10.27.
+
+The verb `make` starts 81 templates in each version. None of their complete short expansions ends with `make`.
+The controls find complete one-word expansions for `next`, `skip`, `replay`, `stop`, `pause`, and `resume`.
+
+No complete expansion without slots consists only of start words in the two versions.
+This result does not include all possible entity names.
+The scene template at `data/en.json:4347` in 2026.10.6 accepts a scene name alone.
+With synthetic name lists, Hassil accepts "okay" and "okay on" for `scene`, `script`, and `switch` entities in each version.
+
+The guard has no satellite name hints, so these commands wait for the maximum time without voice. They do not get an `early` end.
+The transcript does not change. A name-aware rule is not part of this change.
+
+Two isolated source mutations parse and give failures in named tests:
+
+- Removal of the start-only check gives `1 failed` in `test_only_start_words_stay_incomplete[please]`.
+- Restoration of the previous opening-verb set gives `1 failed` in `test_template_opening_verb_without_object_stays_incomplete[-make]`.
+
+The related suite command, through the test wrapper, is `uv run --frozen pytest -q -p no:cacheprovider tests/turn/`.
+Result: `416 passed`. The start guard, detector, and protocol timeouts do not change.
+
+### Repository gates
+
+Three serialized gates run through the test wrapper with a 40-minute limit for each command:
+
+| Gate | Command | Result |
+|---|---|---|
+| Repository | `task check` | Exit 0, `2634 passed, 1 skipped` |
+| Python 3.14.2 floor | `uv run --locked --python 3.14.2 pytest tests/ -q` | Exit 0, `2634 passed, 1 skipped` |
+| Isolated suite | `unshare -rn sh -c 'ip link set lo up && UV_OFFLINE=1 uv run --locked pytest tests/ -q'` | Exit 0, `2634 passed, 1 skipped` |
+
+The floor gate uses an isolated Python environment. Each gate uses the external turn-model cache.
+The repository gate includes format, lint, types, package builds, asset licenses, and Gitleaks.
+Its public-tree task reports `NOT CHECKED public tree` because this worktree has no sibling integration checkout.
+The integration checker runs independently with the private denylist and history checks. Its results close that check:
+`PASS own Git root`, `PASS history secrets`, and `PASS public data matches=0`.
+
+The one skipped test is the optional pinned Parakeet model contract. No new skip is part of this change.
+No source or test edit follows these three gates. This gate record is the last documentation update.
