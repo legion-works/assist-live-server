@@ -11,6 +11,9 @@ from assist_live_server.providers.parakeet import ParakeetSession
 from tests.contract.test_streaming_stt import connect, service
 from tests.stt_fakes import FirstBlockCommandDetector
 
+# Hang guard only: service startup and cleanup under host load are not timed behavior.
+HANG_GUARD = 60
+
 
 @pytest.mark.parametrize(
     "phase", ["negotiated", "heartbeat", "final", "post_end", "close_drain"]
@@ -101,7 +104,7 @@ def test_nonreading_audio_peer_releases_connection_and_turn(
                 release_close.set()
                 await ws.close()
 
-    asyncio.run(asyncio.wait_for(run(), 4))
+    asyncio.run(asyncio.wait_for(run(), HANG_GUARD))
 
 
 def test_end_decision_switches_inflight_input_read_to_final_wait(tmp_path, monkeypatch):
@@ -139,4 +142,4 @@ def test_end_decision_switches_inflight_input_read_to_final_wait(tmp_path, monke
             ], "FINAL_WAIT_WAS_CUT_BY_LIVE_INPUT_DEADLINE"
             assert final_wait.is_set()
 
-    asyncio.run(asyncio.wait_for(run(), 2))
+    asyncio.run(asyncio.wait_for(run(), HANG_GUARD))

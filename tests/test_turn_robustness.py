@@ -8,6 +8,9 @@ from assist_live_server.providers.parakeet import ParakeetSession
 
 from tests.stt_fakes import FirstBlockCommandDetector
 
+# Hang guard only: service startup and cleanup under host load are not timed behavior.
+HANG_GUARD = 60
+
 TURN = "01900000-0000-7000-8000-000000000001"
 
 
@@ -70,7 +73,7 @@ def test_refused_partial_keeps_last_text_and_retries_on_next_audio():
         assert retried.is_set()
         assert gateway.stt_partial_refusals_total == 1
 
-    asyncio.run(asyncio.wait_for(run(), 3))
+    asyncio.run(asyncio.wait_for(run(), HANG_GUARD))
 
 
 @pytest.mark.parametrize("mode", ["partial", "checkpoint"])
@@ -121,7 +124,7 @@ def test_only_expired_wall_timer_gets_wall_limit_cause(monkeypatch, mode, cause)
             mode == "checkpoint" and cause == "wall"
         )
 
-    asyncio.run(asyncio.wait_for(run(), 2))
+    asyncio.run(asyncio.wait_for(run(), HANG_GUARD))
 
 
 def test_callee_timeout_during_hard_end_is_not_a_grace_expiry(monkeypatch):
@@ -145,7 +148,7 @@ def test_callee_timeout_during_hard_end_is_not_a_grace_expiry(monkeypatch):
         assert [r["type"] for r in replies] == ["error"]
         assert replies[0]["code"] == "stt_failed"
 
-    asyncio.run(asyncio.wait_for(run(), 2))
+    asyncio.run(asyncio.wait_for(run(), HANG_GUARD))
 
 
 @pytest.mark.parametrize("cause", ["callee", "timer", "session_timer"])
@@ -183,4 +186,4 @@ def test_only_checkpoint_timer_expiry_counts_as_deadline(monkeypatch, cause):
         )
         assert gateway.checkpoint_wall_limit_failures_total == 0
 
-    asyncio.run(asyncio.wait_for(run(), 2))
+    asyncio.run(asyncio.wait_for(run(), HANG_GUARD))

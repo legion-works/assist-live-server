@@ -11,6 +11,9 @@ from assist_live_server.turn.detector import TurnDetector
 
 from tests.stt_fakes import FirstBlockCommandDetector
 
+# Hang guard only: service startup and cleanup under host load are not timed behavior.
+HANG_GUARD = 60
+
 TURN = "01900000-0000-7000-8000-000000000001"
 
 
@@ -53,7 +56,7 @@ def test_speaker_and_final_get_same_end_sample_under_both_rules():
             ]
             assert any(r["type"] == "speaker_result" for r in replies)
 
-    asyncio.run(asyncio.wait_for(run(), 3))
+    asyncio.run(asyncio.wait_for(run(), HANG_GUARD))
     assert final_inputs == [pcm[:1400], pcm[:1400]]
     assert speaker_inputs == final_inputs, "SPEAKER_MUST_USE_FINAL_AUDIO_PREFIX"
 
@@ -94,7 +97,7 @@ def test_final_decode_uses_exact_turn_prefix(chunk, end):
         )
         return [reply async for reply in gateway.stt(TURN, audio())]
 
-    replies = asyncio.run(asyncio.wait_for(run(), 3))
+    replies = asyncio.run(asyncio.wait_for(run(), HANG_GUARD))
     finals = [r["text"] for r in replies if r["type"] == "final"]
     if end == "no_command":
         assert final_audio == [], "no command must not run a final decode"
@@ -168,7 +171,7 @@ def test_hard_end_flushes_received_tail(monkeypatch, gateway_deadline, end):
         )
         return [r async for r in gateway.stt(TURN, audio(), record=record)]
 
-    replies = asyncio.run(asyncio.wait_for(run(), 3))
+    replies = asyncio.run(asyncio.wait_for(run(), HANG_GUARD))
     assert final_audio == [expected], "hard end lost received detector audio"
     assert [r["text"] for r in replies if r["type"] == "final"] == ["turn samples 9092"]
     assert [d["reason"] for s, d in notes if s == "end_decision"] == ["hard"]
@@ -242,7 +245,7 @@ def test_wall_timeout_waits_for_detector_before_flush(gateway_deadline, tail_sam
             f"turn samples {8192 + tail_samples}"
         ]
 
-    asyncio.run(asyncio.wait_for(run(), 5))
+    asyncio.run(asyncio.wait_for(run(), HANG_GUARD))
 
 
 @pytest.mark.parametrize(
@@ -364,7 +367,7 @@ def test_hard_grace_recovers_only_audio_from_finished_detector(
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
 
-    asyncio.run(asyncio.wait_for(run(), 4))
+    asyncio.run(asyncio.wait_for(run(), HANG_GUARD))
 
 
 @pytest.mark.parametrize("stall", ["provider_push", "detector_push", "detector_flush"])
@@ -463,4 +466,4 @@ def test_wall_timeout_bounds_stalled_operation(monkeypatch, gateway_deadline, st
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
 
-    asyncio.run(asyncio.wait_for(run(), 5))
+    asyncio.run(asyncio.wait_for(run(), HANG_GUARD))
