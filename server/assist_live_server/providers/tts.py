@@ -202,6 +202,7 @@ type ProviderFactory = Callable[..., Awaitable[TTSProvider]]
 PROVIDER_DESTINATIONS: dict[str, Destination] = {
     "piper": "local",
     "elevenlabs": "cloud",
+    "openai_tts": "cloud",
 }
 
 
@@ -235,6 +236,10 @@ def provider_factory(name: str = "piper") -> ProviderFactory:
         raise ValueError(f"unknown TTS provider: {name}")
     if name == "elevenlabs":
         return _load_elevenlabs
+    if name == "openai_tts":
+        from .openai_tts import OpenAITTSProvider
+
+        return OpenAITTSProvider.load
     from .piper import PiperProvider
 
     return PiperProvider.load

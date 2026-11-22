@@ -4591,3 +4591,57 @@ The integration checker runs independently with the private denylist and history
 
 The one skipped test is the optional pinned Parakeet model contract. No new skip is part of this change.
 No source or test edit follows these three gates. This gate record is the last documentation update.
+
+## OpenAI-compatible HTTP TTS (2026-11-22 UTC)
+
+The `openai_tts` provider sends one request for each sentence to a configured HTTP TTS server.
+It keeps Piper's spoken-text rules and request positions. It reads each WAV header before audio output.
+The published client stays unchanged: 16000 and 22050 Hz input stays unchanged, and other accepted source rates become 22050 Hz.
+The source rate cannot change between sentences, also when the output rates can agree.
+
+The first test gave `OpenAI-compatible TTS is not registered` before implementation.
+The next tests gave failures for voice validation, WAV validation, request limits, error paths, and voice filtering.
+Rate-conversion tests first showed incorrect 24000 and 48000 Hz output and a refused typed-client stream.
+The cache tests first showed an empty list after an unsatisfactory refresh and refused startup without the TTS server.
+
+Related tests run one file at a time, through `idle.sh`, with `uv run --frozen pytest -q -p no:cacheprovider <file>`:
+
+| File | Result |
+|---|---|
+| `tests/providers/test_openai_tts.py` | `47 passed` |
+| `tests/providers/test_piper.py` | `42 passed` |
+| `tests/providers/test_spoken.py` | `96 passed` |
+| `tests/providers/test_elevenlabs.py` | `56 passed` |
+| `tests/test_destinations.py` | `17 passed` |
+| `tests/test_main.py` | `22 passed` |
+| `tests/contract/test_health.py` | `85 passed` |
+| `tests/contract/test_streaming_tts.py` | `96 passed` |
+| `tests/contract/test_tts_voices.py` | `14 passed` |
+
+The tests use synthetic audio and loopback HTTP servers. A network guard refuses other connections and DNS lookups.
+The actual typed client accepts the resampled reply and its sentence positions.
+A spectral test keeps a 1 kHz tone and decreases the 11.5 kHz alias by more than 40 dB during 24-to-22.05 kHz conversion.
+The planted test key does not occur in error text, health, metrics, logs, or an actual SQLite turn record.
+
+Thirty-seven isolated, compiled source mutations each give a failure in a named behavioral test.
+The first run found missing coverage for a default voice missing from the permitted list when the catalog is unavailable.
+The added offline test finds that mutation. The second run finds all 37 mutations, without a working-source change.
+
+The format, Ruff, Mypy, CI, actionlint, bootstrap, isolated-package, asset, and two Gitleaks checks give satisfactory results.
+Mypy checks 52 source files. No dependency or client-protocol change is necessary.
+The worktree has no sibling integration checkout for the relative public-tree check.
+The external-worktree AFT inspection reports unknown diagnostics, not a clean result. Native checks supply the type and lint results.
+
+One approved live smoke sends two short synthetic sentences to a local TTS server.
+The model was not loaded, and the previous request was 1216 s earlier.
+The first audio is available after 5.636709 s. The two sentences complete after 7.406738 s.
+
+Each source WAV is 24000 Hz, mono, PCM16. Output is 22050 Hz, mono, PCM16, with 135828 bytes (3.08 s).
+The sentence markers keep request positions 18 and 40. The test keeps no audio file.
+These numbers are one cold-start smoke, not a capacity or listening-quality result.
+
+The request limit is 15 s. Voice refresh uses a 60 s interval, with a 100 ms health-refresh limit.
+
+An unsatisfactory refresh keeps the last-known list. Before the first satisfactory fetch, the configured voices stay available.
+The health response has no list-freshness field. This cached selection lets a request use the usual HA fallback path.
+No deployment, commit, push, or release is part of this change.

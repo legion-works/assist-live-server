@@ -4,7 +4,7 @@ The project is experimental and has no release.
 
 ## Engine and voice
 
-The local provider is Piper 1.8.0, in-process on Python 3.14.
+The default local provider is Piper 1.8.0, in-process on Python 3.14.
 The voice is `en_US-lessac-medium`, with ONNX `intra_op_num_threads=4` and `inter_op_num_threads=1`.
 The [selection record](../research/q7t-local-tts.md) gives the engine measurements and component rights records.
 
@@ -69,13 +69,50 @@ The cancelled result cannot go into a different session.
 
 ## Fallback
 
-Engines that make the full file before audio stay fallback engines only.
+Engines that wait for the complete reply before audio stay fallback engines only.
 The usual local path uses sentence-level Piper output.
 The legacy bytes-only client accepts only 16 kHz, 16-bit, mono PCM and refuses native Piper before audio.
 Use `tts_stream()` for the 22050 Hz format and sentence markers.
 
 A consumer that continues after some audio must start at the next complete sentence and use the same audio format.
 If the fallback format is different, stop audio and report the TTS failure. Do not run the conversation again.
+
+## OpenAI-compatible HTTP provider
+
+Select `openai_tts` for a different TTS server with an OpenAI-compatible TTS route.
+See [configuration](../configuration.md#openai-compatible-tts-server) for its environment settings.
+An address is local only when it agrees with the server's private-address rule.
+Local-only mode refuses a public address at configuration load and before each connection.
+
+The provider uses Piper's sentence splitter, Markdown rules, and positions in the initial request.
+It sends one sentence at a time and waits for that response before it starts the next request.
+It does not send a list as `input` and does not retry a sentence.
+
+The TTS request is `POST /v1/audio/speech`, with JSON fields `input` and `voice`.
+The response must be a complete RIFF/WAVE file with uncompressed, mono, signed PCM16 audio.
+The provider reads the rate from the header and accepts source rates from 8000 through 192000 Hz.
+It refuses a truncated or empty file and a rate change between sentences, before it sends audio from that sentence.
+Each response has a 16 MiB size limit. Audio stays in memory.
+
+The published client accepts only 16000 and 22050 Hz TTS audio.
+These two source rates stay unchanged. The provider changes other source rates to 22050 Hz.
+A Kaiser-windowed sinc low-pass filter decreases energy above the new Nyquist limit before sample-rate conversion.
+The event loop does not run sample-rate conversion.
+
+PCM chunks have a maximum of 32000 bytes, without a WAV header.
+Each completed sentence has its initial request-text position for fallback continuation.
+
+The voice route is `GET /v1/audio/voices`, with JSON `{"voices": ["voice-a", "voice-b"]}`.
+The configured list of permitted voices filters this list. The default voice must be in the selected list.
+The list refreshes a maximum of one time in 60 s, on a health request or a TTS request.
+
+An unsatisfactory refresh keeps the last-known list. Before the first satisfactory fetch, configured voices stay available.
+The health response supplies the voices and default voice, but no list-freshness field.
+
+An optional bearer key comes only from its configured file.
+Static errors contain no request headers, response bodies, or error data. The key does not go to health, metrics, or turn records.
+Connect failures, non-200 responses, invalid WAV files, and request timeouts use the usual `tts_failed` path.
+The HA integration then applies its fallback policy. A 22050 Hz reply can continue with the Piper fallback at the next complete sentence.
 
 ## Latency measurements
 

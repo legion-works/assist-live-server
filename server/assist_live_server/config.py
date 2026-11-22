@@ -3,7 +3,7 @@
 import math
 import os
 from collections import ChainMap
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from assist_live_client.models import TTSVoice
@@ -51,6 +51,8 @@ class ServerConfig:
     speaker_url: str | None = None
     stt_hint_bonus: float = 1.0
     end_rule: str = "partial"
+    tts_base_url: str | None = None
+    tts_destination: Destination | None = None
 
     def __post_init__(self) -> None:
         if self.end_rule not in {"partial", "checkpoint"}:
@@ -85,7 +87,8 @@ class ServerConfig:
             if provider is not None:
                 if provider not in names:
                     raise ValueError("unknown provider")
-                require_destination(provider_destination(provider), self.local_only)
+                if provider != "openai_tts":
+                    require_destination(provider_destination(provider), self.local_only)
         if self.speaker_url is not None:
             parse_speaker_url(self.speaker_url)
 
@@ -111,6 +114,12 @@ class ServerConfig:
             stt_hint_bonus,
             end_rule,
         )
+        if tts_provider == "openai_tts":
+            base_url = os.environ.get("OPENAI_TTS_BASE_URL", "")
+            _, mode = await checked_addresses(
+                parse_speaker_url(base_url), local_only=local_only, resolver=resolver
+            )
+            config = replace(config, tts_base_url=base_url, tts_destination=mode)
         if speaker_url is not None:
             await checked_addresses(
                 parse_speaker_url(speaker_url),
@@ -134,6 +143,12 @@ class ProviderFactory:
         self.speaker = speaker
 
     @property
+    def tts_destination(self) -> Destination:
+        if self.config.tts_provider == "openai_tts":
+            return self.config.tts_destination or "cloud"
+        return provider_destination(self.config.tts_provider or "piper")
+
+    @property
     def tts_voices(self) -> tuple[TTSVoice, ...]:
         if self._tts is not None:
             return getattr(self._tts, "voices", ())
@@ -152,6 +167,12 @@ class ProviderFactory:
 
             return PiperProvider.default_voice
         return None
+
+    async def refresh_tts_voices(self) -> None:
+        from .providers.openai_tts import OpenAITTSProvider
+
+        if isinstance(self._tts, OpenAITTSProvider):
+            await self._tts.refresh_voices()
 
     @classmethod
     async def load(
@@ -180,7 +201,14 @@ class ProviderFactory:
                 if provider_destination(config.stt_provider) == "cloud"
                 else cache
             )
-        if config.tts_provider is not None:
+        if config.tts_provider == "openai_tts":
+            tts = await tts_registry.provider_factory(config.tts_provider)(
+                cache,
+                base_url=config.tts_base_url,
+                local_only=config.local_only,
+                resolver=resolver,
+            )
+        elif config.tts_provider is not None:
             tts = await tts_registry.provider_factory(config.tts_provider)(
                 os.environ.get(f"{config.tts_provider.upper()}_API_KEY", "")
                 if provider_destination(config.tts_provider) == "cloud"
@@ -228,7 +256,12 @@ class ProviderFactory:
             await self._stt.prepare_hints(hints)
 
     def tts(self, provider: str) -> TTSProvider:
-        require_destination(provider_destination(provider), self.config.local_only)
+        require_destination(
+            self.tts_destination
+            if provider == "openai_tts"
+            else provider_destination(provider),
+            self.config.local_only,
+        )
         if provider != self.config.tts_provider or self._tts is None:
             raise ValueError("TTS provider not selected")
         return self._tts

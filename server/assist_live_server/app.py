@@ -126,7 +126,7 @@ def create_app(
             tts_gateway = TTSGateway(
                 providers.tts,
                 provider=config.tts_provider,
-                destination=provider_destination(config.tts_provider),
+                destination=providers.tts_destination,
                 local_only=config.local_only,
                 voices=providers.tts_voices,
                 default_voice=providers.tts_default_voice,
@@ -298,6 +298,18 @@ def create_app(
 
     async def health(request: web.Request) -> web.Response:
         satellites = allowed(request)
+        if providers is not None:
+            await providers.refresh_tts_voices()
+        tts_voices = (
+            providers.tts_voices
+            if providers is not None
+            else (tts_gateway.voices if tts_gateway is not None else ())
+        )
+        tts_default_voice = (
+            providers.tts_default_voice
+            if providers is not None
+            else (tts_gateway.default_voice if tts_gateway is not None else None)
+        )
         sequence_gaps_by_satellite: dict[str, dict[str, int | None]] = {
             satellite: {"boot_id": None, "missing": 0}
             for satellite in sorted(satellites)
@@ -355,12 +367,10 @@ def create_app(
                     and tts_gateway.provider_factory is not None,
                     **(
                         {
-                            "tts_voices": [
-                                asdict(voice) for voice in tts_gateway.voices
-                            ],
-                            "tts_default_voice": tts_gateway.default_voice,
+                            "tts_voices": [asdict(voice) for voice in tts_voices],
+                            "tts_default_voice": tts_default_voice,
                         }
-                        if tts_gateway is not None and tts_gateway.voices
+                        if tts_gateway is not None and tts_voices
                         else {}
                     ),
                 },

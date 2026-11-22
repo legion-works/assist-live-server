@@ -18,13 +18,14 @@ The store's initial value does not add a different switch when it runs in the se
 |---|---|---|
 | `stt_provider` | `parakeet` | Select `parakeet`, `deepgram`, `openai`, or `None` to disable STT. |
 | `end_rule` | `partial` | Select `partial` or `checkpoint`. |
-| `tts_provider` | `piper` | Select `piper`, `elevenlabs`, or `None` to disable TTS. |
+| `tts_provider` | `piper` | Select `piper`, `elevenlabs`, `openai_tts`, or `None` to disable TTS. |
 | `local_only` | `True` | Refuse cloud providers and non-local speaker addresses. |
 | `record_transcripts` | `False` | Store `final` transcripts only when the turn also opts in. |
 | `speaker_url` | `None` | Disable speaker identification unless an explicit HTTP destination is set. |
 | `stt_hint_bonus` | `1.0` | Parakeet name bonus, a finite number from `0` through `4`, inclusive. |
 
 Parakeet and Piper have destination `local`. Deepgram, OpenAI, and ElevenLabs have destination `cloud`.
+The resolved address sets the `openai_tts` destination, not the provider name.
 The factory loads only the selected providers.
 
 `ASSIST_LIVE_STT_HINT_BONUS` sets `stt_hint_bonus` for the server command.
@@ -52,6 +53,37 @@ They cannot accompany `providers`. That embedding code owns its provider policy.
 A provider supplied with `tts_provider` can declare `provider_id`. Without this field, records use `injected`, not an inferred provider name.
 
 The configured factory is the server path that applies `local_only`.
+
+### OpenAI-compatible TTS server
+
+Set `ASSIST_LIVE_TTS_PROVIDER=openai_tts` to select an HTTP TTS server.
+This provider does not select OpenAI STT or use `OPENAI_API_KEY`.
+
+| Environment variable | Default | Purpose |
+|---|---|---|
+| `OPENAI_TTS_BASE_URL` | Necessary | HTTP or HTTPS base URL, without credentials, query parameters, or a fragment. |
+| `OPENAI_TTS_DEFAULT_VOICE` | Necessary | Default voice identifier. |
+| `OPENAI_TTS_VOICES` | No filter | Comma-separated list of permitted voices. The default voice must be in this list when set. |
+| `OPENAI_TTS_API_KEY_FILE` | No key | File with an optional bearer key. No key value goes in the configuration response. |
+| `OPENAI_TTS_TIMEOUT` | `15` | Positive, finite request limit in seconds for each sentence, with address resolution and the complete response. |
+
+The 15 s limit gives a cold model time to load and synthesize a short sentence.
+It is not a guarantee for a busy GPU queue.
+The TTS server must supply `GET /v1/audio/voices` and `POST /v1/audio/speech`.
+The [provider contract](providers/tts-local.md#openai-compatible-http-provider) gives the voice cache and audio rules.
+
+Configuration and each connection use the same address checks as the speaker plug-in.
+With `local_only=True`, each resolved address must be local.
+Each connection uses the first checked address through a new pinned connector, without redirects or environment proxies.
+The registry uses `cloud` as the conservative class before address resolution. Configured health reports the resolved class.
+
+The voice list refresh interval is 60 s. A cached health request sends no HTTP request to the TTS server.
+An expired health refresh has a 100 ms limit. The initial fetch has a 2 s limit.
+
+After an unsatisfactory refresh, the last-known list stays available, so HA can select the configured voice and use its usual fallback.
+Before a satisfactory fetch, the list contains the configured permitted voices, or only the default voice.
+The health response has no field for the age or freshness of this list.
+Voice entries use `und` because this route supplies no language metadata.
 
 ### Local-only health state
 

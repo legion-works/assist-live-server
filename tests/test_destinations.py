@@ -250,7 +250,7 @@ def test_provider_registries_are_the_configuration_source(monkeypatch):
     from assist_live_server.providers.elevenlabs import ElevenLabsProvider
 
     assert stt.provider_names() == ("parakeet", "deepgram", "openai")
-    assert tts.provider_names() == ("piper", "elevenlabs")
+    assert tts.provider_names() == ("piper", "elevenlabs", "openai_tts")
     assert config.PROVIDER_DESTINATIONS.maps[0] is stt.PROVIDER_DESTINATIONS
     assert config.PROVIDER_DESTINATIONS.maps[1] is tts.PROVIDER_DESTINATIONS
     for kind, names in (("stt", stt.provider_names()), ("tts", tts.provider_names())):
