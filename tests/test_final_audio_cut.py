@@ -6,9 +6,56 @@ import pytest
 from assist_live_server import audio_gateway
 from assist_live_server.audio_gateway import AudioGateway
 from assist_live_server.providers.parakeet import ParakeetSession
+from assist_live_server.speaker import SpeakerResult
 from assist_live_server.turn.detector import TurnDetector
 
+from tests.stt_fakes import FirstBlockCommandDetector
+
 TURN = "01900000-0000-7000-8000-000000000001"
+
+
+def test_speaker_and_final_get_same_end_sample_under_both_rules():
+    pcm = np.arange(1024, dtype="<i2").tobytes()
+    speaker_inputs = []
+    final_inputs = []
+
+    class Detector(FirstBlockCommandDetector):
+        def push(self, block, partial):
+            super().push(block[: (700 - self.samples) * 2], partial)
+            return [{"reason": "early"}] if self.samples == 700 else []
+
+    class Speaker:
+        destination = "local"
+
+        async def identify(self, audio):
+            speaker_inputs.append(audio)
+            return SpeakerResult("", 0.0)
+
+    def final(audio):
+        final_inputs.append(audio)
+        return "final words"
+
+    async def run():
+        for mode in ("partial", "checkpoint"):
+
+            async def audio():
+                yield pcm
+
+            gateway = AudioGateway(
+                lambda _: ParakeetSession(lambda _: "", final),
+                detector_factory=Detector,
+                speaker=Speaker(),
+                end_rule=mode,
+            )
+            replies = [r async for r in gateway.stt(TURN, audio())]
+            assert [r["text"] for r in replies if r["type"] == "final"] == [
+                "final words"
+            ]
+            assert any(r["type"] == "speaker_result" for r in replies)
+
+    asyncio.run(asyncio.wait_for(run(), 3))
+    assert final_inputs == [pcm[:1400], pcm[:1400]]
+    assert speaker_inputs == final_inputs, "SPEAKER_MUST_USE_FINAL_AUDIO_PREFIX"
 
 
 @pytest.mark.parametrize("chunk", [320, 640, 1024, 2048])
@@ -196,6 +243,128 @@ def test_wall_timeout_waits_for_detector_before_flush(gateway_deadline, tail_sam
         ]
 
     asyncio.run(asyncio.wait_for(run(), 5))
+
+
+@pytest.mark.parametrize(
+    ("worker_state", "push_state"),
+    [
+        ("returned_during_cancel", "ready"),
+        ("still_running", "ready"),
+        ("returned_during_cancel", "stalled"),
+        ("returned_during_cancel", "callee_timeout"),
+    ],
+)
+def test_hard_grace_recovers_only_audio_from_finished_detector(
+    monkeypatch, gateway_deadline, worker_state, push_state
+):
+    head = bytes(1024)
+    tail = np.arange(512, dtype="<i2").tobytes()
+    release = threading.Event()
+    finished = threading.Event()
+    final_audio = []
+    speaker_audio = []
+    pushes = []
+    deadlines, _ = gateway_deadline
+    original_to_thread = asyncio.to_thread
+
+    async def to_thread(function, *args, **kwargs):
+        try:
+            return await original_to_thread(function, *args, **kwargs)
+        except asyncio.CancelledError:
+            if worker_state == "returned_during_cancel":
+                release.set()
+                assert await original_to_thread(finished.wait, 1)
+            raise
+
+    monkeypatch.setattr(audio_gateway.asyncio, "to_thread", to_thread)
+
+    async def run():
+        entered = asyncio.Event()
+        push_cancelled = asyncio.Event()
+        loop = asyncio.get_running_loop()
+
+        class Detector(FirstBlockCommandDetector):
+            def push(self, block, partial):
+                events = super().push(block, partial)
+                if block == tail:
+                    loop.call_soon_threadsafe(entered.set)
+                    try:
+                        if worker_state == "still_running":
+                            threading.Event().wait(0.6)
+                        assert release.wait(3), "detector barrier not released"
+                    finally:
+                        finished.set()
+                return events
+
+        class Speaker:
+            destination = "local"
+
+            async def identify(self, pcm):
+                speaker_audio.append(pcm)
+                return SpeakerResult("", 0.0)
+
+        def final(pcm):
+            final_audio.append(pcm)
+            return "final words"
+
+        class Session(ParakeetSession):
+            async def push(self, block):
+                pushes.append(block)
+                if block == tail:
+                    if push_state == "callee_timeout":
+                        raise TimeoutError("synthetic catch-up push timeout")
+                    if push_state == "stalled":
+                        try:
+                            await asyncio.Event().wait()
+                        finally:
+                            push_cancelled.set()
+                await super().push(block)
+
+        detector = Detector()
+        gateway = AudioGateway(
+            lambda _: Session(lambda _: "", final),
+            detector_factory=lambda: detector,
+            speaker=Speaker(),
+        )
+
+        async def audio():
+            yield head
+            yield tail
+            await asyncio.Event().wait()
+
+        async def consume():
+            return [r async for r in gateway.stt(TURN, audio())]
+
+        task = asyncio.create_task(consume())
+        try:
+            await asyncio.wait_for(entered.wait(), 1)
+            deadlines[0].reschedule(loop.time())
+            replies = await asyncio.wait_for(asyncio.shield(task), 1.5)
+            assert detector.samples == 1024
+            assert (worker_state == "returned_during_cancel") == finished.is_set()
+            assert pushes == ([head, tail] if finished.is_set() else [head]), (
+                "CATCHUP_MUST_NOT_REPEAT_PROVIDER_PUSH"
+            )
+            if push_state == "callee_timeout":
+                assert [r["type"] for r in replies] == ["error"]
+                assert replies[0]["code"] == "stt_failed"
+                assert final_audio == speaker_audio == []
+                return
+            expected = (
+                head + tail if finished.is_set() and push_state == "ready" else head
+            )
+            assert final_audio == [expected], "FINISHED_DETECTOR_AUDIO_MUST_REACH_FINAL"
+            assert speaker_audio == [expected]
+            assert push_cancelled.is_set() == (push_state == "stalled")
+            assert [r["text"] for r in replies if r["type"] == "final"] == [
+                "final words"
+            ]
+        finally:
+            release.set()
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(asyncio.wait_for(run(), 4))
 
 
 @pytest.mark.parametrize("stall", ["provider_push", "detector_push", "detector_flush"])

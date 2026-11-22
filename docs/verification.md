@@ -4466,3 +4466,63 @@ Each suite runs alone, with a 40-minute limit. No source edit follows that last 
 Correction (2026-11-21 UTC) to "Test time limits that include startup work": the change also removed eight outer `asyncio.wait_for(run(), N)` limits.
 The files are `tests/test_speaker.py`, `tests/contract/test_streaming_stt.py`, `tests/test_checkpoint_wire.py`, `tests/test_checkpoint_review_fixes.py`, and `tests/contract/test_hints.py`.
 Those tests apply inner behavior limits after startup. Some inner limits also include cleanup.
+
+## Speaker audio and hard-end recovery (2026-11-22 UTC)
+
+The speaker plug-in and the `final` decoder receive the same accepted audio prefix with each end rule.
+One regression puts sample 700 in a 1024-sample message. Each mode gives the speaker and decoder 1400 bytes.
+Before the repair, the test gave `SPEAKER_MUST_USE_FINAL_AUDIO_PREFIX`.
+
+After the hard-end grace, cancellation can end before detector work completes.
+The gateway checks detector work independently of the canceled task.
+If that work completes and no provider push started, the gateway pushes the unsent detector samples before `finish()`.
+The catch-up push has its own 0.5 s deadline and no retry.
+An active detector or an expired catch-up deadline keeps the accepted prefix. A provider failure gives `stt_failed`.
+
+The regression controls cancellation with barriers. Its active-detector case waits a minimum of 0.6 s after the sample count increases.
+The completed-detector case gave a missing-audio assertion before the repair.
+The stalled-provider case gave `TimeoutError` before the catch-up deadline repair.
+The repaired cases check the full consumed prefix, the bounded previous prefix, cancellation, and one push for each prefix.
+
+The callee-timeout finding does not apply at base revision `a42f400`.
+The four cases in `test_only_expired_wall_timer_gets_wall_limit_cause` give satisfactory results before and after these changes.
+They check a second-push `TimeoutError` and actual wall expiry with each end rule.
+The catch-up regression also checks a callee `TimeoutError` without a hard end.
+The 15 s turn limit, 600 ms message deadline, 1 s checkpoint deadline, and initial 0.5 s grace stay unchanged.
+
+Four isolated source mutations parse and give failures in their named behavioral tests:
+
+| Mutation | Test | Decisive result |
+|---|---|---|
+| Copy all pending PCM to the speaker | `test_speaker_and_final_get_same_end_sample_under_both_rules` | `SPEAKER_MUST_USE_FINAL_AUDIO_PREFIX` |
+| Remove the catch-up push | `test_hard_grace_recovers_only_audio_from_finished_detector[returned_during_cancel-ready]` | Incorrect provider push list |
+| Remove the catch-up deadline | `test_hard_grace_recovers_only_audio_from_finished_detector[returned_during_cancel-stalled]` | `TimeoutError` at the test bound |
+| Remove the timeout-cause checks | `test_only_expired_wall_timer_gets_wall_limit_cause` | `2 failed, 2 passed` |
+
+The mutation runner checks the imported module path. No mutation changes the working source.
+An isolated archive of the base revision gives the two intended audio-repair failures with the new tests.
+The subsequent targeted run gives `33 passed` for `test_final_audio_cut.py` and `test_turn_robustness.py`.
+
+The three complete gates run one at a time through the external wrapper, each with a 40-minute limit:
+
+```sh
+idle.sh task check
+idle.sh uv run --locked --python 3.14.2 pytest tests/ -q -p no:cacheprovider
+idle.sh unshare -rn sh -c 'ip link set lo up && UV_OFFLINE=1 uv run --locked pytest tests/ -q -p no:cacheprovider'
+```
+
+Each command sets `ASSIST_LIVE_MODEL_CACHE` to the external turn-model cache.
+The floor command uses an isolated `UV_PROJECT_ENVIRONMENT`. The project gate uses the external private-term denylist.
+
+| Gate | Result |
+|---|---|
+| `task check`, Python 3.14.3 | `2470 passed, 1 skipped` in 49.30 s |
+| Python 3.14.2 floor | `2470 passed, 1 skipped` in 53.92 s |
+| Network-isolated suite | `2470 passed, 1 skipped` in 53.90 s |
+
+Ruff checks 142 formatted files. Mypy reports no issues in 51 source files.
+CI, bootstrap, model pins, isolated packages, assets, and Gitleaks give satisfactory results.
+The relative public-tree step reports `NOT CHECKED public tree` because the worktree has no sibling integration checkout.
+No audio playback, device access, cloud call, commit, or publication occurs.
+
+The STE check gives no errors. Its two advisories name unchanged earlier text.

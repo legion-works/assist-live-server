@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import threading
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
@@ -144,25 +145,41 @@ class AudioGateway:
                 pending_audio = bytearray()
                 sent_bytes = 0
                 in_flight: asyncio.Task[None] | None = None
+                detector_finished = threading.Event()
+                push_started = False
+
+                async def push_detected_audio() -> None:
+                    nonlocal sent_bytes, push_started
+                    # docs/design.md: no provider can receive audio after the end.
+                    count = detector.samples * 2 - sent_bytes
+                    if count:
+                        accepted = bytes(pending_audio[:count])
+                        push_started = True
+                        await active_session.push(accepted)
+                        if self.speaker is not None:
+                            speaker_audio.extend(accepted)
+                        del pending_audio[:count]
+                        sent_bytes += count
+                        changed.set()
 
                 async def process_detection(pcm: bytes | None) -> None:
-                    nonlocal onset, candidate, sent_bytes
+                    nonlocal onset, candidate, push_started
                     if pcm is not None:
                         pending_audio.extend(pcm)
-                    events = await asyncio.to_thread(
-                        lambda: (
+                    detector_finished.clear()
+                    push_started = False
+
+                    def detection() -> list[dict[str, Any]]:
+                        events = (
                             detector.flush(partial)
                             if pcm is None
                             else detector.push(pcm, partial)
                         )
-                    )
-                    # docs/design.md: no provider can receive audio after the end.
-                    count = detector.samples * 2 - sent_bytes
-                    if count:
-                        await active_session.push(bytes(pending_audio[:count]))
-                        del pending_audio[:count]
-                        sent_bytes += count
-                        changed.set()
+                        detector_finished.set()
+                        return events
+
+                    events = await asyncio.to_thread(detection)
+                    await push_detected_audio()
                     if not onset and detector.speech_started_at_ms is not None:
                         onset = True
                         active_session.speech_started()
@@ -187,6 +204,7 @@ class AudioGateway:
                     in_flight = None
 
                 async def hard_end() -> None:
+                    nonlocal in_flight
                     try:
                         async with asyncio.timeout(HARD_END_GRACE) as grace_deadline:
                             if in_flight is not None:
@@ -195,8 +213,18 @@ class AudioGateway:
                     except TimeoutError:
                         if not grace_deadline.expired():
                             raise
-                        # A running detector makes another flush unsafe.
-                        pass
+                        if in_flight is not None:
+                            in_flight.cancel()
+                            await asyncio.gather(in_flight, return_exceptions=True)
+                            in_flight = None
+                        # Cancellation cannot stop a thread or undo a provider push.
+                        if detector_finished.is_set() and not push_started:
+                            try:
+                                async with asyncio.timeout(HARD_END_GRACE) as catchup:
+                                    await push_detected_audio()
+                            except TimeoutError:
+                                if not catchup.expired():
+                                    raise
                     await decide("hard")
 
                 async def collect() -> None:
@@ -240,8 +268,6 @@ class AudioGateway:
                                 pcm = pcm[: MAX_AUDIO_BYTES - total]
                                 for offset in range(0, len(pcm), 1024):
                                     block = pcm[offset : offset + 1024]
-                                    if self.speaker is not None:
-                                        speaker_audio.extend(block)
                                     total += len(block)
                                     await detect(block)
                                     if stopped:

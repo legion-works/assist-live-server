@@ -681,6 +681,18 @@ With the same end sample, different message sizes give the same audio prefix to 
 If the client stops audio before the detector ends the turn, the end sample is the last received sample.
 Checkpoint decodes can use accepted audio after the detector's current position. They do not extend the session's `final` audio buffer.
 
+The speaker plug-in receives the same accepted audio prefix as the `final` decode with each end rule.
+It receives no samples after the detector's end sample.
+
+With `partial`, a hard end gives pending detector work and its flush a 0.5 s grace period.
+After that period, the gateway cancels the pending task without a wait for active detector work.
+If detector work completes before cancellation ends, the gateway pushes its unsent samples before `finish()`.
+This catch-up push has its own 0.5 s deadline and no retry.
+
+The gateway does not retry a provider push that started before cancellation.
+If detector work continues or the catch-up deadline expires, `finish()` uses the accepted audio prefix.
+A provider failure gives `stt_failed`.
+
 The server publishes checkpoint `partial` text only after command start and after the detector processes that checkpoint position.
 It publishes none after the end decision or from a position after the end sample.
 It cancels queued checkpoint work for positions after that sample before it requests the `final` decode.
