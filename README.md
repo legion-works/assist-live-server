@@ -8,7 +8,7 @@ The project has three deliverables:
 
 The root `repository.yaml` identifies the HA app repository.
 
-This project is experimental. It has no release. Do not give the server a Home Assistant administrator credential.
+This project is experimental. The server has no release. Do not give the server a Home Assistant administrator credential.
 
 The server supplies timing storage, turn detection, STT, and TTS. The client supplies the integration's protocol interface.
 Packaging checks do not prove a live HA app installation.
@@ -24,7 +24,7 @@ Packaging checks do not prove a live HA app installation.
 
 See [server configuration](docs/configuration.md), [turn settings](docs/profiles.md), and [the protocol](docs/protocol.md) for options and limits.
 The [release instructions](docs/release.md) give container build commands, platform checks, and the client pre-release workflow.
-No package or image release is available.
+The client `0.1.0a1` is a pre-release on PyPI. No server package or image release is available.
 
 See [the architecture](ARCHITECTURE.md), [the structure](STRUCTURE.md), [development checks](CONTRIBUTING.md), and [verification notes](docs/verification.md).
 

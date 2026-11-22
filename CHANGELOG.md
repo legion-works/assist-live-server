@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-The project is experimental. No package or image release is available.
+The project is experimental. The client `0.1.0a1` is a pre-release on PyPI. No server package or image release is available.
 
 ### Server
 
@@ -22,7 +22,7 @@ The project is experimental. No package or image release is available.
 - Accept the firmware's pre-roll length in microphone-open timing events. Keep the store available when historical rows are invalid.
 - Add standalone and Home Assistant app container targets for amd64 and arm64, pinned model downloads, and artifact license checks.
 
-### Client `0.1.0a1` (not published)
+### Client `0.1.0a1` (PyPI pre-release, 2026-11-22)
 
 - Add the asynchronous protocol client with turn, event, query, export, STT, and TTS methods.
 - Add typed TTS items, optional request-text positions, default-voice requests, and health metadata for voices, destinations, and name hints.
