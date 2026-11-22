@@ -92,12 +92,23 @@ The TTS request is `POST /v1/audio/speech`, with JSON fields `input` and `voice`
 The response must be a complete RIFF/WAVE file with uncompressed, mono, signed PCM16 audio.
 The provider reads the rate from the header and accepts source rates from 8000 through 192000 Hz.
 It refuses a truncated or empty file and a rate change between sentences, before it sends audio from that sentence.
-Each response has a 16 MiB size limit. Audio stays in memory.
+
+Each response has a 2945536-byte limit: 60 s of 24 kHz PCM16 audio plus 64 KiB for headers.
+The source audio also has a 60 s limit, independently of the response size. Audio stays in memory.
+These limits give a short sentence sufficient space without a large allocation from an untrusted response.
 
 The published client accepts only 16000 and 22050 Hz TTS audio.
 These two source rates stay unchanged. The provider changes other source rates to 22050 Hz.
-A Kaiser-windowed sinc low-pass filter decreases energy above the new Nyquist limit before sample-rate conversion.
+One fixed-width, Kaiser-windowed sinc resampler does upsampling and downsampling at the lower Nyquist limit.
+It uses 128 input samples for each output sample, with float32 weights and sums.
 The event loop does not run sample-rate conversion.
+
+Each group of output samples contains a maximum of 256 samples and reads its full input overlap.
+There is no complete floating-point input copy. Integer phase keeps sample positions the same at group boundaries and for different sentence lengths.
+Conversion uses less than 8 MiB. This limit includes output PCM but not the source PCM or WAV.
+
+The WAV, source PCM, and conversion memory together stay below 16 MiB for each active sentence.
+These limits do not include other concurrent turns or HTTP-library buffers.
 
 PCM chunks have a maximum of 32000 bytes, without a WAV header.
 Each completed sentence has its initial request-text position for fallback continuation.
@@ -110,6 +121,10 @@ An unsatisfactory refresh keeps the last-known list. Before the first satisfacto
 The health response supplies the voices and default voice, but no list-freshness field.
 
 An optional bearer key comes only from its configured file.
+An empty file is a named configuration error, not a request without a key.
+An `http://` URL sends the bearer key in clear text. Provider startup gives one warning without the key or URL.
+Use `https://` to encrypt requests.
+
 Static errors contain no request headers, response bodies, or error data. The key does not go to health, metrics, or turn records.
 Connect failures, non-200 responses, invalid WAV files, and request timeouts use the usual `tts_failed` path.
 The HA integration then applies its fallback policy. A 22050 Hz reply can continue with the Piper fallback at the next complete sentence.

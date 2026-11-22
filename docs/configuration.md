@@ -67,6 +67,14 @@ This provider does not select OpenAI STT or use `OPENAI_API_KEY`.
 | `OPENAI_TTS_API_KEY_FILE` | No key | File with an optional bearer key. No key value goes in the configuration response. |
 | `OPENAI_TTS_TIMEOUT` | `15` | Positive, finite request limit in seconds for each sentence, with address resolution and the complete response. |
 
+Voice names contain 1 through 128 ASCII letters, digits, spaces, periods, underscores, or hyphens.
+A name with only spaces is invalid. Other characters, with invisible format characters, cause a named configuration or catalog error.
+Invalid names increase `invalid_voice_names_total` and cause a count-only warning. The warning does not contain the names.
+
+An empty key file is a configuration error. It does not disable authentication.
+An `http://` URL sends the bearer key in clear text.
+Provider startup gives one warning without the key or URL. Use `https://` to encrypt requests.
+
 The 15 s limit gives a cold model time to load and synthesize a short sentence.
 It is not a guarantee for a busy GPU queue.
 The TTS server must supply `GET /v1/audio/voices` and `POST /v1/audio/speech`.

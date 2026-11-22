@@ -1,6 +1,7 @@
 import asyncio
 import io
 import json
+import logging
 import math
 import os
 import wave
@@ -30,7 +31,11 @@ from .tts import sentences
 
 VOICE_CACHE_SECONDS = 60.0
 METADATA_TIMEOUT = 0.1
-MAX_WAV_BYTES = 16 * 1024 * 1024
+MAX_SENTENCE_SECONDS = 60
+MAX_WAV_BYTES = MAX_SENTENCE_SECONDS * 24000 * 2 + 65536
+RESAMPLE_BLOCK = 256
+SINC_TAPS = 128
+LOGGER = logging.getLogger(__name__)
 
 
 class OpenAITTSError(RuntimeError):
@@ -47,6 +52,7 @@ class OpenAITTSProvider:
         self.default_voice = os.environ.get("OPENAI_TTS_DEFAULT_VOICE", "")
         self.voices: tuple[TTSVoice, ...] = ()
         self._next_refresh = 0.0
+        self.invalid_voice_names_total = 0
         self._api_key = ""
         key_file = os.environ.get("OPENAI_TTS_API_KEY_FILE")
         try:
@@ -66,9 +72,14 @@ class OpenAITTSProvider:
                 for v in os.environ.get("OPENAI_TTS_VOICES", "").split(",")
                 if v.strip()
             )
-            if not self._valid_voice(self.default_voice) or (
-                self._allowlist and self.default_voice not in self._allowlist
-            ):
+            invalid = sum(
+                not self._valid_voice(v) for v in (self.default_voice, *self._allowlist)
+            )
+            if invalid:
+                self.invalid_voice_names_total += invalid
+                LOGGER.warning("openai_tts_invalid_voice_names count=%d", invalid)
+                raise ValueError
+            if self._allowlist and self.default_voice not in self._allowlist:
                 raise ValueError("invalid openai_tts default voice")
             if any(not self._valid_voice(v) for v in self._allowlist):
                 raise ValueError
@@ -82,13 +93,15 @@ class OpenAITTSProvider:
             TTSVoice(v, v, "und")
             for v in dict.fromkeys(self._allowlist or (self.default_voice,))
         )
+        if self._api_key and self._url.scheme == "http":
+            LOGGER.warning("openai_tts bearer key uses cleartext HTTP")
 
     def _valid_voice(self, value: object) -> bool:
         return (
             isinstance(value, str)
             and 0 < len(value) <= 128
             and bool(value.strip())
-            and not any(ord(c) < 32 or ord(c) == 127 for c in value)
+            and all(c.isascii() and (c.isalnum() or c in " ._-") for c in value)
             and not (self._api_key and self._api_key in value)
         )
 
@@ -154,9 +167,12 @@ class OpenAITTSProvider:
             names = value["voices"]
             if not isinstance(names, list) or not 0 < len(names) <= 256:
                 raise ValueError
-            if any(not self._valid_voice(v) for v in names) or len(set(names)) != len(
-                names
-            ):
+            invalid = sum(not self._valid_voice(v) for v in names)
+            if invalid:
+                self.invalid_voice_names_total += invalid
+                LOGGER.warning("openai_tts_invalid_voice_names count=%d", invalid)
+                raise ValueError
+            if len(set(names)) != len(names):
                 raise ValueError
             selected = [v for v in names if not self._allowlist or v in self._allowlist]
             if self.default_voice not in selected:
@@ -181,6 +197,7 @@ class OpenAITTSProvider:
                     or wav.getcomptype() != "NONE"
                     or not 8000 <= wav.getframerate() <= 192000
                     or wav.getnframes() == 0
+                    or wav.getnframes() > MAX_SENTENCE_SECONDS * wav.getframerate()
                 ):
                     raise ValueError
                 audio_format = TTSFormat("pcm_s16le", wav.getframerate(), 1, 2)
@@ -188,26 +205,33 @@ class OpenAITTSProvider:
                 if len(pcm) != wav.getnframes() * 2:
                     raise ValueError
                 return audio_format, pcm
-        except wave.Error, EOFError, ValueError:
+        except wave.Error, EOFError, ValueError, RuntimeError:
             raise OpenAITTSError("openai_tts_bad_wav") from None
 
     def _resample(self, pcm: bytes, rate: int) -> bytes:
-        samples = np.frombuffer(pcm, dtype="<i2").astype(np.float64)
-        ratio = 22050 / rate
-        half = math.ceil(64 / min(1.0, ratio))
-        offsets = np.arange(-half, half + 1)
-        cutoff = 0.94 * min(1.0, ratio)
-        kernel = cutoff * np.sinc(cutoff * offsets) * np.kaiser(len(offsets), 8.6)
-        kernel /= kernel.sum()
-        # The filter decreases energy above the new Nyquist limit before decimation.
-        # Edge padding keeps the sentence length.
-        filtered = np.convolve(
-            np.pad(samples, (half, half), mode="edge"), kernel, mode="valid"
-        )
-        size = max(1, round(len(samples) * ratio))
-        positions = np.arange(size) / ratio
-        result = np.interp(positions, np.arange(len(samples)), filtered)
-        return np.clip(np.rint(result), -32768, 32767).astype("<i2").tobytes()
+        samples = np.frombuffer(pcm, dtype="<i2")
+        size = max(1, round(len(samples) * 22050 / rate))
+        result = np.empty(size, dtype="<i2")
+        offsets = np.arange(1 - SINC_TAPS // 2, 1 + SINC_TAPS // 2)
+        window = np.kaiser(SINC_TAPS, 8.6).astype(np.float32)
+        cutoff = np.float32(0.94 * min(1.0, 22050 / rate))
+        # Each group of output samples reads its full input overlap.
+        # Integer phase keeps sample positions the same at group boundaries.
+        for start in range(0, size, RESAMPLE_BLOCK):
+            stop = min(start + RESAMPLE_BLOCK, size)
+            phase = np.arange(start, stop, dtype=np.int64) * rate
+            centers = phase // 22050
+            fractions = (phase % 22050).astype(np.float32) / np.float32(22050)
+            distances = offsets.astype(np.float32)[None, :] - fractions[:, None]
+            weights = np.sinc(cutoff * distances)
+            weights *= cutoff * window
+            weights /= weights.sum(axis=1, keepdims=True)
+            indices = centers[:, None] + offsets
+            np.clip(indices, 0, len(samples) - 1, out=indices)
+            values = samples[indices].astype(np.float32)
+            output = np.einsum("ij,ij->i", weights, values, dtype=np.float32)
+            result[start:stop] = np.clip(np.rint(output), -32768, 32767).astype("<i2")
+        return result.tobytes()
 
     async def stream(
         self, text: AsyncIterator[str], voice: str

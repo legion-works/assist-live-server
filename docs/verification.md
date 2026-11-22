@@ -4645,3 +4645,53 @@ The request limit is 15 s. Voice refresh uses a 60 s interval, with a 100 ms hea
 An unsatisfactory refresh keeps the last-known list. Before the first satisfactory fetch, the configured voices stay available.
 The health response has no list-freshness field. This cached selection lets a request use the usual HA fallback path.
 No deployment, commit, push, or release is part of this change.
+
+## HTTP TTS review repairs (2026-11-22 UTC)
+
+The voice-name rule accepts only ASCII letters, digits, spaces, periods, underscores, and hyphens, with 1 through 128 characters.
+Names with only spaces are invalid. Configuration and catalog validation refuse invisible format characters before health output.
+The provider counts invalid names and gives a count-only warning without their text.
+The tests examine literal names and their `unicode_escape` output in logs and keep the previous safe list after an invalid refresh.
+
+One fixed-width sinc resampler replaces complete floating-point input copies, convolution, and linear interpolation.
+Each output sample uses 128 input samples with a Kaiser window and float32 weights and sums.
+Groups contain a maximum of 256 output samples and read the necessary input overlap.
+Integer phase keeps sample positions the same at group boundaries and for long sentences.
+The same code does upsampling and downsampling, with a cutoff below the lower Nyquist limit.
+
+| Source rate | Output rate | Unwanted component relative to the kept tone |
+|---|---|---|
+| 24000 Hz | 22050 Hz | -99.86 dB at 10550 Hz |
+| 11025 Hz | 22050 Hz | -103.24 dB at 8025 Hz |
+| 8000 Hz | 22050 Hz | -114.57 dB at 6000 Hz |
+
+The spectral tests use a 40 dB minimum. A different test uses one complete output group.
+The maximum difference at group boundaries is one PCM16 count.
+Conversion uses less than 8 MiB, with output PCM in that limit but not the source PCM or WAV.
+For 60 s of source audio, measured peak conversion allocation is 5950373 bytes at 8000 Hz and 5936129 bytes at 24000 Hz.
+
+The response limit is 2945536 bytes: 60 s of 24 kHz PCM16 plus 64 KiB for headers.
+The source audio also has a 60 s limit, independently of its byte size.
+The WAV, source PCM, and conversion memory together stay below 16 MiB for each active sentence, without HTTP-library buffers or other turns.
+This replaces the earlier 16 MiB response limit.
+
+The WAV parser also maps Python 3.14's bare `RuntimeError` for malformed odd-sized chunks to `openai_tts_bad_wav`.
+An empty key file continues to give a named configuration error. It does not select a request without authentication.
+With a key and `http://`, provider startup gives one warning without the key or URL. HTTPS and requests without a key give no warning.
+The documentation states that HTTP sends the key in clear text and that HTTPS encrypts the request.
+
+The concurrency tests hold two turns at the same HTTP and format boundaries, then compare their audio, voices, and request positions.
+Concurrent health requests also keep one catalog refresh in flight and use the cached voice list.
+
+Before implementation, the first repair file gives `17 failed, 4 passed` for the intended defects.
+The completed file gives `32 passed`. All ten related files run independently through `idle.sh` with the specified frozen pytest command.
+Their results are `32`, `47`, `42`, `96`, `56`, `17`, `22`, `85`, `96`, and `14 passed`, with 507 tests in total.
+
+All 55 compiled source mutations give failures in named behavioral tests, with 18 new repair mutations.
+The first campaign found missing coverage for source-rate limits after the new audio-length guard also refused a zero-rate header.
+The new nonzero boundary cases find that mutation without an audio-length failure. No working-source mutation occurs.
+
+Ruff checks 145 formatted files. Mypy checks 52 source files without errors.
+CI, actionlint, bootstrap, asset, and two Gitleaks checks give satisfactory results.
+No new dependency, client change, live request, full suite, deployment, commit, or push is part of this repair.
+The parent runs the complete landing suites after review.
