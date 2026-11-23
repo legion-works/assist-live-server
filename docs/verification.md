@@ -4604,7 +4604,7 @@ The next tests gave failures for voice validation, WAV validation, request limit
 Rate-conversion tests first showed incorrect 24000 and 48000 Hz output and a refused typed-client stream.
 The cache tests first showed an empty list after an unsatisfactory refresh and refused startup without the TTS server.
 
-Related tests run one file at a time, through `idle.sh`, with `uv run --frozen pytest -q -p no:cacheprovider <file>`:
+Related tests run one file at a time, through the idle-CPU wrapper, with `uv run --frozen pytest -q -p no:cacheprovider <file>`:
 
 | File | Result |
 |---|---|
@@ -4684,7 +4684,7 @@ The concurrency tests hold two turns at the same HTTP and format boundaries, the
 Concurrent health requests also keep one catalog refresh in flight and use the cached voice list.
 
 Before implementation, the first repair file gives `17 failed, 4 passed` for the intended defects.
-The completed file gives `32 passed`. All ten related files run independently through `idle.sh` with the specified frozen pytest command.
+The completed file gives `32 passed`. All ten related files run independently through the idle-CPU wrapper with the specified frozen pytest command.
 Their results are `32`, `47`, `42`, `96`, `56`, `17`, `22`, `85`, `96`, and `14 passed`, with 507 tests in total.
 
 All 55 compiled source mutations give failures in named behavioral tests, with 18 new repair mutations.
@@ -4695,3 +4695,13 @@ Ruff checks 145 formatted files. Mypy checks 52 source files without errors.
 CI, actionlint, bootstrap, asset, and two Gitleaks checks give satisfactory results.
 No new dependency, client change, live request, full suite, deployment, commit, or push is part of this repair.
 The parent runs the complete landing suites after review.
+
+## Invalid voice-name metric and document corrections (2026-11-23 UTC)
+
+`/metrics` shows the invalid voice-name count as `assist_live_tts_invalid_voice_names_total`.
+The test `test_invalid_voice_name_count_reaches_metrics` reads the counter before and after a voice-list refresh that contains one name that is not permitted. It gives `1 passed`.
+With the `app.py` and `config.py` change removed, the same test gives a failure because the counter line is missing. With the change back, the two HTTP TTS test files give `80 passed`.
+
+The configuration error for a rejected voice name also names the permitted voice list as a possible cause.
+The protocol document `docs/protocol.md` has a new statement about a provider push that cancellation stops. The speaker audio can then be one push shorter than the `final` audio.
+The speaker-audio record above starts its commands with `idle.sh`. That is the idle-CPU wrapper that earlier records call `idle-run.sh`.

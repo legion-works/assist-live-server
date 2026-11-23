@@ -69,7 +69,7 @@ This provider does not select OpenAI STT or use `OPENAI_API_KEY`.
 
 Voice names contain 1 through 128 ASCII letters, digits, spaces, periods, underscores, or hyphens.
 A name with only spaces is invalid. Other characters, with invisible format characters, cause a named configuration or catalog error.
-Invalid names increase `invalid_voice_names_total` and cause a count-only warning. The warning does not contain the names.
+Invalid names increase the `/metrics` counter `assist_live_tts_invalid_voice_names_total` and cause a count-only warning. The warning does not contain the names.
 
 An empty key file is a configuration error. It does not disable authentication.
 An `http://` URL sends the bearer key in clear text.

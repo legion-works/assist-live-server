@@ -168,6 +168,14 @@ class ProviderFactory:
             return PiperProvider.default_voice
         return None
 
+    @property
+    def tts_invalid_voice_names_total(self) -> int:
+        from .providers.openai_tts import OpenAITTSProvider
+
+        if isinstance(self._tts, OpenAITTSProvider):
+            return self._tts.invalid_voice_names_total
+        return 0
+
     async def refresh_tts_voices(self) -> None:
         from .providers.openai_tts import OpenAITTSProvider
 

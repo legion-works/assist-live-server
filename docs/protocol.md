@@ -690,6 +690,7 @@ If detector work completes before cancellation ends, the gateway pushes its unse
 This catch-up push has its own 0.5 s deadline and no retry.
 
 The gateway does not retry a provider push that started before cancellation.
+Thus the speaker audio can be one push shorter than the `final` audio.
 If detector work continues or the catch-up deadline expires, `finish()` uses the accepted audio prefix.
 A provider failure gives `stt_failed`.
 

@@ -84,6 +84,54 @@ def test_refresh_counts_each_unsafe_name_and_keeps_safe_health_choices(
     asyncio.run(run())
 
 
+def test_invalid_voice_name_count_reaches_metrics(monkeypatch, tmp_path):
+    from assist_live_server.app import create_app
+    from assist_live_server.auth import Registry
+    from assist_live_server.store import SQLiteStore
+
+    async def catalog(request, count):
+        return web.json_response(
+            {"voices": ["voice-a"] if count == 1 else ["voice-a", "bad\u202e"]}
+        )
+
+    async def run():
+        async with speech_server(catalog_handler=catalog) as (url, _, _):
+            factory = await configured(monkeypatch, url)
+            store = SQLiteStore(tmp_path / "metrics.sqlite3")
+            registry = Registry(replay_store=store)
+            registry.bind("satellite-a", "satellite-a", b"synthetic-device-secret")
+            registry.add_token("test-token", ["satellite-a"])
+            try:
+                async with TestClient(
+                    TestServer(create_app(registry, store, providers=factory))
+                ) as client:
+
+                    async def counter():
+                        response = await client.get(
+                            "/metrics", headers={"Authorization": "Bearer test-token"}
+                        )
+                        assert response.status == 200
+                        lines = (await response.text()).splitlines()
+                        name = "assist_live_tts_invalid_voice_names_total "
+                        return [line for line in lines if line.startswith(name)]
+
+                    assert await counter() == [
+                        "assist_live_tts_invalid_voice_names_total 0"
+                    ]
+                    monkeypatch.setattr(
+                        "assist_live_server.providers.openai_tts.monotonic",
+                        lambda: 1000000000000.0,
+                    )
+                    await factory.refresh_tts_voices()
+                    assert await counter() == [
+                        "assist_live_tts_invalid_voice_names_total 1"
+                    ]
+            finally:
+                store.close()
+
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("setting", ["OPENAI_TTS_DEFAULT_VOICE", "OPENAI_TTS_VOICES"])
 def test_unsafe_configured_voice_cannot_seed_unavailable_catalog(
     monkeypatch, caplog, setting

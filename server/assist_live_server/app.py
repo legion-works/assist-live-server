@@ -450,6 +450,11 @@ def create_app(
                         else 0
                     ),
                     "stt_hints_build_waits_total": hint_build_waits_total(),
+                    "tts_invalid_voice_names_total": (
+                        providers.tts_invalid_voice_names_total
+                        if providers is not None
+                        else 0
+                    ),
                     "stt_final_admission_refusals_total": (
                         final_admission_refusals_total()
                     ),

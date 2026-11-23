@@ -87,7 +87,8 @@ class OpenAITTSProvider:
                 raise ValueError
         except OSError, UnicodeError, ValueError:
             raise ValueError(
-                "invalid openai_tts key, timeout, or default voice configuration"
+                "invalid openai_tts key, timeout, default voice, "
+                "or permitted voice configuration"
             ) from None
         self.voices = tuple(
             TTSVoice(v, v, "und")
