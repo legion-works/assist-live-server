@@ -63,6 +63,7 @@ This provider does not select OpenAI STT or use `OPENAI_API_KEY`.
 |---|---|---|
 | `OPENAI_TTS_BASE_URL` | Necessary | HTTP or HTTPS base URL, without credentials, query parameters, or a fragment. |
 | `OPENAI_TTS_DEFAULT_VOICE` | Necessary | Default voice identifier. |
+| `OPENAI_TTS_LANGUAGE` | `en` | Language tag of each voice, for example `en`, `de`, or `en-US`. It must agree with the HA pipeline language. |
 | `OPENAI_TTS_VOICES` | No filter | Comma-separated list of permitted voices. The default voice must be in this list when set. |
 | `OPENAI_TTS_API_KEY_FILE` | No key | File with an optional bearer key. No key value goes in the configuration response. |
 | `OPENAI_TTS_TIMEOUT` | `15` | Positive, finite request limit in seconds for each sentence, with address resolution and the complete response. |
@@ -91,7 +92,8 @@ An expired health refresh has a 100 ms limit. The initial fetch has a 2 s limit.
 After an unsatisfactory refresh, the last-known list stays available, so HA can select the configured voice and use its usual fallback.
 Before a satisfactory fetch, the list contains the configured permitted voices, or only the default voice.
 The health response has no field for the age or freshness of this list.
-Voice entries use `und` because this route supplies no language metadata.
+This route supplies no language metadata, so each voice gets the `OPENAI_TTS_LANGUAGE` tag.
+A voice list with the `und` tag does not agree with an HA pipeline language, so HA refuses the TTS step.
 
 ### Local-only health state
 

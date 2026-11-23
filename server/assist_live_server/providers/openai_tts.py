@@ -4,6 +4,7 @@ import json
 import logging
 import math
 import os
+import re
 import wave
 from collections.abc import AsyncGenerator, AsyncIterator
 from pathlib import Path
@@ -42,6 +43,10 @@ class OpenAITTSError(RuntimeError):
     pass
 
 
+# A language tag such as en, de, en-US, or en_US. The HTTP route gives no language.
+LANGUAGE = re.compile(r"[a-z]{2,3}(?:[-_][A-Za-z0-9]{2,8}){0,3}")
+
+
 class OpenAITTSProvider:
     provider_id = "openai_tts"
 
@@ -50,6 +55,7 @@ class OpenAITTSProvider:
         self._local_only = local_only
         self._resolver = resolver
         self.default_voice = os.environ.get("OPENAI_TTS_DEFAULT_VOICE", "")
+        self.language = os.environ.get("OPENAI_TTS_LANGUAGE", "en")
         self.voices: tuple[TTSVoice, ...] = ()
         self._next_refresh = 0.0
         self.invalid_voice_names_total = 0
@@ -64,6 +70,8 @@ class OpenAITTSProvider:
                     raise ValueError
                 if any(not 32 <= ord(c) <= 126 for c in self._api_key):
                     raise ValueError
+            if not LANGUAGE.fullmatch(self.language):
+                raise ValueError
             self._timeout = float(os.environ.get("OPENAI_TTS_TIMEOUT", "15"))
             if not math.isfinite(self._timeout) or self._timeout <= 0:
                 raise ValueError
@@ -87,11 +95,11 @@ class OpenAITTSProvider:
                 raise ValueError
         except OSError, UnicodeError, ValueError:
             raise ValueError(
-                "invalid openai_tts key, timeout, default voice, "
+                "invalid openai_tts key, timeout, language, default voice, "
                 "or permitted voice configuration"
             ) from None
         self.voices = tuple(
-            TTSVoice(v, v, "und")
+            TTSVoice(v, v, self.language)
             for v in dict.fromkeys(self._allowlist or (self.default_voice,))
         )
         if self._api_key and self._url.scheme == "http":
@@ -178,7 +186,7 @@ class OpenAITTSProvider:
             selected = [v for v in names if not self._allowlist or v in self._allowlist]
             if self.default_voice not in selected:
                 raise ValueError("invalid openai_tts default voice")
-            self.voices = tuple(TTSVoice(v, v, "und") for v in selected)
+            self.voices = tuple(TTSVoice(v, v, self.language) for v in selected)
         except TimeoutError, OpenAITTSError:
             return
         except ValueError, TypeError, KeyError:

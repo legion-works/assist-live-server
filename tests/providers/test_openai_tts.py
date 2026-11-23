@@ -724,7 +724,7 @@ def test_health_voices_are_filtered_and_cached_with_bounded_refresh(monkeypatch)
                     )
                     body = await response.json()
                     assert body["capabilities"]["tts_voices"] == [
-                        {"id": "voice-a", "name": "voice-a", "language": "und"}
+                        {"id": "voice-a", "name": "voice-a", "language": "en"}
                     ]
                     assert body["capabilities"]["tts_default_voice"] == "voice-a"
                     assert body["destinations"]["tts"] == "local"

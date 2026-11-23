@@ -4705,3 +4705,12 @@ With the `app.py` and `config.py` change removed, the same test gives a failure 
 The configuration error for a rejected voice name also names the permitted voice list as a possible cause.
 The protocol document `docs/protocol.md` has a new statement about a provider push that cancellation stops. The speaker audio can then be one push shorter than the `final` audio.
 The speaker-audio record above starts its commands with `idle.sh`. That is the idle-CPU wrapper that earlier records call `idle-run.sh`.
+
+## TTS server voice language (2026-11-23 UTC)
+
+The household server showed the TTS server voices with the language `und`. The HA integration then refuses an `en` pipeline, because `und` agrees with no pipeline language.
+The setting `OPENAI_TTS_LANGUAGE` gives one tag to all voices, with `en` as the default. An invalid tag is a named configuration error.
+
+The new language file gives `16 passed`. With the provider change removed, the same file gives `15 failed, 1 passed`.
+The one satisfactory result is the `und` tag, which the earlier code also gave.
+The four HTTP TTS and destination test files give `113 passed`. Ruff and mypy give satisfactory results for all files.
