@@ -100,7 +100,7 @@ The words "next", "skip", and "replay" are complete media commands in the templa
 The complete template verbs `dock`, `mow`, `mute`, `pause`, `resume`, `stop`, `unmute`, and `unpause` also keep this behavior.
 The words `cancel` and `continue` stay complete because they can be one-word replies in a dialog.
 The query verbs `are`, `do`, and `is` are not opening command verbs in this rule.
-See the [public design](https://github.com/legion-works/assist-live/blob/6f067ba/docs/design.md#end-of-turn-and-stt-fallback), `docs/design.md`.
+See the [public design](https://github.com/legion-works/assist-live/blob/380a0e9/docs/design.md#end-of-turn-and-stt-fallback), `docs/design.md`.
 
 This text rule does not parse grammar. For example, "turn off the light and turn on" contains an earlier verb from that set.
 The rule can accept that unfinished command. Smart Turn and the minimum time without voice apply.
