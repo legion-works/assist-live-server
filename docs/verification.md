@@ -4714,3 +4714,57 @@ The setting `OPENAI_TTS_LANGUAGE` gives one tag to all voices, with `en` as the 
 The new language file gives `16 passed`. With the provider change removed, the same file gives `15 failed, 1 passed`.
 The one satisfactory result is the `und` tag, which the earlier code also gave.
 The four HTTP TTS and destination test files give `113 passed`. Ruff and mypy give satisfactory results for all files.
+
+## Test time limits with high host load (2026-11-23 UTC)
+
+A landing run on a loaded host gave seven failures in `test_event_store.py` and `test_hints.py`.
+Each failure came from SQLite work or connection setup in a short wall-clock window.
+
+Waits for the SQLite writer use a 60 s hang guard.
+Three tests have a protocol limit that also holds SQLite work or the device handshake.
+These tests stop the event-loop clock while that work runs. The test helper is `tests/loop_clock.py`.
+The 2 s device result limit, the 600 ms message deadline, and the 50 ms test value of the first-event deadline do not change.
+
+A stopped clock starts again after 30 s. Thus a store call that does not end gives a failure at the hang guard.
+The websocket case of `test_event_to_store_to_client` also sends a ping after the first event.
+It must receive a pong, not a close frame. This check has no time window.
+
+A scratch plugin added a wait where the host load occurred.
+Each class gave a failure before the repair and a satisfactory result after the repair with the same wait:
+
+| Class | Added wait | Before | After |
+|---|---|---|---|
+| SQLite event commit | 2.5 s in each event commit | `TimeoutError` at the 2 s window | satisfactory |
+| SQLite maintenance | 2.5 s in each maintenance call | `TimeoutError` at the 2 s window | satisfactory |
+| SQLite turn open | 1.2 s in each turn open | `TimeoutError` at the 2 s window | satisfactory |
+| Device result limit that holds the commit | 2.5 s in each event commit | `TimeoutError` at the 1 s or 2 s window | satisfactory |
+| First-event window | 0.2 s stop of the event loop before the first send | `TimeoutError` at the 1 s window | satisfactory |
+| Message deadline that holds SQLite work | 0.35 s in each turn read and maintenance call | `message deadline exceeded` | satisfactory |
+| Outer startup guard | 3.5 s after service startup | `TimeoutError` at the 3 s guard | satisfactory |
+
+Without the clock stop, the three protocol-limit classes give failures with the same wait.
+Thus the hang guard alone does not repair them.
+
+Six production mutations ran in scratch copies. Each mutation gives a failure in its repaired test:
+
+| Mutation | Test | Result |
+|---|---|---|
+| Maintenance loop stops after an error | `test_maintenance_recovers_after_store_error` | `TimeoutError` at the 60 s hang guard |
+| Store error gives an accepted result | `test_worker_store_error_resolves_result_and_accepts_next_event` | assertion, 0.63 s |
+| Server closes the device after an accepted event | `test_event_to_store_to_client[websocket]` | `DEVICE_SOCKET_STAYS_OPEN`, 0.40 s |
+| First-event deadline stays after authentication | `test_authenticated_device_outlives_first_event_deadline` | assertion `1 == 2` on accepted events |
+| Server does not send the timing-write refusal | `test_turn_removed_between_route_check_and_hint_snapshot_keeps_store_refusal` | `DID NOT RAISE ProtocolError`, 0.23 s |
+| Superseded hint build is not cancelled | `test_pending_hint_builds_are_joined_and_superseded_lists_do_not_publish[False]` | `TimeoutError` at the 60 s hang guard |
+
+Four mutations give a fast failure with the test name.
+The maintenance mutation and the hint-build mutation give a failure only at the 60 s hang guard.
+In the hint-build case, the 1 s cancellation wait gives the first error. The cleanup then waits for the build that was not cancelled.
+
+The repaired files give `28 passed` in `test_event_store.py`, `57 passed` in `test_hints.py`, and `3 passed` in `test_loop_clock.py`.
+Ruff format and Ruff check give satisfactory results on the four changed files.
+The first test runs used a cgroup with write limits. Subsequent runs used the host test queue without write limits. No production code changes.
+
+The cross-family review found a timing fault in the helper test.
+The test read the loop clock before the monotonic clock. A scheduler pause between the two reads could then give an incorrect failure.
+The repaired helper test reads the monotonic clock first and last.
+With a 20 ms pause at the first loop-clock read, the earlier test gives `1 failed` and the repaired test gives `1 passed`.

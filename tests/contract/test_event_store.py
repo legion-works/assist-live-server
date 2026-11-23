@@ -9,6 +9,11 @@ from aiohttp import ClientSession, UnixConnector, web
 from assist_live_client import AssistLiveClient, TimingEvent, TurnOpen
 from assist_live_client.protocol import ProtocolError, encode_control
 
+from tests.loop_clock import LoopClock
+
+# Hang guard only: SQLite writer work under host load is not timed behavior.
+HANG_GUARD = 60
+
 
 @asynccontextmanager
 async def service(
@@ -155,7 +160,7 @@ def test_worker_store_error_resolves_result_and_accepts_next_event(
             results = [asyncio.get_running_loop().create_future() for _ in range(2)]
             for seq, result in enumerate(results):
                 assert ingress.accept(packet(seq), result=result)
-            async with asyncio.timeout(2):
+            async with asyncio.timeout(HANG_GUARD):
                 assert await asyncio.gather(*results) == [False, True]
                 await ingress.queue.join()
             assert ingress.worker_errors == 1
@@ -251,7 +256,7 @@ def test_maintenance_recovers_after_store_error(tmp_path, monkeypatch, caplog):
 
         monkeypatch.setattr(SQLiteStore, "maintain", broken)
         async with service(tmp_path) as (client, session, _, _, _):
-            async with asyncio.timeout(2):
+            async with asyncio.timeout(HANG_GUARD):
                 await recovered.wait()
             async with session.get(
                 "http://service.invalid/metrics", headers=client._headers
@@ -291,7 +296,7 @@ def test_concurrent_identical_open_turn_returns_success(tmp_path, monkeypatch):
                 ) as response:
                     return response.status
 
-            async with asyncio.timeout(2):
+            async with asyncio.timeout(HANG_GUARD):
                 assert sorted(await asyncio.gather(post(), post())) == [200, 200]
 
     asyncio.run(run())
@@ -341,7 +346,7 @@ def test_shutdown_counts_inflight_and_queued_drops_and_resolves_results(
 
 
 @pytest.mark.parametrize("adapter", ["udp", "websocket"])
-def test_event_to_store_to_client(tmp_path, capsys, adapter):
+def test_event_to_store_to_client(tmp_path, capsys, monkeypatch, adapter):
     async def run():
         async with service(tmp_path, udp=adapter == "udp") as (
             client,
@@ -351,6 +356,10 @@ def test_event_to_store_to_client(tmp_path, capsys, adapter):
             address,
         ):
             from assist_live_server.app import UDP_ADDRESS
+
+            # The 2 s device result limit also holds the SQLite commit.
+            # The commit time under host load is not the behavior of this test.
+            LoopClock(monkeypatch).exclude_store(monkeypatch, store)
 
             if adapter == "udp":
                 (
@@ -364,26 +373,38 @@ def test_event_to_store_to_client(tmp_path, capsys, adapter):
                     transport.sendto(packet(seq, stage))
             else:
                 assert address is None and UDP_ADDRESS is not None
-                ws = await session.ws_connect("http://service.invalid/v1/device")
+                ws = await session.ws_connect(
+                    "http://service.invalid/v1/device", autoping=False
+                )
 
                 async def send(seq, stage):
                     await ws.send_bytes(packet(seq, stage))
 
             try:
                 await send(0, "wake_detected")
-                async with asyncio.timeout(2):
+                async with asyncio.timeout(HANG_GUARD):
                     await store.changed.wait()
+                if adapter == "websocket":
+                    from aiohttp import WSMsgType
+
+                    # The server sends a close frame before it can reply to a
+                    # later ping. A pong shows that the device socket stays
+                    # open after the accepted event, without a time window.
+                    await ws.ping()
+                    async with asyncio.timeout(HANG_GUARD):
+                        reply = await ws.receive()
+                    assert reply.type == WSMsgType.PONG, "DEVICE_SOCKET_STAYS_OPEN"
                 turn = TurnOpen(str(uuid7()), "satellite-a", "voice", None, None)
                 await client.open_turn(turn)
                 wake_stream = client.events(turn.satellite, 0)
-                async with asyncio.timeout(2):
+                async with asyncio.timeout(HANG_GUARD):
                     wake = await anext(wake_stream)
                 await wake_stream.aclose()
                 assert wake["event"]["stage"] == "wake_detected"
                 assert wake["event"]["turn_id"] == turn.turn_id
                 await send(1, "playback_end")
                 stream = client.events(turn.satellite, wake["event_id"])
-                async with asyncio.timeout(2):
+                async with asyncio.timeout(HANG_GUARD):
                     end = await anext(stream)
                 await stream.aclose()
                 assert end["event"]["stage"] == "playback_end"
@@ -542,10 +563,10 @@ def test_application_restart_loads_durable_replay_before_ingress(tmp_path):
                 ]:
                     before = ingress.accepted
                     assert ingress.accept(raw)
-                    async with asyncio.timeout(2):
+                    async with asyncio.timeout(HANG_GUARD):
                         await ingress.queue.join()
                     assert ingress.accepted - before == int(expected)
-                async with asyncio.timeout(2):
+                async with asyncio.timeout(HANG_GUARD):
                     await ingress.queue.join()
             finally:
                 await runner.cleanup()
@@ -707,21 +728,34 @@ def test_authenticated_device_outlives_first_event_deadline(tmp_path, monkeypatc
 
     async def run():
         async with service(tmp_path) as (_, session, store, ingress, _):
-            async with session.ws_connect("http://service.invalid/v1/device") as ws:
-                await ws.send_bytes(packet(0))
-                async with asyncio.timeout(1):
-                    await store.changed.wait()
-                    await ingress.queue.join()
+            clock = LoopClock(monkeypatch)
+            clock.exclude_store(monkeypatch, store)
+            # The 50 ms first-event deadline starts at the handshake. The clock
+            # stops until the first event is stored, so host load cannot use
+            # that window before the device authenticates.
+            with clock.stopped():
+                ws = await session.ws_connect("http://service.invalid/v1/device")
+                try:
+                    await ws.send_bytes(packet(0))
+                    async with asyncio.timeout(HANG_GUARD):
+                        await store.changed.wait()
+                        await ingress.queue.join()
+                except BaseException:
+                    await ws.close()
+                    raise
+            try:
                 store.changed.clear()
                 loop = asyncio.get_running_loop()
                 elapsed = loop.create_future()
                 loop.call_later(0.1, elapsed.set_result, None)
                 await elapsed
                 await ws.send_bytes(packet(1))
-                async with asyncio.timeout(1):
+                async with asyncio.timeout(HANG_GUARD):
                     await store.changed.wait()
                     await ingress.queue.join()
                 assert ingress.accepted == 2
+            finally:
+                await ws.close()
 
     asyncio.run(run())
 

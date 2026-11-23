@@ -17,6 +17,12 @@ from assist_live_client import AssistLiveClient
 from assist_live_server.app import create_app
 from assist_live_server.auth import Registry
 
+from tests.loop_clock import LoopClock
+
+# Hang guard only: service startup, child interpreters, and SQLite work under
+# host load are not timed behavior.
+HANG_GUARD = 60
+
 
 @asynccontextmanager
 async def service(tmp_path, store=None, providers=None):
@@ -553,7 +559,7 @@ asyncio.run(run())
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await asyncio.wait_for(process.communicate(), 10)
+            stdout, stderr = await asyncio.wait_for(process.communicate(), HANG_GUARD)
             assert process.returncode == 0, stdout.decode() + stderr.decode()
 
     asyncio.run(run())
@@ -751,7 +757,7 @@ def test_pending_hint_builds_are_joined_and_superseded_lists_do_not_publish(
                 assert seen == [("newest lamp",)], "LATEST_HINT_GENERATION_ONLY"
         assert canceled.is_set(), "SHUTDOWN_MUST_CANCEL_AND_JOIN_HINT_BUILDS"
 
-    asyncio.run(asyncio.wait_for(run(), 3))
+    asyncio.run(asyncio.wait_for(run(), HANG_GUARD))
 
 
 def test_missing_ready_list_uses_empty_hints_without_lookup_miss(tmp_path, monkeypatch):
@@ -868,10 +874,14 @@ def test_turn_removed_between_route_check_and_hint_snapshot_keeps_store_refusal(
 
         monkeypatch.setattr(store, "get_turn", get_turn)
         monkeypatch.setattr(store, "append", append)
+        # The client waits 600 ms for `negotiated` while the server holds the
+        # route check. The SQLite reads and the turn removal in that window
+        # are setup of the race, so the loop clock stops while they run.
+        LoopClock(monkeypatch).exclude_store(monkeypatch, store)
         try:
             async with service(tmp_path, store, factory) as (client, http):
                 await client.set_hints("satellite-a", ["lamp"])
-                await asyncio.wait_for(prepared.wait(), 2)
+                await asyncio.wait_for(prepared.wait(), HANG_GUARD)
                 turn = TurnOpen(str(uuid7()), "satellite-a", "voice", None, None)
                 await client.open_turn(turn)
 
@@ -881,10 +891,10 @@ def test_turn_removed_between_route_check_and_hint_snapshot_keeps_store_refusal(
                 async def consume():
                     return [r async for r in client.stt(turn.turn_id, audio())]
 
-                async with asyncio.timeout(8):
+                async with asyncio.timeout(HANG_GUARD):
                     task = asyncio.create_task(consume())
                     try:
-                        await asyncio.wait_for(route_checked.wait(), 2)
+                        await asyncio.wait_for(route_checked.wait(), HANG_GUARD)
                         expired = store.now_ns() + store.retention_ns + 60_000_000_000
                         store.now_ns = lambda: expired
                         await store.maintain()
@@ -895,7 +905,7 @@ def test_turn_removed_between_route_check_and_hint_snapshot_keeps_store_refusal(
                         with pytest.raises(
                             ProtocolError, match="audio refused"
                         ) as error:
-                            await asyncio.wait_for(task, 2)
+                            await asyncio.wait_for(task, HANG_GUARD)
                         assert error.value.kind == "refused", (
                             "REMOVED_TURN_AUDIO_REFUSED"
                         )
