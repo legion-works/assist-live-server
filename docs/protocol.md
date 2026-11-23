@@ -809,12 +809,12 @@ Socket writes wait for flow control. No route makes an unbounded queue.
 
 `ProtocolError.kind` gives the error class without a message-text check:
 
-- `refused`: the server refuses an HTTP request, negotiation, or audio request.
+- `refused`: the client refuses a redirect, or the server refuses an HTTP request, negotiation, or audio request.
 - `closed`: a transport error or a closed stream stops the operation.
 - `timeout`: an operation does not complete before its deadline.
 - `malformed`: a request, response, or stream has invalid data.
 
-The `ProtocolError` class and message strings stay unchanged.
+The client does not follow redirects for HTTP requests or WebSocket handshakes. This rule also applies when the scheme, host, and port do not change.
 `ProtocolError(*args)` keeps its arguments and defaults to `kind=None`.
 For callers, `None` means an unclassified error. All client error sites set `kind`.
 

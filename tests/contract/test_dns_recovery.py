@@ -251,17 +251,17 @@ def test_resolve_consumes_original_deadline(monkeypatch, turn_id, entry, stage):
             timeout=aiohttp.ClientTimeout(total=60),
         ) as session:
             method = "request" if entry == "health" else "ws_connect"
-            original_connect = getattr(session, method)
+            original_connect = getattr(aiohttp.ClientSession, method)
 
             @asynccontextmanager
-            async def connect(*args, **kwargs):
+            async def connect(connection, *args, **kwargs):
                 if kwargs["url"].raw_host == "127.0.0.1":
                     retry_entered.set()
                     await retry_release.wait()
-                async with original_connect(*args, **kwargs) as response:
+                async with original_connect(connection, *args, **kwargs) as response:
                     yield response
 
-            monkeypatch.setattr(session, method, connect)
+            monkeypatch.setattr(aiohttp.ClientSession, method, connect)
             client = AssistLiveClient(
                 "http://service.invalid", "test-token", session=session
             )

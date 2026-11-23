@@ -4768,3 +4768,11 @@ The cross-family review found a timing fault in the helper test.
 The test read the loop clock before the monotonic clock. A scheduler pause between the two reads could then give an incorrect failure.
 The repaired helper test reads the monotonic clock first and last.
 With a 20 ms pause at the first loop-clock read, the earlier test gives `1 failed` and the repaired test gives `1 passed`.
+
+## Client redirects (2026-11-23 UTC)
+
+The client refuses all redirects for the event and audio WebSockets. The same rule applies to HTTP requests.
+
+`tests/contract/test_redirects.py` checks WebSocket status `307` and HTTP status `307` and `308` for a turn request. It checks that the client does not look up the other host. A WebSocket test without a redirect checks that the supplied session and connector stay open.
+
+Without the refusal, four WebSocket tests give unsatisfactory results. The control tests give satisfactory results. The client test suite gives `675 passed` with `ResourceWarning` as an error.

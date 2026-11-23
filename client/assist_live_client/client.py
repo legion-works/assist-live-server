@@ -40,6 +40,16 @@ from .protocol import (
 )
 
 
+async def _refuse_redirects(
+    request: aiohttp.ClientRequest, handler: aiohttp.ClientHandlerType
+) -> aiohttp.ClientResponse:
+    response = await handler(request)
+    if 300 <= response.status < 400:
+        response.close()
+        raise ProtocolError("redirect refused", kind="refused")
+    return response
+
+
 class AssistLiveClient:
     def __init__(
         self, url: str, token: str, *, session: aiohttp.ClientSession | None = None
@@ -150,6 +160,28 @@ class AssistLiveClient:
                     )
             # HTTP keeps its body deadline. WebSockets keep their stream deadlines.
             yield response
+
+    @contextlib.asynccontextmanager
+    async def _websocket(
+        self, path: str, *, max_msg_size: int
+    ) -> AsyncIterator[aiohttp.ClientWebSocketResponse]:
+        base = self._connection()
+        connector = base.connector
+        if connector is None or connector.closed:
+            raise ProtocolError("session closed", kind="closed")
+        # aiohttp does not accept redirect options in ws_connect.
+        async with (
+            aiohttp.ClientSession(
+                connector=connector,
+                connector_owner=False,
+                timeout=base.timeout,
+                middlewares=(_refuse_redirects,),
+            ) as session,
+            self._connect(
+                session.ws_connect, path, max_msg_size=max_msg_size, compress=0
+            ) as ws,
+        ):
+            yield ws
 
     async def _request(
         self,
@@ -324,12 +356,7 @@ class AssistLiveClient:
         identifier(satellite)
         unsigned(after_event_id)
         try:
-            async with self._connect(
-                self._connection().ws_connect,
-                "/v1/events",
-                max_msg_size=MAX_CONTROL,
-                compress=0,
-            ) as ws:
+            async with self._websocket("/v1/events", max_msg_size=MAX_CONTROL) as ws:
                 await ws.send_json(
                     {
                         "type": "subscribe",
@@ -412,12 +439,10 @@ class AssistLiveClient:
         sent_characters = 0
         previous_text_end = 0
         try:
-            async with self._connect(
-                self._connection().ws_connect,
+            async with self._websocket(
                 "/v1/audio",
                 # aiohttp refuses equality. The protocol maximum is inclusive.
                 max_msg_size=MAX_AUDIO + 1,
-                compress=0,
             ) as ws:
                 fields: dict[str, object] = {
                     "mode": mode,
