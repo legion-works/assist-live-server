@@ -87,6 +87,64 @@ async def check_websocket_redirect(turn_id, route, same_origin):
         assert not connector.closed
 
 
+@pytest.mark.parametrize("route", ["events", "audio"])
+def test_websocket_on_closed_session_is_closed_error(turn_id, route):
+    asyncio.run(check_closed_session(turn_id, route))
+
+
+async def check_closed_session(turn_id, route):
+    resolver = LocalResolver()
+    session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(resolver=resolver))
+    await session.close()
+    client = AssistLiveClient("http://service.invalid:9", "test-token", session=session)
+    async with aclosing(
+        client.events("satellite-a")
+        if route == "events"
+        else client.stt(turn_id, no_audio())
+    ) as stream:
+        with pytest.raises(ProtocolError) as error:
+            await anext(stream)
+    assert (error.value.kind, str(error.value), resolver.hosts) == (
+        "closed",
+        "session closed",
+        [],
+    )
+
+
+def test_websocket_sends_supplied_default_headers(turn_id):
+    asyncio.run(check_default_headers(turn_id))
+
+
+async def check_default_headers(turn_id):
+    seen = []
+
+    async def events(request):
+        seen.append(request.headers.get("User-Agent"))
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        await ws.receive_json()
+        await ws.close()
+        return ws
+
+    app = web.Application()
+    app.router.add_get("/v1/events", events)
+    connector = aiohttp.TCPConnector(resolver=LocalResolver())
+    async with (
+        TestServer(app, host="127.0.0.1") as server,
+        aiohttp.ClientSession(
+            connector=connector, headers={"User-Agent": "caller-agent"}
+        ) as session,
+        AssistLiveClient(
+            f"http://service.invalid:{server.port}", "test-token", session=session
+        ) as client,
+    ):
+        async with aclosing(client.events("satellite-a")) as stream:
+            # The test server closes after the subscribe message, so the stream ends.
+            with pytest.raises(StopAsyncIteration):
+                await anext(stream)
+    assert seen == ["caller-agent"]
+
+
 def test_direct_websocket_keeps_supplied_connector_open(turn_id):
     asyncio.run(check_direct_websocket(turn_id))
 

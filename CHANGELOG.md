@@ -28,7 +28,7 @@ The project is experimental. The client `0.1.0a1` is a pre-release on PyPI. No s
 - Add typed TTS items, optional request-text positions, default-voice requests, and health metadata for voices, destinations, and name hints.
 - Add satellite name-list updates, late-open timestamps, sentence timing records, and the `fallback_unavailable` code.
 - Classify protocol errors as refused, closed, timeout, or malformed. Retry a DNS failure one time through a new system lookup before the initial deadline.
-- Refuse redirects for the event and audio WebSockets, also when the scheme, host, and port do not change.
+- Refuse redirects for the event and audio WebSockets, also when the scheme, host, and port do not change. A WebSocket handshake uses only the connector, timeout, and default headers of the supplied session.
 - Accept the Home Assistant-compatible `aiohttp>=3.14.4,<4` dependency without server model runtimes.
 
 ### Packaging

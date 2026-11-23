@@ -174,6 +174,7 @@ class AssistLiveClient:
             aiohttp.ClientSession(
                 connector=connector,
                 connector_owner=False,
+                headers=base.headers,
                 timeout=base.timeout,
                 middlewares=(_refuse_redirects,),
             ) as session,
