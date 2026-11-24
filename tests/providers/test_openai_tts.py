@@ -49,9 +49,18 @@ def loopback_only(monkeypatch):
     monkeypatch.setattr(socket, "getaddrinfo", checked_resolve)
 
 
+FORMAT = TTSFormat("pcm_s16le", 22050, 1, 2)
+
+
 async def parts(*values):
     for value in values:
         yield value
+
+
+async def after_format(stream):
+    # The format comes before the first synthesis request, so a failure comes next.
+    assert await anext(stream) == FORMAT
+    return await anext(stream)
 
 
 def wav_bytes(rate=22050, channels=1, width=2, pcm=b"\x01\x00" * 20000):
@@ -112,8 +121,8 @@ def test_two_sentences_use_piper_text_positions_and_header_rate(monkeypatch):
             factory = await configured(monkeypatch, url)
             provider = factory.tts("openai_tts")
             stream = provider.stream(parts("**One**. ", "Two!"), "voice-a")
-            assert await anext(stream) == TTSFormat("pcm_s16le", 22050, 1, 2)
-            assert requests == [{"input": "One.", "voice": "voice-a"}]
+            assert await anext(stream) == FORMAT
+            assert requests == []
             items = [item async for item in stream]
             assert requests == [
                 {"input": "One.", "voice": "voice-a"},
@@ -140,8 +149,13 @@ def test_unknown_voice_stops_before_text_or_http(monkeypatch):
                 raise AssertionError("unknown voice read text")
                 yield "Never."
 
+            items = []
             with pytest.raises(ValueError, match="unknown TTS voice"):
-                await anext(factory.tts("openai_tts").stream(forbidden(), "unknown"))
+                async for item in factory.tts("openai_tts").stream(
+                    forbidden(), "unknown"
+                ):
+                    items.append(item)
+            assert items == []
             assert requests == []
 
     asyncio.run(run())
@@ -226,13 +240,15 @@ def test_bad_wav_is_named_failure_before_audio(monkeypatch, body):
         async with speech_server(handler) as (url, requests, _):
             factory = await configured(monkeypatch, url)
             with pytest.raises(RuntimeError, match="openai_tts_bad_wav"):
-                await anext(factory.tts("openai_tts").stream(parts("One."), "voice-a"))
+                await after_format(
+                    factory.tts("openai_tts").stream(parts("One."), "voice-a")
+                )
             assert len(requests) == 1
 
     asyncio.run(run())
 
 
-@pytest.mark.parametrize("failure", ["status", "rate", "connect", "bad_wav"])
+@pytest.mark.parametrize("failure", ["status", "connect", "bad_wav"])
 def test_mid_reply_failure_keeps_only_completed_sentence_no_retry(monkeypatch, failure):
     async def handler(request, count):
         if count == 1:
@@ -242,7 +258,7 @@ def test_mid_reply_failure_keeps_only_completed_sentence_no_retry(monkeypatch, f
             return web.Response()
         return web.Response(
             status=503 if failure == "status" else 200,
-            body=b"invalid" if failure == "bad_wav" else wav_bytes(rate=16000),
+            body=b"invalid" if failure == "bad_wav" else wav_bytes(),
         )
 
     async def run():
@@ -291,7 +307,9 @@ def test_non_200_with_valid_wav_is_not_audio(monkeypatch, status):
         async with speech_server(handler) as (url, requests, _):
             factory = await configured(monkeypatch, url)
             with pytest.raises(RuntimeError, match="openai_tts_http_error"):
-                await anext(factory.tts("openai_tts").stream(parts("One."), "voice-a"))
+                await after_format(
+                    factory.tts("openai_tts").stream(parts("One."), "voice-a")
+                )
             assert len(requests) == 1
 
     asyncio.run(run())
@@ -326,7 +344,8 @@ def test_timeout_starts_existing_fallback_error_path(monkeypatch):
             try:
                 await asyncio.wait_for(entered.wait(), 1)
                 messages = await asyncio.wait_for(task, 1)
-                assert [i["code"] for i in messages] == ["tts_failed"]
+                assert [i["type"] for i in messages] == ["format", "error"]
+                assert messages[-1]["code"] == "tts_failed"
                 assert len(requests) == 1
             finally:
                 release.set()
@@ -365,7 +384,7 @@ def test_public_address_refused_at_config_and_each_connection(monkeypatch):
             )
             answers = ("192.0.2.1",)
             with pytest.raises(RuntimeError, match="openai_tts_destination_refused"):
-                await anext(provider.stream(parts("One."), "voice-a"))
+                await after_format(provider.stream(parts("One."), "voice-a"))
             assert requests == []
 
     asyncio.run(run())
@@ -387,30 +406,114 @@ def test_header_rates_use_compatible_format_and_preserve_duration(monkeypatch, r
                     parts("One."), "voice-a"
                 )
             ]
-            output_rate = 16000 if rate == 16000 else 22050
-            assert items[0] == TTSFormat("pcm_s16le", output_rate, 1, 2)
+            assert items[0] == FORMAT
+            assert [i for i in items if isinstance(i, TTSFormat)] == [FORMAT]
             audio = b"".join(i.data for i in items if isinstance(i, TTSAudio))
-            assert len(audio) == 2 * output_rate
-            if rate in {16000, 22050}:
+            assert len(audio) == 2 * 22050
+            if rate == 22050:
                 assert audio == pcm
 
     asyncio.run(run())
 
 
-def test_later_header_rate_change_fails_even_when_output_rates_match(monkeypatch):
+def test_format_comes_before_the_first_speech_response(monkeypatch):
+    async def run():
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def handler(request, count):
+            entered.set()
+            await release.wait()
+            return web.Response(body=wav_bytes())
+
+        async with speech_server(handler) as (url, requests, _):
+            factory = await configured(monkeypatch, url)
+            stream = factory.tts("openai_tts").stream(parts("One."), "voice-a")
+            gateway = TTSGateway(
+                factory.tts, provider="openai_tts", destination="local"
+            )
+            messages = gateway.stream(str(uuid7()), parts("One."), "voice-a")
+            try:
+                assert await asyncio.wait_for(anext(stream), 1) == FORMAT
+                message = await asyncio.wait_for(anext(messages), 1)
+                assert (message["type"], message["rate"]) == ("format", 22050)
+                pending = asyncio.create_task(anext(stream))
+                await asyncio.wait_for(entered.wait(), 1)
+                assert not pending.done()
+                release.set()
+                assert isinstance(await asyncio.wait_for(pending, 1), TTSAudio)
+                rest = [i async for i in messages]
+                assert [i for i in rest if isinstance(i, dict)][-1]["type"] == (
+                    "sentence_end"
+                )
+            finally:
+                release.set()
+                await stream.aclose()
+                await messages.aclose()
+
+    asyncio.run(run())
+
+
+def test_mixed_sentence_rates_all_become_one_22050_hz_reply(monkeypatch):
+    rates = {1: 16000, 2: 24000, 3: 22050, 4: 16000}
+
     async def handler(request, count):
-        return web.Response(body=wav_bytes(rate=24000 if count == 1 else 48000))
+        rate = rates[count]
+        return web.Response(body=wav_bytes(rate=rate, pcm=b"\x10\x00" * rate))
 
     async def run():
         async with speech_server(handler) as (url, requests, _):
             factory = await configured(monkeypatch, url)
-            stream = factory.tts("openai_tts").stream(parts("One. Two."), "voice-a")
-            assert await anext(stream) == TTSFormat("pcm_s16le", 22050, 1, 2)
-            while not isinstance(await anext(stream), TTSSentenceEnd):
-                pass
-            with pytest.raises(RuntimeError, match="openai_tts_rate_changed"):
-                await anext(stream)
-            assert len(requests) == 2
+            items = [
+                i
+                async for i in factory.tts("openai_tts").stream(
+                    parts("One. Two. Three. Four."), "voice-a"
+                )
+            ]
+            assert items[0] == FORMAT
+            assert [i for i in items if isinstance(i, TTSFormat)] == [FORMAT]
+            assert [i.sentence for i in items if isinstance(i, TTSSentenceEnd)] == [
+                0,
+                1,
+                2,
+                3,
+            ]
+            sentence = []
+            sizes = []
+            for item in items[1:]:
+                if isinstance(item, TTSAudio):
+                    sentence.append(item.data)
+                elif isinstance(item, TTSSentenceEnd):
+                    sizes.append(len(b"".join(sentence)))
+                    sentence = []
+            assert sizes == [2 * 22050] * 4
+            assert len(requests) == 4
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("text", [(), ("",), ("   ",), (" \n\t", "  ")])
+def test_empty_text_gives_only_the_format_and_a_clean_end(monkeypatch, text):
+    async def run():
+        async with speech_server() as (url, requests, _):
+            factory = await configured(monkeypatch, url)
+            items = [
+                i
+                async for i in factory.tts("openai_tts").stream(parts(*text), "voice-a")
+            ]
+            assert items == [FORMAT]
+            gateway = TTSGateway(
+                factory.tts, provider="openai_tts", destination="local"
+            )
+            messages = [
+                i
+                async for i in gateway.stream(
+                    str(uuid7()), parts(*text), "voice-a", text_positions=True
+                )
+            ]
+            assert [i["type"] for i in messages] == ["format"]
+            assert messages[0]["rate"] == 22050
+            assert requests == []
 
     asyncio.run(run())
 
@@ -506,7 +609,9 @@ def test_response_size_is_bounded_before_audio(monkeypatch):
                 "assist_live_server.providers.openai_tts.MAX_WAV_BYTES", 100
             )
             with pytest.raises(RuntimeError, match="openai_tts_response_too_large"):
-                await anext(factory.tts("openai_tts").stream(parts("One."), "voice-a"))
+                await after_format(
+                    factory.tts("openai_tts").stream(parts("One."), "voice-a")
+                )
             assert len(requests) == 1
 
     asyncio.run(run())
@@ -525,6 +630,7 @@ def test_cancellation_starts_no_next_sentence(monkeypatch):
         async with speech_server(handler) as (url, requests, _):
             factory = await configured(monkeypatch, url)
             stream = factory.tts("openai_tts").stream(parts("One. Two."), "voice-a")
+            assert await anext(stream) == FORMAT
             task = asyncio.create_task(anext(stream))
             try:
                 await asyncio.wait_for(entered.wait(), 1)
@@ -618,6 +724,72 @@ def test_resampled_24khz_reply_is_accepted_by_real_typed_client(monkeypatch, tmp
                     assert [
                         i.text_end for i in items if isinstance(i, TTSSentenceEnd)
                     ] == [4, 9]
+                    turn_id = str(uuid7())
+                    await client.open_turn(
+                        TurnOpen(turn_id, "satellite-a", "tts_only", None, None)
+                    )
+                    blank = [
+                        i
+                        async for i in client.tts_stream(
+                            turn_id, parts(" \n "), text_positions=True
+                        )
+                    ]
+                    assert blank == [FORMAT]
+            finally:
+                store.close()
+
+    asyncio.run(run())
+
+
+def test_real_client_gets_format_before_synthesis_then_refusal(monkeypatch, tmp_path):
+    from assist_live_client import AssistLiveClient, TurnOpen
+    from assist_live_client.protocol import ProtocolError
+    from assist_live_server.app import create_app
+    from assist_live_server.auth import Registry
+    from assist_live_server.store import SQLiteStore
+
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def handler(request, count):
+        entered.set()
+        await release.wait()
+        return web.Response(status=503, body=wav_bytes())
+
+    async def run():
+        async with speech_server(handler) as (url, requests, _):
+            factory = await configured(monkeypatch, url)
+            store = SQLiteStore(tmp_path / "turns.sqlite3")
+            registry = Registry(replay_store=store)
+            registry.bind("satellite-a", "satellite-a", b"synthetic-device-secret")
+            registry.add_token("test-token", ["satellite-a"])
+            try:
+                async with TestClient(
+                    TestServer(create_app(registry, store, providers=factory))
+                ) as service:
+                    client = AssistLiveClient(
+                        str(service.make_url("/")).rstrip("/"),
+                        "test-token",
+                        session=service.session,
+                    )
+                    turn_id = str(uuid7())
+                    await client.open_turn(
+                        TurnOpen(turn_id, "satellite-a", "tts_only", None, None)
+                    )
+                    stream = client.tts_stream(turn_id, parts("One."))
+                    try:
+                        assert await asyncio.wait_for(anext(stream), 5) == FORMAT
+                        await asyncio.wait_for(entered.wait(), 5)
+                        assert not release.is_set()
+                        release.set()
+                        with pytest.raises(ProtocolError) as error:
+                            await asyncio.wait_for(anext(stream), 5)
+                        assert error.value.kind == "refused"
+                        assert str(error.value) == "audio refused"
+                    finally:
+                        release.set()
+                        await stream.aclose()
+                    assert len(requests) == 1
             finally:
                 store.close()
 
@@ -647,7 +819,9 @@ def test_key_file_is_used_but_absent_from_errors_health_metrics_and_records(
         async with speech_server(handler) as (url, _, _):
             factory = await configured(monkeypatch, url)
             with pytest.raises(RuntimeError) as error:
-                await anext(factory.tts("openai_tts").stream(parts("One."), "voice-a"))
+                await after_format(
+                    factory.tts("openai_tts").stream(parts("One."), "voice-a")
+                )
             rendered = "".join(traceback.format_exception(error.value))
             assert key not in rendered
             records = []

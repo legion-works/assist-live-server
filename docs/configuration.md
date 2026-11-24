@@ -79,6 +79,7 @@ Provider startup gives one warning without the key or URL. Use `https://` to enc
 The 15 s limit gives a cold model time to load and synthesize a short sentence.
 It is not a guarantee for a busy GPU queue.
 The TTS server must supply `GET /v1/audio/voices` and `POST /v1/audio/speech`.
+The reply format is always 22050 Hz mono PCM16. The server sends it before the first audio and changes each other source rate to 22050 Hz.
 The [provider contract](providers/tts-local.md#openai-compatible-http-provider) gives the voice cache and audio rules.
 
 Configuration and each connection use the same address checks as the speaker plug-in.

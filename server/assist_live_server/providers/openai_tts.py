@@ -248,24 +248,23 @@ class OpenAITTSProvider:
         await self.refresh_voices()
         if voice not in {v.id for v in self.voices}:
             raise ValueError("unknown TTS voice")
+        # The provider sends the reply format before the first synthesis request.
+        # A caller can then start playback before it gets the first sentence audio.
+        yield TTSFormat("pcm_s16le", 22050, 1, 2)
         sentence_stream = sentences(text)
         try:
             index = 0
-            reply_rate = None
             async for sentence, text_end in sentence_stream:
                 raw = await self._request(
                     "v1/audio/speech", {"input": sentence, "voice": voice}
                 )
                 audio_format, pcm = self._pcm(raw)
-                rate = audio_format.rate
-                if reply_rate is not None and reply_rate != rate:
-                    raise OpenAITTSError("openai_tts_rate_changed")
-                if rate not in {16000, 22050}:
-                    pcm = await asyncio.to_thread(self._resample, pcm, rate)
-                    audio_format = TTSFormat("pcm_s16le", 22050, 1, 2)
-                if reply_rate is None:
-                    reply_rate = rate
-                    yield audio_format
+                # The resampler changes each sentence on its own.
+                # Thus sentences of one reply can have different source rates.
+                if audio_format.rate != 22050:
+                    pcm = await asyncio.to_thread(
+                        self._resample, pcm, audio_format.rate
+                    )
                 for offset in range(0, len(pcm), MAX_PCM):
                     yield TTSAudio(pcm[offset : offset + MAX_PCM])
                 yield TTSSentenceEnd(index, text_end)

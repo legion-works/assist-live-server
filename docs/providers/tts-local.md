@@ -91,14 +91,23 @@ It does not send a list as `input` and does not retry a sentence.
 The TTS request is `POST /v1/audio/speech`, with JSON fields `input` and `voice`.
 The response must be a complete RIFF/WAVE file with uncompressed, mono, signed PCM16 audio.
 The provider reads the rate from the header and accepts source rates from 8000 through 192000 Hz.
-It refuses a truncated or empty file and a rate change between sentences, before it sends audio from that sentence.
+It refuses a truncated or empty file before it sends audio from that sentence.
+Different sentences of one reply can have different source rates.
 
 Each response has a 2945536-byte limit: 60 s of 24 kHz PCM16 audio plus 64 KiB for headers.
 The source audio also has a 60 s limit, independently of the response size. Audio stays in memory.
 These limits give a short sentence sufficient space without a large allocation from an untrusted response.
 
-The published client accepts only 16000 and 22050 Hz TTS audio.
-These two source rates stay unchanged. The provider changes other source rates to 22050 Hz.
+The reply format is always mono PCM16 at 22050 Hz.
+The provider sends this format after the voice check and before its first synthesis request.
+An unknown voice gives only the error, without a format.
+Thus the HA integration knows the format before it gets the first sentence audio.
+The provider changes each source rate other than 22050 Hz to 22050 Hz, also 16000 Hz.
+It changes each sentence on its own.
+
+The legacy bytes-only client accepts only 16 kHz and refuses this provider before audio. Use `tts_stream()`.
+Empty or whitespace-only text gives the format, no audio, and a usual end, without a synthesis request. The provider can refresh its voice list before that.
+
 One fixed-width, Kaiser-windowed sinc resampler does upsampling and downsampling at the lower Nyquist limit.
 It uses 128 input samples for each output sample, with float32 weights and sums.
 The event loop does not run sample-rate conversion.

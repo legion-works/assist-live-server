@@ -4776,3 +4776,39 @@ The client refuses all redirects for the event and audio WebSockets. The same ru
 `tests/contract/test_redirects.py` checks WebSocket status `307` and HTTP status `307` and `308` for a turn request. It checks that the client does not look up the other host. A WebSocket test without a redirect checks that the supplied session and connector stay open.
 
 Without the refusal, four WebSocket tests give unsatisfactory results. The control tests give satisfactory results. The client test suite gives `675 passed` with `ResourceWarning` as an error.
+
+## TTS server format before the first audio (2026-11-23 UTC)
+
+With a voice-clone TTS server, the first sentence audio can come after more than 2 s.
+The satellite firmware ends the reply when no reply audio starts in 2 s.
+The HA integration can start the reply with audio that has no sound only when it knows the format before the first audio.
+
+The `openai_tts` provider gives the format `pcm_s16le`, 22050 Hz, mono, 16-bit as its first item, after the voice check and before its first synthesis request.
+An unknown voice gives only the error, without a format, as before this change.
+The gateway sends a provider format as a `format` control immediately (`tts_gateway.py`, the `TTSFormat` branch of `stream`).
+The published client `0.1.0a1` gives this control to the caller immediately as `TTSFormat` in `tts_stream()`. No client change is necessary.
+
+The provider changes each source rate other than 22050 Hz to 22050 Hz, also 16000 Hz, for each sentence on its own.
+Thus a subsequent sentence at a different rate is not an error. The `openai_tts_rate_changed` error had no other use. This change removes it.
+
+Empty or whitespace-only text gives the format and no audio. The gateway and the client then give a usual end.
+Before this change, empty text gave no format, and the typed client refused the stream as malformed.
+
+A loopback test connects the typed client to the server app. The TTS server holds its synthesis response until the test releases it.
+The client gets the `TTSFormat` before the release. The TTS server then gives HTTP 503.
+The next client read gives `ProtocolError("audio refused")` with `kind="refused"`, from the gateway code `tts_failed`.
+
+The two HTTP TTS test files give `14 failed, 73 passed` with the provider of the base revision.
+The failures are the new and changed format, rate, empty-text, and client tests.
+With the change, the three HTTP TTS test files give `103 passed`.
+
+A scratch mutation sends the format after the first synthesis response, immediately before the first audio.
+It gives `10 failed, 77 passed`. The failures include the held-response provider and client tests and the empty-text tests.
+
+| Gate | Result |
+|---|---|
+| `task check` with the private denylist | Exit 0, `2755 passed, 1 skipped`. Gitleaks gives no leaks. `NOT CHECKED public tree`, because there is no sibling integration checkout. |
+| Python 3.14.2 floor with an isolated environment | Exit 0, `2755 passed, 1 skipped` |
+| Network-isolated suite | Exit 0, `2755 passed, 1 skipped` |
+
+The floor and isolated suites use the external turn-model cache. A first floor run without `ASSIST_LIVE_MODEL_CACHE` gave four model-cache failures. They are not related to this change.

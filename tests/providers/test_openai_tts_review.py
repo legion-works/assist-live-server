@@ -9,7 +9,7 @@ from aiohttp.test_utils import TestClient, TestServer
 from assist_live_client.models import TTSAudio, TTSSentenceEnd
 from assist_live_server.providers.openai_tts import OpenAITTSProvider
 
-from .test_openai_tts import configured, parts, speech_server, wav_bytes
+from .test_openai_tts import after_format, configured, parts, speech_server, wav_bytes
 from .test_openai_tts import loopback_only as loopback_only
 
 
@@ -152,7 +152,9 @@ def test_unsafe_configured_voice_cannot_seed_unavailable_catalog(
     asyncio.run(run())
 
 
-@pytest.mark.parametrize("rate, frequency", [(11025, 3000), (8000, 2000)])
+@pytest.mark.parametrize(
+    "rate, frequency", [(16000, 5000), (16000, 7000), (11025, 3000), (8000, 2000)]
+)
 def test_upsampling_suppresses_mirror_images(monkeypatch, rate, frequency):
     clock = np.arange(rate) / rate
     pcm = np.rint(12000 * np.sin(2 * np.pi * frequency * clock)).astype("<i2").tobytes()
@@ -258,7 +260,7 @@ def test_sentence_response_cap_is_sixty_seconds_plus_headers(monkeypatch):
         async with speech_server(handler) as (url, _, _):
             provider = (await configured(monkeypatch, url)).tts("openai_tts")
             with pytest.raises(RuntimeError, match="openai_tts_response_too_large"):
-                await anext(provider.stream(parts("One."), "voice-a"))
+                await after_format(provider.stream(parts("One."), "voice-a"))
 
     asyncio.run(run())
 
