@@ -814,7 +814,7 @@ Socket writes wait for flow control. No route makes an unbounded queue.
 - `timeout`: an operation does not complete before its deadline.
 - `malformed`: a request, response, or stream has invalid data.
 
-The `ProtocolError` class and message strings stay unchanged.
+The `ProtocolError` class stays unchanged. A refused redirect gives the message `redirect refused`, and a closed supplied session gives `session closed`. Use `kind`, not the message text, to select the next step.
 `ProtocolError(*args)` keeps its arguments and defaults to `kind=None`.
 For callers, `None` means an unclassified error. All client error sites set `kind`.
 

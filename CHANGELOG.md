@@ -23,13 +23,18 @@ The project is experimental. The client `0.1.0a1` is a pre-release on PyPI. No s
 - Accept the firmware's pre-roll length in microphone-open timing events. Keep the store available when historical rows are invalid.
 - Add standalone and Home Assistant app container targets for amd64 and arm64, pinned model downloads, and artifact license checks.
 
+### Client, not released
+
+These changes are on `main` only. The published client `0.1.0a1` does not have them.
+
+- Refuse redirects for the event and audio WebSockets, also when the scheme, host, and port do not change. A WebSocket handshake uses only the connector, timeout, and default headers of the supplied session.
+
 ### Client `0.1.0a1` (PyPI pre-release, 2026-11-22)
 
 - Add the asynchronous protocol client with turn, event, query, export, STT, and TTS methods.
 - Add typed TTS items, optional request-text positions, default-voice requests, and health metadata for voices, destinations, and name hints.
 - Add satellite name-list updates, late-open timestamps, sentence timing records, and the `fallback_unavailable` code.
 - Classify protocol errors as refused, closed, timeout, or malformed. Retry a DNS failure one time through a new system lookup before the initial deadline.
-- Refuse redirects for the event and audio WebSockets, also when the scheme, host, and port do not change. A WebSocket handshake uses only the connector, timeout, and default headers of the supplied session.
 - Accept the Home Assistant-compatible `aiohttp>=3.14.4,<4` dependency without server model runtimes.
 
 ### Packaging
