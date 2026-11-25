@@ -110,7 +110,7 @@ They are not part of the local gate or the CI image check.
 
 ## Client pre-release on PyPI
 
-The manual `publish-client.yml` workflow publishes the client pre-release `0.1.0a1` to PyPI.
+The manual `publish-client.yml` workflow publishes the version of `client/pyproject.toml` as a client pre-release on PyPI. The published versions are `0.1.0a1` and `0.1.0a2`.
 It does not publish the server or a container image.
 The `build` task checks the client package, asset records, and wheel before publication.
 Its PyPI check accepts only HTTP `404` for a missing version. A published version or a different error stops publication.
