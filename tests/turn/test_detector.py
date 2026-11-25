@@ -341,27 +341,47 @@ def test_empty_flush_does_not_invent_silence():
     assert d.flush("the") == []
 
 
-def test_sequential_turns_reset_shared_real_vad_runtime():
+def test_sequential_turns_use_primed_vad_without_counting_priming_as_audio():
     cache = os.environ.get("ASSIST_LIVE_MODEL_CACHE")
     assert cache, "FAIL model cache: set ASSIST_LIVE_MODEL_CACHE"
-    shared = ModelRuntime(cache)
+    runtime = ModelRuntime(cache)
     rng = np.random.default_rng(123)
-    audio = [rng.integers(-12000, 12000, 512, dtype=np.int16).tobytes(), pcm(5000)]
+    block = rng.integers(-12000, 12000, 512, dtype="<i2")
+    samples = block.astype(np.float32) / np.float32(32768)
+    state = np.zeros((2, 1, 128), dtype=np.float32)
+    model_input = {
+        "input": np.zeros((1, 576), dtype=np.float32),
+        "sr": np.array(16000, dtype=np.int64),
+    }
+    for _ in range(8):
+        _, state = runtime.vad.run(None, {**model_input, "state": state})
+    model_input["input"][0, 64:] = samples
+    expected, _ = runtime.vad.run(None, {**model_input, "state": state})
 
-    def run(runtime):
-        d = TurnDetector(models=runtime)
-        assert not runtime.state.any()
-        assert not runtime.context.any()
-        events = [event for block in audio for event in d.push(block, "the")]
-        return events, runtime.state.copy(), runtime.context.copy()
+    probabilities = []
+
+    def observe(samples):
+        probability = runtime.vad_probability(samples)
+        probabilities.append(probability)
+        return probability
 
     for _ in range(2):
-        actual = run(shared)
-        expected = run(ModelRuntime(cache))
-        assert len(actual[0]) == 1 and actual[0][0]["reason"] == "max_silence"
-        assert actual[0] == expected[0]
-        np.testing.assert_array_equal(actual[1], expected[1])
-        np.testing.assert_array_equal(actual[2], expected[2])
+        probabilities.clear()
+        detector = TurnDetector(models=runtime)
+        detector.vad_probability = observe
+        assert detector.push(block.tobytes(), "") == []
+        assert probabilities == [expected.item()]
+        assert detector.samples == 512
+        assert detector.audio == block.tobytes()
+        assert detector.speech_started_at_ms is None
+        assert detector.push(pcm(4968), "") == [
+            {
+                "type": "end_decision",
+                "reason": "max_silence",
+                "audio_ms": 5000.0,
+                "silence_ms": 0.0,
+            }
+        ]
 
 
 @pytest.mark.parametrize("name", ["silero-vad", "piper-runtime"])

@@ -115,7 +115,10 @@ The `max_silence` and `hard` endpoints do not wait for that interval.
 
 Use one `TurnDetector` for each turn. A shared `ModelRuntime` is for sequential turns only.
 
-The detector sets VAD state and context to their initial values at the start of each turn.
+At the start of each turn, the detector clears the Silero state and context.
+Silero processes eight `512-sample blocks` before it gets turn audio. Each sample is `0`.
+The detector keeps the model state but does not count these 256 ms as turn audio.
+The STT provider and the speaker check do not get these samples.
 Call `flush(partial)` when the audio stream stalls or ends, to process the remaining received samples.
 
 Only the VAD input gets 0 padding. The event clock counts received samples, not padding or wall time.

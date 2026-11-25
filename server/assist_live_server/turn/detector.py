@@ -152,6 +152,11 @@ class ModelRuntime:
     def reset_vad(self) -> None:
         self.state = np.zeros((2, 1, 128), dtype=np.float32)
         self.context = np.zeros((1, 64), dtype=np.float32)
+        # An initial zero state can miss short commands. Set the model state
+        # here so the detector does not count these blocks as turn audio.
+        silence = np.zeros(512, dtype=np.float32)
+        for _ in range(8):
+            self.vad_probability(silence)
 
     def vad_probability(self, samples: Samples) -> float:
         if samples.shape != (512,):

@@ -4812,3 +4812,58 @@ It gives `10 failed, 77 passed`. The failures include the held-response provider
 | Network-isolated suite | Exit 0, `2755 passed, 1 skipped` |
 
 The floor and isolated suites use the external turn-model cache. A first floor run without `ASSIST_LIVE_MODEL_CACHE` gave four model-cache failures. They are not related to this change.
+
+## Silero initial state (2026-11-25 UTC)
+
+On `477a594`, four short recorded commands did not start at `phase 0`.
+Each turn ended with `max_silence` at 5 s. All four commands start with the new model state.
+
+Silero processes eight `512-sample blocks` (256 ms) before it gets turn audio. Each sample is `0`.
+These samples change only the model state. They do not change the audio clock or the command rules.
+
+The real-model test found an incorrect first `p` value before the change.
+The turn test suite gave `416 passed` after the change.
+The test found the same error when a mutation removed these samples.
+The second mutation sent these samples through the turn input. The test got 4,608 samples, not 512.
+
+| Detector test input | Trials | Cold starts | Primed starts | Result |
+|---|---:|---:|---:|---|
+| Short commands and controls from one recording session, 16 phases | 128 | 91 | 127 | Four misses at `phase 0` start. One miss stays at a different phase. |
+| Public timer corpus, five phases | 1,250 | 1,250 | 1,250 | 489 onset changes and 103 end changes. This test used no `partial` transcripts. |
+| Wake-only plays with room noise | 624 | 0 | 1 | The `final` decode at the new end gave `Yeah.`. The operator accepted this result. |
+| Two recordings with voice from the room-noise test, 16 phases each | 32 | 25 | 30 | The two start counts changed from 16 to 16 and from 9 to 14. |
+| Aligned wake-tail cuts, 16 phases | 672 | 0 | 0 | No end position changed. |
+
+One noise turn started after a 256 ms run with `p` at or above 0.5, at only one of 16 offsets (28 ms). Its maximum `p` was 0.674.
+Its start was at sample 23,488 on the recording clock. Its end moved 28,800 samples earlier.
+The test did not send the `final` decoder output to Home Assistant.
+
+| Phase-zero gateway input | Pairs | Cold starts | Primed starts | Transcript result | End positions that changed |
+|---|---:|---:|---:|---|---:|
+| Public timer corpus | 250 | 250 | 250 | 37 word errors in each test (1,755 words in the correct transcripts). No correct transcript became incorrect. | 7 |
+| Commands from the operator script | 32 | 32 | 32 | No transcript changed. | 0 |
+| Wake-only controls from the operator script | 12 | 1 | 3 | Two new starts each gave `Mm-hmm.`. | 0 |
+| Control with no voice from the operator script | 1 | 0 | 0 | No transcript. | 0 |
+| Live command recordings | 44 | 43 | 43 | Five transcripts changed. A different decoder found no increase in word errors. A human check is necessary for four changes. | 17 |
+
+| Wake-only input | Added starts | Cut point |
+|---|---:|---|
+| Operator script controls | 2 of 12 | The input starts 200 ms before the estimated wake-word end. Each new start gave `Mm-hmm.`. |
+| Aligned wake tails | 0 of 672 | Device recordings start at the recorded turn start. Playback sources start 200 ms before the estimated wake-word end. |
+
+For the aligned wake inputs, the test uses the earlier of two times: the estimated wake-word end and the command start.
+These tests do not measure the rate of incorrect starts in use.
+
+The gateway tests used Parakeet and the `partial` end rule with 1,024-byte messages.
+Corpus ends moved -512 to +2,048 samples. Three corpus transcripts changed, with no change in their word error counts.
+Live ends moved -2,368 to +3,104 samples. The five changed live transcripts had nine word errors before the change and seven after, against the other decoder.
+The live audio has no set of correct transcripts from a human check.
+
+| Gate | Result |
+|---|---|
+| `task check` with the private denylist | Exit 0, `2755 passed, 1 skipped` |
+| Python 3.14.2 floor with an isolated environment | Exit 0, `2755 passed, 1 skipped` |
+| Network-isolated suite | Exit 0, `2755 passed, 1 skipped` |
+| Public-tree check with the private denylist | Exit 0, no public data found |
+
+The count does not change, because the new real-model test replaces the earlier test that a shared model gets its initial state again.
