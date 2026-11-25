@@ -814,12 +814,13 @@ Socket writes wait for flow control. No route makes an unbounded queue.
 - `timeout`: an operation does not complete before its deadline.
 - `malformed`: a request, response, or stream has invalid data.
 
-The `ProtocolError` class stays unchanged. A refused redirect gives the message `redirect refused`, and a closed supplied session gives `session closed`. Use `kind`, not the message text, to select the next step.
+The `ProtocolError` class stays unchanged. On `main`, a refused WebSocket redirect gives the message `redirect refused`, and a closed supplied session gives `session closed`. Use `kind`, not the message text, to select the next step.
 `ProtocolError(*args)` keeps its arguments and defaults to `kind=None`.
 For callers, `None` means an unclassified error. All client error sites set `kind`.
 
-The client does not follow redirects for HTTP requests or WebSocket handshakes. This rule also applies when the scheme, host, and port do not change.
-A WebSocket handshake uses the connector, timeout, and default headers of the supplied session. It does not use the cookies, proxy settings, request hooks, or middlewares of that session.
+The client does not follow redirects for HTTP requests. This rule also applies to the published client `0.1.0a1`.
+The client on `main` also does not follow redirects for WebSocket handshakes, also when the scheme, host, and port do not change. The published client `0.1.0a1` does not have this rule.
+On `main`, a WebSocket handshake uses the connector, timeout, and default headers of the supplied session. It does not use the cookies, proxy settings, request hooks, or middlewares of that session.
 
 ### Turn records
 
