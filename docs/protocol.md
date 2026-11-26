@@ -214,6 +214,9 @@ The local provisioning command writes a credential file with mode `0600` and pri
 uv run python -m assist_live_server.provision --store "$CREDENTIAL_FILE" --satellite "$SATELLITE_KEY"
 ```
 
+The command saves the device mapping and its integration token in one file replacement.
+If the replacement does not occur, the command can run again with the same satellite key.
+
 Keep that file external to the repository.
 Copy the device secret to external ESPHome `secrets.yaml` through a local procedure with access control.
 The integration receives only its different access token.
@@ -340,6 +343,8 @@ It accepts an unseen reordered sequence in the current boot's replay window.
 It records missing sequences independently from duplicates.
 A new boot retires the previous boot.
 The gateway also refuses unseen sequences from a retired boot.
+
+The clock window and missing-sequence counts change only after the writer commits the event.
 
 An unexpected acceptance error refuses the current event, increases an error counter, and makes a credential-free log entry.
 The acceptance task continues after an interval, from 100 ms to a maximum of five seconds if errors continue.
@@ -693,6 +698,7 @@ The gateway does not retry a provider push that started before cancellation.
 Thus the speaker audio can be one push shorter than the `final` audio.
 If detector work continues or the catch-up deadline expires, `finish()` uses the accepted audio prefix.
 A provider failure gives `stt_failed`.
+The audio deadline does not cancel publication of the end decision.
 
 The server publishes checkpoint `partial` text only after command start and after the detector processes that checkpoint position.
 It publishes none after the end decision or from a position after the end sample.
@@ -710,6 +716,7 @@ A provider's own `TimeoutError` gives `stt_failed`, not a hard end or a checkpoi
 Only expiry of the turn's wall timer gives that wall-limit cause.
 
 The server sends `end_decision`, one `final`, then `speaker_result` before `end` and stream close.
+If the server cannot publish `end_decision`, it does not send `final`.
 A provider failure sends one terminal `error` with code `stt_failed`, not a `final`.
 The server does not retry or use fallback after a `final`.
 
@@ -846,6 +853,10 @@ They continue to read events for a historical turn without its conversation iden
 The optional `opened_utc_ns` gives the initial open time in UTC nanoseconds.
 Without it, the server uses its receipt time. An earlier time gives `late_open: true` in the turn record.
 The server uses the initial time for turn expiry and retention.
+
+If an open or closing turn for the same satellite has a newer open time, the server records the earlier turn as `incomplete`.
+The server does not change the newer turn or give pending device events to the earlier turn.
+An equal retry gives HTTP `200` and makes no changes.
 
 It refuses a time older than its retention with `late_open_too_old`.
 It refuses a time more than one second after receipt with `late_open_in_future`.

@@ -23,10 +23,12 @@ from tests.stt_fakes import FirstBlockCommandDetector
 
 
 @asynccontextmanager
-async def service(tmp_path, factory=None, *, policy=False, gateway=None):
+async def service(
+    tmp_path, factory=None, *, policy=False, gateway=None, satellite="satellite-a"
+):
     registry = Registry()
-    registry.bind("satellite-a", "satellite-a", b"synthetic-device-key")
-    registry.add_token("synthetic-token", ["satellite-a"])
+    registry.bind(satellite, satellite, b"synthetic-device-key")
+    registry.add_token("synthetic-token", [satellite])
     store = SQLiteStore(tmp_path / "turns.db", record_transcripts=policy)
     if gateway is None:
         gateway = AudioGateway(
@@ -48,9 +50,7 @@ async def service(tmp_path, factory=None, *, policy=False, gateway=None):
             async with AssistLiveClient(
                 "http://service.invalid", "synthetic-token", session=session
             ) as client:
-                turn = TurnOpen(
-                    str(uuid7()), "satellite-a", "voice", None, None, policy
-                )
+                turn = TurnOpen(str(uuid7()), satellite, "voice", None, None, policy)
                 await client.open_turn(turn)
                 yield client, session, turn, store
     finally:
@@ -156,6 +156,57 @@ def test_no_command_empty_final_keeps_wire_shape_and_stt_final_event(tmp_path):
             assert sum(e["stage"] == "stt_final" for e in events) == 1
             assert not any(e["stage"] in {"speech_start", "stt_failed"} for e in events)
             assert not any(e["data"].get("replaced") for e in events)
+
+    asyncio.run(run())
+
+
+def test_valid_final_survives_transcript_record_size_limit(tmp_path):
+    text = "x" * 16_000
+
+    async def metrics(session):
+        async with session.get(
+            "http://service.invalid/metrics",
+            headers={"Authorization": "Bearer synthetic-token"},
+        ) as response:
+            assert response.status == 200
+            return (await response.text()).splitlines()
+
+    async def run():
+        gateway = AudioGateway(
+            lambda _: ParakeetSession(lambda _: "", lambda _: text),
+            detector_factory=FirstBlockCommandDetector,
+        )
+        async with service(
+            tmp_path, gateway=gateway, policy=True, satellite="s" * 128
+        ) as (_, session, turn, store):
+            metric = "assist_live_transcript_omitted_total"
+            assert f"{metric} 0" in await metrics(session)
+            ws = await connect(session, turn)
+            await ws.send_bytes(encode_audio(turn.turn_id, 0, bytes(1024)))
+            await ws.send_json(encode_control("end", turn.turn_id))
+            replies = [message.json() async for message in ws]
+            assert [r["type"] for r in replies if r["type"] != "heartbeat"] == [
+                "end_decision",
+                "final",
+                "speaker_result",
+                "end",
+            ]
+            assert next(r["text"] for r in replies if r["type"] == "final") == text
+            rows = (await store.get_turn(turn.turn_id))["events"]
+            final = next(row for row in rows if row["stage"] == "stt_final")
+            assert final["data"] == {
+                "part": "stt",
+                "provider": "parakeet",
+                "transcript_omitted": True,
+            }
+            assert not any(row["stage"] == "stt_failed" for row in rows)
+            lines = await metrics(session)
+            assert f"# TYPE {metric} counter" in lines
+            assert f"{metric} 1" in lines
+            assert f"{metric} 1" in await metrics(session)
+            assert (await store.diagnostics(frozenset({"satellite-b"})))[
+                "transcript_omitted_total"
+            ] == 0
 
     asyncio.run(run())
 

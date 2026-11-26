@@ -10,6 +10,13 @@ class ClockWindow:
         self.samples: deque[tuple[int, int]] = deque(maxlen=50)
         self.latest_arrival_ns = 0
 
+    def copy(self) -> ClockWindow:
+        clock = ClockWindow()
+        clock.boot = self.boot
+        clock.samples = self.samples.copy()
+        clock.latest_arrival_ns = self.latest_arrival_ns
+        return clock
+
     def observe(self, boot: int, device_ms: int, arrival_ns: int) -> tuple[int, float]:
         unsigned(boot)
         unsigned(device_ms)

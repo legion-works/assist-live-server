@@ -4918,3 +4918,29 @@ Each pair had the same command onset sample, end sample, and last transcript.
 `task check` did not run its public-tree step because this worktree has no sibling integration checkout.
 The other public-tree check used the checker in the integration checkout.
 The tests did not build, pull, or examine an image.
+
+## Turn records and device provisioning (2026-11-26 UTC)
+
+Five tests examine these rules with synthetic inputs:
+
+- The newer turn can complete after an earlier turn open.
+- The server sends the full `final` when the transcript does not fit its timing record.
+- In `partial` mode, the server sends the end decision before the `final`, also at a hard end.
+- A refused device event does not change the clock window or the missing-sequence counts.
+- The provision command writes a new device mapping and its integration token in the same file replacement.
+
+The tests give five failures on `709883b` and five satisfactory results with these rules.
+For each rule, one code change gives one failure in an isolated copy.
+
+`task check`, the Python 3.14.2 suite, and the network-isolated suite each give `2764 passed, 1 skipped`.
+The public-tree check gives `PASS public data matches=0`.
+
+### Review checks
+
+The transcript omission counter gives `0` before the write and `1` after it.
+A count of `2` gives one failure in an isolated copy.
+A newer turn in `closing` gets status `complete` after an earlier turn open.
+The provision command replaces the registry file one time.
+
+The five test files give `156 passed`.
+`task check`, the Python 3.14.2 suite, and the network-isolated suite each give `2765 passed, 1 skipped`.

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from collections.abc import Callable
 from dataclasses import replace
 from typing import Literal
 
@@ -21,15 +22,17 @@ class EventGateway:
         self.metrics = Metrics()
 
     async def accept(self, device: DeviceEvent) -> None:
-        event = self.convert(device)
+        event, commit = self.convert(device)
         if isinstance(self.store, SQLiteStore):
             await self.store.append_device(event, device.arrival_ns)
         else:
             await self.store.append(event)
+        commit()
 
-    def convert(self, device: DeviceEvent) -> TimingEvent:
+    def convert(self, device: DeviceEvent) -> tuple[TimingEvent, Callable[[], None]]:
         raw = device.event
-        clock = self.clocks.setdefault(device.satellite, ClockWindow())
+        current = self.clocks.get(device.satellite)
+        clock = current.copy() if current is not None else ClockWindow()
         stamp, uncertainty = clock.observe(
             raw["boot"], raw["device_ms"], device.arrival_ns
         )
@@ -37,14 +40,7 @@ class EventGateway:
         boot, high, received = previous
         if boot != raw["boot"]:
             high, received = -1, 0
-        self.sequences[device.satellite] = (
-            raw["boot"],
-            max(high, raw["seq"]),
-            received + 1,
-        )
-        self.metrics.sequence_gaps = sum(
-            high + 1 - received for _, high, received in self.sequences.values()
-        )
+        sequence = (raw["boot"], max(high, raw["seq"]), received + 1)
         quality: Literal["measured", "proxy", "estimate"] = "proxy"
         if raw["data"].get("quality") == "measured":
             quality = "measured"
@@ -62,7 +58,15 @@ class EventGateway:
             raw["seq"],
         )
         event = replace(event, data=safe_data(replace(event, data=raw["data"])))
-        return event
+
+        def commit() -> None:
+            self.clocks[device.satellite] = clock
+            self.sequences[device.satellite] = sequence
+            self.metrics.sequence_gaps = sum(
+                high + 1 - received for _, high, received in self.sequences.values()
+            )
+
+        return event, commit
 
     async def run(self, ingress: TimingIngress) -> None:
         backoff = 0.1

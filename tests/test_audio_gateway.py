@@ -6,9 +6,14 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from assist_live_server.audio_gateway import AudioGateway
+from assist_live_client import TimingEvent, TurnOpen
+from assist_live_server.audio_gateway import HARD_END_GRACE, TURN_TIMEOUT, AudioGateway
 from assist_live_server.providers.parakeet import ParakeetSession
+from assist_live_server.store import SQLiteStore
 from assist_live_server.turn.detector import TurnDetector
+
+from tests.loop_clock import LoopClock
+from tests.stt_fakes import FirstBlockCommandDetector
 
 TURN = "01900000-0000-7000-8000-000000000001"
 
@@ -26,6 +31,67 @@ def test_cloud_request_refused_before_factory_and_audio():
             forbidden, provider="deepgram", destination="cloud", local_only=True
         )
         assert [r["type"] async for r in gateway.stt(TURN, audio())] == ["error"]
+
+    asyncio.run(run())
+
+
+def test_partial_hard_end_publishes_decision_before_final(tmp_path, monkeypatch):
+    class EndpointDetector(FirstBlockCommandDetector):
+        def push(self, pcm, partial):
+            super().push(pcm, partial)
+            return [{"reason": "hard"}]
+
+    async def run():
+        clock = LoopClock(monkeypatch)
+        loop = asyncio.get_running_loop()
+        store = SQLiteStore(tmp_path / "turns.db")
+        turn = TurnOpen(TURN, "satellite-a", "voice", None, None)
+        release = asyncio.Event()
+        timer = None
+
+        async def record(stage, data):
+            nonlocal timer
+            if stage == "end_decision":
+                timer = loop.call_later(TURN_TIMEOUT + 2 * HARD_END_GRACE, release.set)
+                await release.wait()
+            with clock.stopped():
+                await store.append(
+                    TimingEvent(
+                        TURN,
+                        turn.satellite,
+                        "server",
+                        stage,
+                        store.now_ns(),
+                        "measured",
+                        None,
+                        data=data,
+                    )
+                )
+
+        async def audio():
+            yield bytes(1024)
+            await asyncio.Event().wait()
+
+        gateway = AudioGateway(
+            lambda _: ParakeetSession(lambda _: "", lambda _: "final text"),
+            detector_factory=EndpointDetector,
+        )
+        try:
+            with clock.stopped():
+                await store.open_turn(turn)
+            async with asyncio.timeout(2 * TURN_TIMEOUT):
+                replies = [r async for r in gateway.stt(TURN, audio(), record=record)]
+            assert [reply["type"] for reply in replies] == [
+                "end_decision",
+                "final",
+                "speaker_result",
+            ]
+            rows = (await store.get_turn(TURN))["events"]
+            assert sum(row["stage"] == "end_decision" for row in rows) == 1
+        finally:
+            if timer is not None:
+                timer.cancel()
+            store.close()
 
     asyncio.run(run())
 

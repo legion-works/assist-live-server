@@ -120,6 +120,57 @@ def test_conflicting_turn_uses_typed_error(tmp_path):
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("newer_status", ["open", "closing"])
+def test_replayed_older_open_keeps_newer_turn_completable(tmp_path, newer_status):
+    from assist_live_server.store import SQLiteStore
+
+    async def run():
+        now = 100_000_000_000
+        store = SQLiteStore(tmp_path / "turns.db", now_ns=lambda: now)
+        newer = TurnOpen(str(uuid7()), "satellite-a", "tts_only", None, None)
+        older = replace(newer, turn_id=str(uuid7()), opened_utc_ns=now - 1)
+
+        def stored_status():
+            return store.connection.execute(
+                "SELECT status FROM turns WHERE turn_id=?", (newer.turn_id,)
+            ).fetchone()[0]
+
+        async def append(stage, source):
+            await store.append(
+                TimingEvent(
+                    newer.turn_id if source != "device" else None,
+                    newer.satellite,
+                    source,
+                    stage,
+                    now,
+                    "measured",
+                    None,
+                )
+            )
+
+        try:
+            await store.open_turn(newer)
+            if newer_status == "closing":
+                await append("playback_end", "device")
+            assert await store._call(stored_status) == newer_status
+            await store.open_turn(older)
+            await store.open_turn(older)
+            assert await store._call(stored_status) == newer_status
+            await append("tts_first_text", "integration")
+            await append("tts_first_byte", "server")
+            await append("playback_start", "device")
+            if newer_status == "open":
+                await append("playback_end", "device")
+            assert (await store.get_turn(newer.turn_id))["status"] == "complete"
+            recorded = await store.get_turn(older.turn_id)
+            assert recorded["status"] == "incomplete"
+            assert recorded["events"] == []
+        finally:
+            store.close()
+
+    asyncio.run(run())
+
+
 def test_retention_and_status_queries_use_indexes_and_acceptance_has_no_scans(tmp_path):
     from assist_live_server.auth import Registry
     from assist_live_server.event_gateway import EventGateway
@@ -632,6 +683,68 @@ def test_device_transaction_failure_and_unique_guard(tmp_path):
             assert list(gateway.clocks["satellite-a"].samples) == samples
             assert gateway.sequences == sequences
             assert (await store.diagnostics())["pending_events"] == 1
+        finally:
+            store.close()
+
+    asyncio.run(run())
+
+
+def test_refused_device_boot_keeps_clock_and_sequence_state(tmp_path):
+    from assist_live_server.auth import Registry
+    from assist_live_server.event_gateway import EventGateway
+    from assist_live_server.protocol import DeviceEvent
+    from assist_live_server.store import SQLiteStore
+
+    async def run():
+        now = 100_000_000_000
+        store = SQLiteStore(tmp_path / "timing.db", now_ns=lambda: now)
+        registry = Registry()
+        registry.bind("satellite-a", "satellite-a", b"synthetic-key")
+        gateway = EventGateway(store)
+        device = DeviceEvent(
+            "satellite-a",
+            {
+                "device": "satellite-a",
+                "boot": 1,
+                "seq": 0,
+                "device_ms": 1000,
+                "stage": "wake_detected",
+                "data": {},
+            },
+            True,
+            now,
+        )
+
+        def execute(sql):
+            store.connection.execute(sql)
+
+        try:
+            await store.configure_registry(registry)
+            assert await store.accept_device(registry, device, gateway.convert)
+            await store._call(
+                execute,
+                "CREATE TRIGGER refuse_event BEFORE INSERT ON pending "
+                "BEGIN SELECT RAISE(ABORT, 'test write failure'); END",
+            )
+            refused = replace(device, event={**device.event, "boot": 2, "seq": 9})
+            assert not await store.accept_device(registry, refused, gateway.convert)
+            assert registry.replay["satellite-a"].boot == 1
+            assert gateway.metrics.sequence_gaps == 0
+            await store._call(execute, "DROP TRIGGER refuse_event")
+            later = replace(
+                device,
+                event={**device.event, "seq": 1, "device_ms": 2000},
+                arrival_ns=now + 2_000_000_000,
+            )
+            assert await store.accept_device(registry, later, gateway.convert)
+            turn = TurnOpen(str(uuid7()), device.satellite, "voice", None, None)
+            await store.open_turn(turn)
+            events = (await store.get_turn(turn.turn_id))["events"]
+            assert [(row["seq"], row["t_utc_ns"]) for row in events] == [
+                (0, now),
+                (1, now + 1_000_000_000),
+            ]
+            assert gateway.metrics.sequence_gaps == 0
         finally:
             store.close()
 

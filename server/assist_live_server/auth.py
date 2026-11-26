@@ -111,7 +111,9 @@ class Registry:
         self.devices: dict[str, dict[str, Any]] = {}
         self.tokens: dict[str, list[str]] = {}
 
-    def bind(self, device: str, satellite: str, secret: bytes) -> None:
+    def bind(
+        self, device: str, satellite: str, secret: bytes, *, save: bool = True
+    ) -> None:
         identifier(device)
         identifier(satellite)
         if device in self.devices or any(
@@ -129,9 +131,12 @@ class Registry:
         self.replay[device] = ReplayState()
         self.credential_epochs[device] = 0
         self.credentials[device] = (satellite, secret, 0)
-        self.save()
+        if save:
+            self.save()
 
-    def add_token(self, token: str, satellites: list[str]) -> None:
+    def add_token(
+        self, token: str, satellites: list[str], *, save: bool = True
+    ) -> None:
         if (
             not token
             or not satellites
@@ -147,7 +152,8 @@ class Registry:
         ):
             raise ValueError("credential authorities must differ")
         self.tokens[token] = list(set(satellites))
-        self.save()
+        if save:
+            self.save()
 
     def authorize(self, token: str) -> frozenset[str] | None:
         for stored, satellites in self.tokens.items():

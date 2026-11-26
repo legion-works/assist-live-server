@@ -269,6 +269,12 @@ Names do not go into log messages, errors, or metric dimensions. The event-reten
 
 The server stores a `final` transcript only when the server and the turn each set `record_transcripts=True`.
 The two options default to `false`. The server does not store `partial` transcripts.
+If the transcript makes the timing record larger than 16,256 bytes, the server keeps the record without the transcript and sets `data.transcript_omitted: true`.
+This limit does not change the `final` message.
+
+The `/metrics` counter `assist_live_transcript_omitted_total` counts these stored records for the token's satellites.
+The counter starts at `0` when the server starts.
+
 STT and TTS timing records include the selected provider and the actual destination.
 
 ## Server command and image options

@@ -34,6 +34,8 @@ LOGGER = logging.getLogger(__name__)
 ROW_ERRORS = (ValueError, TypeError, KeyError, OverflowError, RecursionError)
 OPEN_CLOCK_TOLERANCE_NS = 1_000_000_000
 
+type DeviceConversion = Callable[[DeviceEvent], tuple[TimingEvent, Callable[[], None]]]
+
 
 class WrongOwnerError(ValueError):
     def __init__(self) -> None:
@@ -41,6 +43,10 @@ class WrongOwnerError(ValueError):
 
 
 class TurnLimitError(ValueError):
+    pass
+
+
+class RecordSizeError(ValueError):
     pass
 
 
@@ -143,6 +149,7 @@ class SQLiteStore:
         self.last_retention_ns: int | None = None
         self.invalid_rows: Counter[tuple[str, str]] = Counter()
         self.removed_parents: Counter[str] = Counter()
+        self.transcript_omissions: Counter[str] = Counter()
         self.removed_conversation_ids: Counter[str] = Counter()
         self.wrong_owners: Counter[str] = Counter()
         self.turn_limits: Counter[tuple[str, str]] = Counter()
@@ -227,7 +234,7 @@ class SQLiteStore:
         self,
         registry: Registry,
         device: DeviceEvent,
-        convert: Callable[[DeviceEvent], TimingEvent],
+        convert: DeviceConversion,
     ) -> bool:
         return await self._call(self._accept_device, registry, device, convert)
 
@@ -235,7 +242,7 @@ class SQLiteStore:
         self,
         registry: Registry,
         device: DeviceEvent,
-        convert: Callable[[DeviceEvent], TimingEvent],
+        convert: DeviceConversion,
     ) -> bool:
         name = device.event["device"]
         original = registry.replay[name]
@@ -259,8 +266,8 @@ class SQLiteStore:
                         self.now_ns(),
                     ),
                 )
-                # Reserve the unique key before the clock accepts a sample.
-                event = convert(
+                # Reserve the unique key before the clock prepares a sample.
+                event, commit_conversion = convert(
                     replace(device, new_boot=original.boot != device.event["boot"])
                 )
                 self.connection.execute(
@@ -279,6 +286,7 @@ class SQLiteStore:
             if isinstance(error, (sqlite3.Error, ValueError, TypeError, OverflowError)):
                 return False
             raise
+        commit_conversion()
         self._notify()
         return True
 
@@ -286,7 +294,7 @@ class SQLiteStore:
         row = json.dumps(asdict(event), separators=(",", ":"), allow_nan=False)
         # The envelope also has a cursor and version within the protocol bound.
         if len(row.encode()) > MAX_CONTROL - 128:
-            raise ValueError("stored record too large")
+            raise RecordSizeError("stored record too large")
         return row
 
     def _bad_row(self, satellite: str, kind: str, error: Exception) -> None:
@@ -345,9 +353,18 @@ class SQLiteStore:
         event = replace(event, source="server", stage="unmatched", data=data)
         return replace(event, data=safe_data(event))
 
-    def _insert(self, event: TimingEvent) -> None:
+    def _insert(self, event: TimingEvent) -> bool:
         stored_integer(event.t_utc_ns)
-        payload = self._encode(event)
+        transcript_omitted = False
+        try:
+            payload = self._encode(event)
+        except RecordSizeError:
+            if event.stage != "stt_final" or "transcript" not in event.data:
+                raise
+            data = {**event.data, "transcript_omitted": True}
+            del data["transcript"]
+            payload = self._encode(replace(event, data=data))
+            transcript_omitted = True
         if event.turn_id is not None:
             count, size = self.connection.execute(
                 "SELECT count(*),coalesce(sum(length(CAST(payload AS BLOB))),0) "
@@ -396,6 +413,7 @@ class SQLiteStore:
             )
         if event.turn_id:
             self._refresh_status(event.turn_id)
+        return transcript_omitted
 
     def _refresh_status(self, turn_id: str) -> None:
         row = self.connection.execute(
@@ -531,13 +549,22 @@ class SQLiteStore:
                 if parent is None or parent[0] != turn.satellite:
                     removal = "absent" if parent is None else "other_satellite"
                     turn = replace(turn, parent_turn_id=None)
-            self.connection.execute(
-                "UPDATE turns SET status='incomplete' "
-                "WHERE satellite=? AND status IN ('open','closing')",
-                (turn.satellite,),
+            superseded = (
+                self.connection.execute(
+                    "SELECT 1 FROM turns WHERE satellite=? "
+                    "AND status IN ('open','closing') AND opened_ns>? LIMIT 1",
+                    (turn.satellite, opened),
+                ).fetchone()
+                is not None
             )
+            if not superseded:
+                self.connection.execute(
+                    "UPDATE turns SET status='incomplete' "
+                    "WHERE satellite=? AND status IN ('open','closing')",
+                    (turn.satellite,),
+                )
             self.connection.execute(
-                "INSERT INTO turns VALUES(?,?,?,?, 'open',NULL)",
+                "INSERT INTO turns VALUES(?,?,?,?,?,NULL)",
                 (
                     turn.turn_id,
                     turn.satellite,
@@ -551,20 +578,22 @@ class SQLiteStore:
                         }
                     ),
                     opened,
+                    "incomplete" if superseded else "open",
                 ),
             )
-            pending = self.connection.execute(
-                "SELECT pending_id,payload FROM pending WHERE satellite=? "
-                "ORDER BY pending_id",
-                (turn.satellite,),
-            ).fetchall()
-            for pending_id, raw in pending:
-                event = self._decode_event(raw, turn.satellite, "pending")
-                if event is not None:
-                    self._insert(replace(event, turn_id=turn.turn_id))
-                self.connection.execute(
-                    "DELETE FROM pending WHERE pending_id=?", (pending_id,)
-                )
+            if not superseded:
+                pending = self.connection.execute(
+                    "SELECT pending_id,payload FROM pending WHERE satellite=? "
+                    "ORDER BY pending_id",
+                    (turn.satellite,),
+                ).fetchall()
+                for pending_id, raw in pending:
+                    event = self._decode_event(raw, turn.satellite, "pending")
+                    if event is not None:
+                        self._insert(replace(event, turn_id=turn.turn_id))
+                    self.connection.execute(
+                        "DELETE FROM pending WHERE pending_id=?", (pending_id,)
+                    )
         if removal is not None:
             self.removed_parents[turn.satellite] += 1
             LOGGER.info("turn parent removed: %s", removal)
@@ -608,7 +637,9 @@ class SQLiteStore:
             return
         with self.connection:
             self.connection.execute("BEGIN IMMEDIATE")
-            self._insert(self._sanitize(event))
+            transcript_omitted = self._insert(self._sanitize(event))
+        if transcript_omitted:
+            self.transcript_omissions[event.satellite] += 1
         self._notify()
 
     async def append_device(self, event: TimingEvent, arrival_ns: int) -> None:
@@ -747,6 +778,11 @@ class SQLiteStore:
             "parent_turn_id_removed_total": sum(
                 count
                 for satellite, count in self.removed_parents.items()
+                if satellites is None or satellite in satellites
+            ),
+            "transcript_omitted_total": sum(
+                count
+                for satellite, count in self.transcript_omissions.items()
                 if satellites is None or satellite in satellites
             ),
             "conversation_id_removed_total": sum(

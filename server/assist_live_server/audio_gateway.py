@@ -79,6 +79,7 @@ class AudioGateway:
         output: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue(maxsize=16)
         changed = asyncio.Event()
         stopped = False
+        decision: str | None = None
         partial = ""
         onset = False
         candidate = False
@@ -104,11 +105,12 @@ class AudioGateway:
                     },
                 )
 
-        async def decide(reason: str) -> None:
-            nonlocal stopped
+        def select_end(reason: str) -> None:
+            nonlocal decision, stopped
             if stopped:
                 return
             stopped = True
+            decision = reason
             if self.end_rule == "partial" and detector.samples:
                 arrival = next(
                     (stamp for end, stamp in arrivals if end >= detector.samples),
@@ -118,8 +120,14 @@ class AudioGateway:
                     self.end_decision_wait.observe(
                         asyncio.get_running_loop().time() - arrival
                     )
+
+        async def publish_end(reason: str) -> None:
             await note("end_decision", reason=reason, decision_source="server")
             await output.put(encode_control("end_decision", turn_id))
+
+        async def checkpoint_end(reason: str) -> None:
+            select_end(reason)
+            await publish_end(reason)
 
         async def work() -> None:
             nonlocal session, stopped, detector, partial, onset
@@ -194,7 +202,7 @@ class AudioGateway:
                         candidate = True
                         await note("end_candidate")
                     if events:
-                        await decide(events[-1]["reason"])
+                        select_end(events[-1]["reason"])
 
                 async def detect(pcm: bytes | None) -> None:
                     nonlocal in_flight
@@ -225,7 +233,7 @@ class AudioGateway:
                             except TimeoutError:
                                 if not catchup.expired():
                                     raise
-                    await decide("hard")
+                    select_end("hard")
 
                 async def collect() -> None:
                     nonlocal total, received_samples
@@ -253,7 +261,7 @@ class AudioGateway:
                                     pcm = pending.result()
                                 except StopAsyncIteration:
                                     await detect(None)
-                                    await decide("input_end")
+                                    select_end("input_end")
                                     break
                                 pending = None
                                 received_samples += len(pcm) // 2
@@ -324,7 +332,7 @@ class AudioGateway:
                         active_session,
                         detector,
                         note=note,
-                        decide=decide,
+                        decide=checkpoint_end,
                         publish=publish,
                         failure=self.checkpoint_failure,
                         observe=self.end_decision_wait.observe,
@@ -347,6 +355,10 @@ class AudioGateway:
                     for task in done:
                         task.result()
                     await collector
+                    # The audio deadline must not cancel decision publication.
+                    if decision is None:
+                        raise RuntimeError("end decision missing")
+                    await publish_end(decision)
                 text = ""
                 replaced = False
                 if onset:

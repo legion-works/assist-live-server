@@ -201,6 +201,35 @@ def test_registry_isolation_and_provisioning(tmp_path, caplog, capsys):
     assert device.hex() not in caplog.text
 
 
+def test_provision_interruption_after_replace_leaves_complete_binding(
+    tmp_path, monkeypatch
+):
+    from assist_live_server import auth
+    from assist_live_server.provision import provision
+
+    path = tmp_path / "credentials"
+    provision(path, "satellite-a")
+    original_token = next(iter(auth.Registry.load(path).tokens))
+    replace_file = auth.os.replace
+
+    def interrupt_after_replace(source, target):
+        replace_file(source, target)
+        raise OSError("test interruption after replace")
+
+    with monkeypatch.context() as interruption:
+        interruption.setattr(auth.os, "replace", interrupt_after_replace)
+        with pytest.raises(OSError, match="test interruption after replace"):
+            provision(path, "satellite-b")
+
+    registry = auth.Registry.load(path)
+    assert registry.device("satellite-b") is not None
+    assert registry.authorize(original_token) == frozenset({"satellite-a"})
+    assert [registry.authorize(token) for token in registry.tokens] == [
+        frozenset({"satellite-a"}),
+        frozenset({"satellite-b"}),
+    ]
+
+
 def test_replay_window_accepts_long_run_with_bounded_memory():
     from assist_live_server.auth import REPLAY_WINDOW, Registry
 
