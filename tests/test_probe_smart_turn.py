@@ -188,7 +188,14 @@ def test_record_only_mode_reuses_saved_cost_without_network_or_measurement(
         == 0
     )
     assert "PASS decision recorded" in capsys.readouterr().out
-    assert "| `total` | 1.000 | 2.000 | 1.000 | 2.000 |" in report.read_text()
+    rendered = report.read_text()
+    assert "| `total` | 1.000 | 2.000 | 1.000 | 2.000 |" in rendered
+    committed = (ROOT / "docs/research/q5-smart-turn.md").read_text()
+    for prefix in ("The measured probe", "See the `uv.lock` file"):
+        expected = next(
+            line for line in committed.splitlines() if line.startswith(prefix)
+        )
+        assert expected in rendered.splitlines()
 
 
 def test_manifest_decision_runs_release_gate(tmp_path):

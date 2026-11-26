@@ -1,4 +1,4 @@
-FROM python:3.14.3-slim-bookworm@sha256:f21c0d5a44c56805654c15abccc1b2fd576c8d93aca0a3f74b4aba2dc92510e2 AS build
+FROM python:3.14.10-slim-bookworm@sha256:e60ad028afdcdd14772a3d46decf0eaf616720f9102aeb4397a2045ff6718c3d AS build
 WORKDIR /build
 RUN pip install --no-cache-dir uv==0.13.1
 COPY pyproject.toml uv.lock ./
@@ -9,7 +9,7 @@ RUN uv sync --locked --no-dev --no-editable --package assist-live-server
 COPY tools/check_release.py tools/asset_rights.py tools/check_assets.py tools/
 RUN /build/.venv/bin/python tools/check_release.py --write-provenance /build/wheel-provenance.json
 
-FROM python:3.14.3-slim-bookworm@sha256:f21c0d5a44c56805654c15abccc1b2fd576c8d93aca0a3f74b4aba2dc92510e2 AS runtime
+FROM python:3.14.10-slim-bookworm@sha256:e60ad028afdcdd14772a3d46decf0eaf616720f9102aeb4397a2045ff6718c3d AS runtime
 LABEL org.opencontainers.image.title="assist-live-server" \
       org.opencontainers.image.source="https://github.com/legion-works/assist-live-server" \
       org.opencontainers.image.licenses="Project code: Apache-2.0; third-party components: see /app/THIRD_PARTY_NOTICES.md"

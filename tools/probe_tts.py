@@ -259,6 +259,9 @@ It must have 366.19 ms and a Python 3.12 worker.
 ## Measurements
 
 Measurement date: `{selection["measured_at"]}`.
+The measurement versions apply to that run.
+The license records below identify the current image inputs.
+
 Hardware class: `{selection["hardware"]}`.
 All engines used the CPU. Other processes shared the host.
 The test used no CPU affinity or frequency lock.
@@ -305,7 +308,7 @@ It uses linear interpolation without clipping.
 
 ## Packaging limits
 
-Piper uses ONNX Runtime 1.31.0.
+The measured Piper configuration used ONNX Runtime 1.31.0.
 Its session uses four intra-op `threads` and one inter-op `thread`.
 It uses sequential execution.
 Piper 1.8.0 declares Python `>=3.9`.
@@ -329,7 +332,8 @@ Image inventory: `NOT CHECKED`. There is no image.
 
 ## Licenses and sources
 
-Sources accessed: 2026-10-25.
+Source access date for NumPy 2.5.5 and ONNX Runtime 1.32.0: 2026-11-26.
+Source access date for the other components: 2026-10-25.
 Piper code uses GPL-3.0-or-later, not Apache-2.0.
 
 The Lessac `model card` gives a URL for the custom Blizzard 2013 research license.

@@ -232,14 +232,14 @@ There is no downloaded feature-extractor configuration.
 It uses 80 `features`, a 400-sample FFT, a 160-sample hop, and `dither=0.0`.
 NumPy supplies `feature extraction`. The probe loads no PyTorch model.
 
-The probe uses these development dependencies:
+The measured probe used these development dependencies:
 
 - NumPy `{result["numpy_version"]}`.
 - ONNX Runtime `{result["onnxruntime_version"]}`.
 - Transformers `{result["transformers_version"]}`.
 
 The client has no model-runtime dependency.
-The package versions and wheel hashes are in `uv.lock`.
+See the `uv.lock` file at the probe revision for its package versions and wheel hashes.
 Package licenses and Python floors are in `docs/verification.md`.
 
 ## Input and clocks

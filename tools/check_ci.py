@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import tempfile
+import tomllib
 import zipfile
 from pathlib import Path
 
@@ -68,6 +69,26 @@ def check_ci(root: Path = ROOT) -> list[str]:
         except OSError, ValueError, KeyError, TypeError, AttributeError, yaml.YAMLError:
             errors.append(f"{name}: invalid workflow")
     ci = workflows.get("ci", {}).get("jobs", {})
+    try:
+        matrix = ci["checks"]["strategy"]["matrix"]
+        image_pins = set(
+            re.findall(
+                r"^FROM python:(\d+\.\d+\.\d+)-",
+                (root / "Dockerfile").read_text(),
+                re.M,
+            )
+        )
+        if len(image_pins) != 1 or set(matrix["python"]) != image_pins:
+            errors.append("ci: checks: Python matrix must match the image Python pin")
+        floor = tomllib.loads((root / "pyproject.toml").read_text())["project"][
+            "requires-python"
+        ].removeprefix(">=")
+        if {"check": "unit", "python": floor} not in matrix["include"]:
+            errors.append(
+                "ci: checks: unit matrix must include the declared Python floor"
+            )
+    except OSError, ValueError, KeyError, TypeError:
+        errors.append("ci: checks: invalid Python matrix or version sources")
     final = ci.get("ci-complete", {})
     if final.get("if") != "always()" or set(final.get("needs", [])) != set(ci) - {
         "ci-complete"

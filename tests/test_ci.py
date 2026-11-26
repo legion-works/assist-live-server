@@ -106,7 +106,8 @@ def test_secret_scans_include_history_and_full_checkout(tmp_path):
     }
 
 
-def test_ci_runs_tests_on_declared_floor():
+def test_ci_runs_tests_on_image_python_and_declared_floor():
+    import re
     import tomllib
 
     floor = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"][
@@ -115,6 +116,14 @@ def test_ci_runs_tests_on_declared_floor():
     workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
     job = workflow["jobs"]["checks"]
     matrix = job["strategy"]["matrix"]
+    python_pins = set(
+        re.findall(
+            r"^FROM python:(\d+\.\d+\.\d+)-",
+            (ROOT / "Dockerfile").read_text(),
+            re.M,
+        )
+    )
+    assert len(python_pins) == 1 and set(matrix["python"]) == python_pins
     assert {"check": "unit", "python": floor} in matrix["include"]
     setup = next(
         step
@@ -379,8 +388,8 @@ def test_server_wheel_requires_client(tmp_path, direct_wheel):
         "Requires-Dist", []
     )
     requirements = metadata.get_all("Requires-Dist", [])
-    assert "numpy==2.5.4" in requirements
-    assert "onnxruntime==1.31.0" in requirements
+    assert "numpy==2.5.5" in requirements
+    assert "onnxruntime==1.32.0" in requirements
     assert not any("torch" in value or "silero-vad" in value for value in requirements)
     with zipfile.ZipFile(wheel_path) as wheel:
         manifest = wheel.read("assist_live_server/assets/manifest.json")
@@ -438,6 +447,11 @@ def test_ci_structure_and_pins():
             "publish-client: build: read-only job permissions required",
         ),
         ("other-workflow-token", "ci: checks: read-only job permissions required"),
+        ("old-python", "ci: checks: Python matrix must match the image Python pin"),
+        (
+            "missing-floor",
+            "ci: checks: unit matrix must include the declared Python floor",
+        ),
         (
             "other-release-job",
             "release-please: other: read-only job permissions required",
@@ -450,7 +464,12 @@ def test_publish_permissions_are_scoped_to_one_job(tmp_path, mutation, expected)
     from tools.check_ci import check_ci
 
     shutil.copytree(ROOT / ".github", tmp_path / ".github")
-    for filename in ("release-please-config.json", ".release-please-manifest.json"):
+    for filename in (
+        "release-please-config.json",
+        ".release-please-manifest.json",
+        "Dockerfile",
+        "pyproject.toml",
+    ):
         shutil.copyfile(ROOT / filename, tmp_path / filename)
     guard = (
         "      - name: Require publication approval\n"
@@ -495,6 +514,15 @@ def test_publish_permissions_are_scoped_to_one_job(tmp_path, mutation, expected)
                 "  checks:\n", "  checks:\n    permissions:\n      id-token: write\n"
             )
         )
+    elif mutation in ("old-python", "missing-floor"):
+        path = tmp_path / ".github/workflows/ci.yml"
+        workflow_ci = yaml.safe_load(path.read_text())
+        matrix = workflow_ci["jobs"]["checks"]["strategy"]["matrix"]
+        if mutation == "old-python":
+            matrix["python"] = ["3.14.3"]
+        else:
+            matrix["include"] = []
+        path.write_text(yaml.safe_dump(workflow_ci))
     elif mutation == "other-release-job":
         path = tmp_path / ".github/workflows/release-please.yml"
         original = path.read_text()
@@ -543,7 +571,12 @@ def test_release_guard_and_action_pin_mutations(tmp_path):
     from tools.check_ci import check_ci
 
     shutil.copytree(ROOT / ".github", tmp_path / ".github")
-    for filename in ("release-please-config.json", ".release-please-manifest.json"):
+    for filename in (
+        "release-please-config.json",
+        ".release-please-manifest.json",
+        "Dockerfile",
+        "pyproject.toml",
+    ):
         shutil.copyfile(ROOT / filename, tmp_path / filename)
     assert not check_ci(tmp_path)
     path = tmp_path / ".github/workflows/release-artifacts.yml"

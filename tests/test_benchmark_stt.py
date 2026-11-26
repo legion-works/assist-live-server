@@ -373,12 +373,20 @@ def benchmark_copy(tmp_path):
 
 
 def test_documented_command_preserves_disclosures_on_copied_tree(benchmark_copy):
+    from importlib.metadata import version
+
     tree, command, _, _ = benchmark_copy
     process = subprocess.run(
         command, cwd=tree, capture_output=True, text=True, timeout=30
     )
     assert process.returncode == 0, process.stdout + process.stderr
     report = (tree / "docs/research/q6-streaming-stt.md").read_text()
+    committed = (ROOT / "docs/research/q6-streaming-stt.md").read_text()
+    assert report.splitlines()[3] == committed.splitlines()[3]
+    installed = version("onnxruntime")
+    assert report.count(f'"onnxruntime": "{installed}"') == 2
+    frozen = json.loads((Path(command[-1]) / "selection.json").read_text())
+    assert frozen["onnxruntime_version"] == installed
     for heading in [
         "Initial test and corrected tail",
         "Harness checks",
@@ -395,6 +403,8 @@ def test_documented_command_preserves_disclosures_on_copied_tree(benchmark_copy)
 
 @pytest.mark.parametrize("split", ["tuning", "held_out"])
 def test_split_command_keeps_complete_public_export(benchmark_copy, split):
+    from importlib.metadata import version
+
     from tools.benchmark_stt import provider_identity
 
     tree, command, _, manifest = benchmark_copy
@@ -405,6 +415,7 @@ def test_split_command_keeps_complete_public_export(benchmark_copy, split):
         label_path = Path(command[command.index("--labels") + 1])
         frozen = {
             "candidate": "parakeet",
+            "onnxruntime_version": version("onnxruntime"),
             "label_sha256": hashlib.sha256(label_path.read_bytes()).hexdigest(),
             "providers": {
                 name: provider_identity(c, 4)
@@ -427,6 +438,32 @@ def test_split_command_keeps_complete_public_export(benchmark_copy, split):
     )
     assert process.returncode == 0, process.stdout + process.stderr
     assert export.read_bytes() == before
+
+
+@pytest.mark.parametrize("saved", [None, "0.0.0"])
+def test_saved_onnxruntime_mismatch_stops_before_decode(benchmark_copy, saved):
+    from importlib.metadata import version
+
+    tree, command, _, _ = benchmark_copy
+    models = Path(command[-1])
+    freeze = models / "selection.json"
+    frozen = {} if saved is None else {"onnxruntime_version": saved}
+    freeze.write_text(json.dumps(frozen))
+    process = subprocess.run(
+        command + ["--split", "held_out"],
+        cwd=tree,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert process.returncode == 1
+    expected = "unrecorded" if saved is None else saved
+    assert (
+        f"ONNXRUNTIME_VERSION_MISMATCH: installed {version('onnxruntime')}, "
+        f"saved {expected}"
+    ) in process.stdout
+    assert not (models / "measurements-held_out.json").exists()
+    assert json.loads(freeze.read_text()) == frozen
 
 
 def test_empty_reference_has_named_cli_failure(benchmark_copy):

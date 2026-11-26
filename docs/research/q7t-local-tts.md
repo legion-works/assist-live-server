@@ -15,6 +15,9 @@ It must have 366.19 ms and a Python 3.12 worker.
 ## Measurements
 
 Measurement date: `2026-10-25`.
+The measurement versions apply to that run.
+The license records below identify the current image inputs.
+
 Hardware class: `AMD Ryzen AI Max+ 395, x86-64 Linux, 16 cores and 32 logical threads`.
 All engines used the CPU. Other processes shared the host.
 The test used no CPU affinity or frequency lock.
@@ -65,7 +68,7 @@ It uses linear interpolation without clipping.
 
 ## Packaging limits
 
-Piper uses ONNX Runtime 1.31.0.
+The measured Piper configuration used ONNX Runtime 1.31.0.
 Its session uses four intra-op `threads` and one inter-op `thread`.
 It uses sequential execution.
 Piper 1.8.0 declares Python `>=3.9`.
@@ -89,7 +92,8 @@ Image inventory: `NOT CHECKED`. There is no image.
 
 ## Licenses and sources
 
-Sources accessed: 2026-10-25.
+Source access date for NumPy 2.5.5 and ONNX Runtime 1.32.0: 2026-11-26.
+Source access date for the other components: 2026-10-25.
 Piper code uses GPL-3.0-or-later, not Apache-2.0.
 
 The Lessac `model card` gives a URL for the custom Blizzard 2013 research license.
@@ -315,19 +319,19 @@ a copy of the Unicode data files and any associated documentation
 
 License: `MIT`.
 
-Source: https://files.pythonhosted.org/packages/30/2e/5c6ec7e26a097e97ee70f2dee68b8ca4d9d26701f2f33c3f8ab585cb89fe/onnxruntime-1.31.0-cp314-cp314-manylinux_2_28_x86_64.whl
+Source: https://files.pythonhosted.org/packages/94/b5/cd55e7f1dfcf2e5fbf3a6915a8c6b4cf81df091e81de2db40e58357ffba4/onnxruntime-1.32.0-cp314-cp314-manylinux_2_28_x86_64.whl
 
-SHA-256: `e4efa4a1a0bb0b5173c6a3292c181d518b8323f9d56e978635d0c09d38c94d1a`.
+SHA-256: `48b878f9551d465aa79ee94ecaf49a1f6b5d27f2975efa775ded374db14d0af1`.
 
 Attribution:
 
 ```text
-ONNX Runtime 1.31.0. Copyright (c) Microsoft Corporation. MIT. Preserve the package license and third-party notices.
+ONNX Runtime 1.32.0. Copyright (c) Microsoft Corporation. MIT. Preserve the package license and third-party notices.
 ```
 
-- License source: https://pypi.org/pypi/onnxruntime/1.31.0/json
-- Source revision or version: `1.31.0`.
-- File: `onnxruntime-1.31.0-cp314-cp314-manylinux_2_28_x86_64.whl`. SHA-256: `e4efa4a1a0bb0b5173c6a3292c181d518b8323f9d56e978635d0c09d38c94d1a`.
+- License source: https://pypi.org/pypi/onnxruntime/1.32.0/json
+- Source revision or version: `1.32.0`.
+- File: `onnxruntime-1.32.0-cp314-cp314-manylinux_2_28_x86_64.whl`. SHA-256: `48b878f9551d465aa79ee94ecaf49a1f6b5d27f2975efa775ded374db14d0af1`.
 
 License statement:
 
@@ -339,19 +343,19 @@ MIT License
 
 License: `BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0`.
 
-Source: https://files.pythonhosted.org/packages/16/d5/928078d2b28f26829b138b4a6c3980045022fb409f570657a224ae60ef4e/numpy-2.5.4-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
+Source: https://files.pythonhosted.org/packages/a4/1f/fcdce1061fba2bfb2e9bfda01fbd8132d5f7522a4f7c8e2b2f629d54ee38/numpy-2.5.5-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
 
-SHA-256: `d549420b8858885cea8838a727842249218b9c1da24dd517e25c9c7a948310a3`.
+SHA-256: `c48960d420e90cf305cb1fde0d4e6082cc90512cda87a9acf0b6e04e91cf4abe`.
 
 Attribution:
 
 ```text
-NumPy 2.5.4. Copyright (c) 2005-2025, NumPy Developers. BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0. Preserve the full package and bundled-library notices.
+NumPy 2.5.5. Copyright (c) 2005-2025, NumPy Developers. BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0. Preserve the full package and bundled-library notices.
 ```
 
-- License source: https://pypi.org/pypi/numpy/2.5.4/json
-- Source revision or version: `2.5.4`.
-- File: `numpy-2.5.4-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl`. SHA-256: `d549420b8858885cea8838a727842249218b9c1da24dd517e25c9c7a948310a3`.
+- License source: https://pypi.org/pypi/numpy/2.5.5/json
+- Source revision or version: `2.5.5`.
+- File: `numpy-2.5.5-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl`. SHA-256: `c48960d420e90cf305cb1fde0d4e6082cc90512cda87a9acf0b6e04e91cf4abe`.
 
 License statement:
 

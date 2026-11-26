@@ -135,7 +135,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ## Cost probe dependencies
 
-The server runtime uses NumPy 2.5.4 and ONNX Runtime 1.31.0.
+The server runtime uses NumPy 2.5.5 and ONNX Runtime 1.32.0.
 The development environment also uses Transformers 5.20.2.
 The client package has none of these dependencies. The service image includes the runtime libraries.
 The package metadata declares these licenses:
@@ -244,10 +244,13 @@ SOFTWARE.
 ## Selected local TTS components
 
 The server runtime uses Piper 1.8.0 and pathvalidate 3.3.1.
-NumPy 2.5.4 and ONNX Runtime 1.31.0 are also runtime dependencies, not development-only dependencies.
+NumPy 2.5.5 and ONNX Runtime 1.32.0 are also runtime dependencies, not development-only dependencies.
 The service image keeps the installed packages and their license files.
 The model and package bytes stay external to the repository.
-Sources accessed: 2026-10-25. See `docs/research/q7t-local-tts.md` for the pinned sources and quotations.
+
+Source access date for NumPy 2.5.5 and ONNX Runtime 1.32.0: 2026-11-26.
+Source access date for the other components: 2026-10-25.
+See `docs/research/q7t-local-tts.md` for the pinned sources and quotations.
 
 ### Piper runtime
 
@@ -331,11 +334,11 @@ Documentation.
 ### Python runtime libraries
 
 ```text
-ONNX Runtime 1.31.0. Copyright (c) Microsoft Corporation. MIT. Preserve the package license and third-party notices.
+ONNX Runtime 1.32.0. Copyright (c) Microsoft Corporation. MIT. Preserve the package license and third-party notices.
 ```
 
 ```text
-NumPy 2.5.4. Copyright (c) 2005-2025, NumPy Developers. BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0. Preserve the full package and bundled-library notices.
+NumPy 2.5.5. Copyright (c) 2005-2025, NumPy Developers. BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0. Preserve the full package and bundled-library notices.
 ```
 
 ```text
@@ -345,8 +348,8 @@ Copyright (c) 2016-2025 Tsuyoshi Hombashi
 
 Package declarations:
 
-- https://pypi.org/pypi/onnxruntime/1.31.0/json
-- https://pypi.org/pypi/numpy/2.5.4/json
+- https://pypi.org/pypi/onnxruntime/1.32.0/json
+- https://pypi.org/pypi/numpy/2.5.5/json
 - https://pypi.org/pypi/pathvalidate/3.3.1/json
 
 The pinned wheels contain the complete upstream license files.
@@ -399,9 +402,9 @@ Only `onnx_asr/preprocessors/data/fbanks.npz` supplies data for the selected Num
 The selected providers do not use the other bundled ONNX files and NumPy arrays.
 
 ```text
-numpy 2.5.4. BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0. Preserve the wheel license and notices.
+numpy 2.5.5. BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0. Preserve the wheel license and notices.
 onnx-asr 0.12.0. MIT. Preserve the wheel license and notices.
-onnxruntime 1.31.0. MIT. Preserve the wheel license and notices.
+onnxruntime 1.32.0. MIT. Preserve the wheel license and notices.
 piper-tts 1.8.0. GPL-3.0-or-later. Preserve the wheel license and notices.
 Nakdimon. Copyright 2022, Elazar Gershuni. MIT. Preserve piper/hebrew/LICENSE and SOURCE.
 ```
@@ -442,14 +445,14 @@ The image checker compares this record with the manifest and installed metadata.
 
 ## Base image and operating-system packages
 
-The base is the official `python:3.14.3-slim-bookworm` multi-platform image:
+The base is the official `python:3.14.10-slim-bookworm` multi-platform image:
 
 ```text
-sha256:f21c0d5a44c56805654c15abccc1b2fd576c8d93aca0a3f74b4aba2dc92510e2
+sha256:e60ad028afdcdd14772a3d46decf0eaf616720f9102aeb4397a2045ff6718c3d
 ```
 
 Python uses the PSF license. Its license text is `/usr/local/lib/python3.14/LICENSE.txt`.
-Source: https://www.python.org/downloads/release/python-3143/.
+Source: https://www.python.org/downloads/release/python-31410/.
 The base image also keeps its `pip` installer, its MIT notice files, and its Python headers.
 The server does not use these files. The image does not delete base-image package files.
 

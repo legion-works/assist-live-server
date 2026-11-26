@@ -1,6 +1,7 @@
 # Local STT measurements
 
 Date: 2026-10-25. The project is experimental and has no release.
+The versions in this record apply to these measurements, not to the current server image.
 
 ## Decision
 

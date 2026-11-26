@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import importlib
+import importlib.metadata
 import json
 import math
 import os
@@ -156,7 +157,7 @@ def runtime_configuration(candidate: Row, threads: int) -> Row:
     if compatible:
         config.update(
             runtime="onnx-asr==0.12.0",
-            onnxruntime="1.31.0",
+            onnxruntime=importlib.metadata.version("onnxruntime"),
             model="nemo-parakeet-tdt-0.6b-v2",
             quantization="int8",
             inter_op_threads=1,
@@ -573,9 +574,14 @@ def render_report(
     )
     parakeet = [r for r in results if r["candidate"] == "parakeet"]
     fillers = sum(r["initial_nonreference"] for r in parakeet)
+    version_note = (
+        "The versions in this record apply to these measurements, "
+        "not to the current server image."
+    )
     return f"""# Local STT measurements
 
 Date: 2026-10-25. The project is experimental and has no release.
+{version_note}
 
 ## Decision
 
@@ -860,6 +866,16 @@ def main(argv: list[str] | None = None) -> int:
         }
         if set(candidates) != {"parakeet", "sherpa-zipformer", "fastconformer"}:
             raise ValueError("comparison requires the three declared candidates")
+        onnxruntime_version = importlib.metadata.version("onnxruntime")
+        freeze = args.model_root / "selection.json"
+        saved_selection = json.loads(freeze.read_text()) if freeze.exists() else None
+        if saved_selection is not None:
+            saved_version = saved_selection.get("onnxruntime_version", "unrecorded")
+            if saved_version != onnxruntime_version:
+                raise ValueError(
+                    f"ONNXRUNTIME_VERSION_MISMATCH: installed {onnxruntime_version}, "
+                    f"saved {saved_version}; use a new model root to select again"
+                )
         labels = [
             json.loads(line)
             for line in args.labels.read_text().splitlines()
@@ -876,6 +892,7 @@ def main(argv: list[str] | None = None) -> int:
             if not words(label["transcript"]):
                 raise ValueError(f"empty reference transcript: {label['id']}")
         identity: Row = {
+            "onnxruntime_version": onnxruntime_version,
             "label_sha256": hashlib.sha256(args.labels.read_bytes()).hexdigest(),
             "selection_rule": {
                 "wer_margin_pp": 1.0,
@@ -888,7 +905,6 @@ def main(argv: list[str] | None = None) -> int:
                 for name, c in candidates.items()
             },
         }
-        freeze = args.model_root / "selection.json"
         environment = {
             "cpu": next(
                 (
@@ -906,7 +922,7 @@ def main(argv: list[str] | None = None) -> int:
             "runtimes": {
                 "onnx-asr": "0.12.0",
                 "sherpa-onnx": "2.0.0",
-                "onnxruntime": "1.31.0",
+                "onnxruntime": onnxruntime_version,
             },
             "effective_provider_configurations": {
                 name: runtime_configuration(candidate, args.threads)
@@ -942,7 +958,9 @@ def main(argv: list[str] | None = None) -> int:
             }
 
         if args.split == "held_out":
-            frozen = json.loads(freeze.read_text())
+            if saved_selection is None:
+                raise ValueError("held-out evaluation needs a saved selection")
+            frozen = saved_selection
             if any(frozen[k] != v for k, v in identity.items()):
                 raise ValueError("frozen input or provider identity mismatch")
             results = [
@@ -1016,7 +1034,12 @@ def main(argv: list[str] | None = None) -> int:
             + ("; no streaming default" if frozen["candidate"] == "parakeet" else "")
         )
         return 0
-    except (ValueError, OSError, KeyError) as error:
+    except (
+        ValueError,
+        OSError,
+        KeyError,
+        importlib.metadata.PackageNotFoundError,
+    ) as error:
         print(f"FAIL Q6 comparison: {error}")
         return 1
 

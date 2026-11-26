@@ -9,7 +9,9 @@ Do not add personal data, secrets, or household recordings.
 ## Development checks
 
 Use Python `3.14.2` or above, `uv`, Task, actionlint, Gitleaks, and OpenSSL.
-The CI workflow pins the tool versions. CI tests Python `3.14.2` and `3.14.3`.
+The CI workflow pins the tool versions. CI tests Python `3.14.2` and `3.14.10`.
+The server image uses Python `3.14.10`.
+
 The DNS-recovery TLS tests use the `openssl` command to make temporary certificates. Without it, the tests stop with `OPENSSL_REQUIRED_FOR_TLS_TEST`.
 Run these commands from the repository root:
 

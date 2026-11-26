@@ -4867,3 +4867,54 @@ The live audio has no set of correct transcripts from a human check.
 | Public-tree check with the private denylist | Exit 0, no public data found |
 
 The count does not change, because the new real-model test replaces the earlier test that a shared model gets its initial state again.
+
+## Server image inputs (2026-11-26 UTC)
+
+The build and runtime images use `python:3.14.10-slim-bookworm` at OCI index digest
+`sha256:e60ad028afdcdd14772a3d46decf0eaf616720f9102aeb4397a2045ff6718c3d`.
+The Docker Hub registry API supplied the index.
+The index includes Linux amd64 and arm64 images.
+The server lock pins NumPy `2.5.5` and ONNX Runtime `1.32.0`.
+The two packages supply CPython 3.14 wheels for those platforms.
+The bundled data files in those wheels have the same hashes as before.
+
+| Package | Python floor | Source |
+|---|---|---|
+| NumPy `2.5.5` | `>=3.12` | https://pypi.org/pypi/numpy/2.5.5/json |
+| ONNX Runtime `1.32.0` | `>=3.11` | https://pypi.org/pypi/onnxruntime/1.32.0/json |
+
+NumPy updates OpenBLAS and corrects some array operations.
+ONNX Runtime 1.32.0 release notes: `UNVERIFIED`.
+The upstream release page and the page that compares the two tags gave HTTP 404.
+
+The gateway test used baseline commit `574bc38` with CPython `3.14.3`, NumPy `2.5.4`, and ONNX Runtime `1.31.0`.
+The test used the candidate with CPython `3.14.10` and the new lock.
+Each tree used a different environment and its own lock.
+The two trees used the same cached models, Parakeet, the `partial` end rule, and 1,024-byte messages.
+Each pair had the same command onset sample, end sample, and last transcript.
+
+| Set | Pairs | Onset differences | End differences | Transcript differences |
+|---|---:|---:|---:|---:|
+| Household | 8 | 0 | 0 | 0 |
+| Operator script | 45 | 0 | 0 | 0 |
+| Corpus | 250 | 0 | 0 | 0 |
+| Live | 44 | 0 | 0 | 0 |
+| Total | 347 | 0 | 0 | 0 |
+
+| Replay | Slot start (UTC) | Final row write (UTC) |
+|---|---|---|
+| Household and operator script | `09:57:48Z` | `10:01:09.216Z` |
+| Corpus | `10:33:00Z` | `11:05:02.803Z` |
+| Live | `11:33:00Z` | `11:36:19.560Z` |
+
+| Gate | Result |
+|---|---|
+| `task check` on Python 3.14.10 | Exit 0, `2759 passed, 1 skipped` |
+| Python 3.14.2 floor | Exit 0, `2759 passed, 1 skipped` in 59.65 s |
+| Network-isolated suite on Python 3.14.10 | Exit 0, `2759 passed, 1 skipped` in 62.57 s |
+| `tests/test_package.py` and `tests/test_release.py` | Exit 0, `39 passed` in 1.41 s |
+| Public-tree check with the private denylist | Exit 0, `PASS public data matches=0` |
+
+`task check` did not run its public-tree step because this worktree has no sibling integration checkout.
+The other public-tree check used the checker in the integration checkout.
+The tests did not build, pull, or examine an image.
