@@ -5003,3 +5003,11 @@ If the check examines only open or closing turns again, the test gives the same 
 
 The selected store, startup, and health tests gave `25 passed`.
 `task check`, the Python 3.14.2 suite, and the network-isolated suite each gave `2801 passed, 1 skipped` for this change.
+
+## CI `uv` version for Python 3.14.10 (2026-11-27 UTC)
+
+Hosted CI gave a failure on `709883b`, `7a2827e` and `ba9ca4b` at `uv sync --locked` with `error: No interpreter found for Python 3.14.10 in managed installations or search path`.
+The pinned `uv` `0.13.1` does not know the Python `3.14.10` download.
+The workflows pin `uv` to `0.13.9`, the version that installed Python `3.14.10` for the local gates.
+The image build keeps `uv` `0.13.1`, because the base image supplies Python `3.14.10`.
+The local gates on those commits gave no failure, because they use the local `uv`.

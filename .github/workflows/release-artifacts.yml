@@ -19,7 +19,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@85856786d1ce8acfbcc2f13a5f3fbd6b938f9f41 # v7.1.2
         with:
-          version: "0.13.1"
+          version: "0.13.9"
           python-version: "3.14.3"
       - run: uv sync --locked
         env:
@@ -45,7 +45,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@85856786d1ce8acfbcc2f13a5f3fbd6b938f9f41 # v7.1.2
         with:
-          version: "0.13.1"
+          version: "0.13.9"
           python-version: "3.14.3"
       - run: uv sync --locked
         env:

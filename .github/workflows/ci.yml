@@ -28,7 +28,7 @@ jobs:
           fetch-depth: 0
       - uses: astral-sh/setup-uv@85856786d1ce8acfbcc2f13a5f3fbd6b938f9f41 # v7.1.2
         with:
-          version: "0.13.1"
+          version: "0.13.9"
           python-version: ${{ matrix.python }}
       - uses: go-task/setup-task@0ab1b2a65bc55236a3bc64cde78f80e20e8885c2 # v1.0.0
         with:
@@ -95,7 +95,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@85856786d1ce8acfbcc2f13a5f3fbd6b938f9f41 # v7.1.2
         with:
-          version: "0.13.1"
+          version: "0.13.9"
           python-version: "3.14.3"
       - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
         with:
