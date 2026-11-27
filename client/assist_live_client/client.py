@@ -6,7 +6,7 @@ import socket
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from dataclasses import asdict
 from ipaddress import ip_address
-from typing import Any
+from typing import Any, Never
 
 import aiohttp
 
@@ -48,6 +48,12 @@ async def _refuse_redirects(
         response.close()
         raise ProtocolError("redirect refused", kind="refused")
     return response
+
+
+def _refuse_status(status: int, message: str) -> Never:
+    if status == 401:
+        raise ProtocolError(message, kind="unauthorized") from None
+    raise ProtocolError(message, kind="refused") from None
 
 
 class AssistLiveClient:
@@ -170,19 +176,24 @@ class AssistLiveClient:
         if connector is None or connector.closed:
             raise ProtocolError("session closed", kind="closed")
         # aiohttp does not accept redirect options in ws_connect.
-        async with (
-            aiohttp.ClientSession(
-                connector=connector,
-                connector_owner=False,
-                headers=base.headers,
-                timeout=base.timeout,
-                middlewares=(_refuse_redirects,),
-            ) as session,
-            self._connect(
-                session.ws_connect, path, max_msg_size=max_msg_size, compress=0
-            ) as ws,
-        ):
-            yield ws
+        try:
+            async with (
+                aiohttp.ClientSession(
+                    connector=connector,
+                    connector_owner=False,
+                    headers=base.headers,
+                    timeout=base.timeout,
+                    middlewares=(_refuse_redirects,),
+                ) as session,
+                self._connect(
+                    session.ws_connect, path, max_msg_size=max_msg_size, compress=0
+                ) as ws,
+            ):
+                yield ws
+        except aiohttp.WSServerHandshakeError as error:
+            if error.status == 401:
+                _refuse_status(error.status, "WebSocket upgrade refused")
+            raise
 
     async def _request(
         self,
@@ -207,7 +218,7 @@ class AssistLiveClient:
                 allow_redirects=False,
             ) as response:
                 if response.status != 200:
-                    raise ProtocolError("request refused", kind="refused")
+                    _refuse_status(response.status, "request refused")
                 value = bytearray()
                 async for chunk in response.content.iter_chunked(1024):
                     if len(value) + len(chunk) > response_max:
@@ -226,7 +237,9 @@ class AssistLiveClient:
                 return parse_json(bytes(value), response_max)
         except TimeoutError:
             raise ProtocolError("request failed", kind="timeout") from None
-        except aiohttp.ClientError:
+        except aiohttp.ClientError as error:
+            if isinstance(error, aiohttp.ClientResponseError) and error.status == 401:
+                _refuse_status(error.status, "request refused")
             raise ProtocolError("request failed", kind="closed") from None
         except ValueError:
             raise ProtocolError("request failed", kind="malformed") from None
@@ -235,7 +248,9 @@ class AssistLiveClient:
         try:
             value = await self._request("GET", "/health", timeout=timeout)
             return value.get("version") == 1 and value.get("healthy") is True
-        except ProtocolError:
+        except ProtocolError as error:
+            if error.kind == "unauthorized":
+                raise
             return False
 
     async def health_capabilities(self, timeout: float = 0.2) -> HealthCapabilities:
@@ -397,7 +412,7 @@ class AssistLiveClient:
                 allow_redirects=False,
             ) as response:
                 if response.status != 200:
-                    raise ProtocolError("export refused", kind="refused")
+                    _refuse_status(response.status, "export refused")
                 line = bytearray()
                 cursor = 0
                 async for chunk in response.content.iter_chunked(1024):
@@ -423,7 +438,9 @@ class AssistLiveClient:
                     raise ProtocolError("incomplete export line", kind="malformed")
         except TimeoutError:
             raise ProtocolError("export failed", kind="timeout") from None
-        except aiohttp.ClientError:
+        except aiohttp.ClientError as error:
+            if isinstance(error, aiohttp.ClientResponseError) and error.status == 401:
+                _refuse_status(error.status, "export refused")
             raise ProtocolError("export failed", kind="closed") from None
         except ValueError, TypeError, KeyError:
             raise ProtocolError("export failed", kind="malformed") from None

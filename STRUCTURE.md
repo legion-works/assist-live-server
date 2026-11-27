@@ -114,4 +114,4 @@ Credentials alone do not select a cloud service.
 - `tests/contract/test_health.py`: STT-only, TTS-only, and full health responses.
 - `docs/configuration.md`: provider options, speaker request shape, source revision, and privacy policy.
 
-The client `models.py` exports `HealthCapabilities`. The boolean `health()` method stays compatible with older clients.
+The client `models.py` exports `HealthCapabilities`. From client `0.1.0a3`, the Boolean `health()` method stops with `ProtocolError(kind="unauthorized")` on HTTP 401. Other failures give `False`.

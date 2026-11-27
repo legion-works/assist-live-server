@@ -25,7 +25,8 @@ class ProtocolError(Exception):
     def __init__(
         self,
         *args: object,
-        kind: Literal["refused", "closed", "timeout", "malformed"] | None = None,
+        kind: Literal["unauthorized", "refused", "closed", "timeout", "malformed"]
+        | None = None,
     ) -> None:
         super().__init__(*args)
         self.kind = kind

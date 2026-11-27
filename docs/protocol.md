@@ -74,6 +74,7 @@ The server sets this status at startup. After a change to the model cache, resta
 
 The client `health(timeout=0.2)` method keeps its boolean result: protocol version 1 and `healthy=true`.
 `health_capabilities(timeout=0.2)` gives `HealthCapabilities`, with the function flags, policy, destinations, and TTS voices.
+From client `0.1.0a3`, `health()` stops with `ProtocolError(kind="unauthorized")` on HTTP 401. Other failures, such as HTTP 503 and timeouts, give `False`.
 Missing function flags default to `false` without an error.
 Three positional constructor arguments keep `text_positions=false`.
 
@@ -832,12 +833,20 @@ Do not use an export that stops during a write as a complete export.
 
 `ProtocolError.kind` gives the error class without a message-text check:
 
-- `refused`: the client refuses a redirect, or the server refuses an HTTP request, negotiation, or audio request.
-- `closed`: a transport error or a closed stream stops the operation.
-- `timeout`: an operation does not complete before its deadline.
-- `malformed`: a request, response, or stream has invalid data.
+| `kind` | Condition |
+| --- | --- |
+| `unauthorized` | An HTTP request or a WebSocket upgrade gets HTTP 401. Available from client `0.1.0a3`. |
+| `refused` | The client stops on a redirect, a non-200 HTTP response other than 401, or a negotiation or audio refusal. |
+| `closed` | A transport error, a closed stream, or an HTTP error from the session stops the operation. |
+| `timeout` | An operation does not complete before its deadline. |
+| `malformed` | A request, response, or stream has invalid data. |
 
-The `ProtocolError` class stays unchanged. From client `0.1.0a2`, a refused WebSocket redirect gives the message `redirect refused`, and a closed supplied session gives `session closed`. Use `kind`, not the message text, to select the next step.
+The server gives HTTP 401 for an incorrect token and HTTP 403 for a satellite, turn, or owner refusal. Server responses do not change for client `0.1.0a2`.
+
+The client gives `closed` for an HTTP error other than 401 if the supplied HTTP session uses `raise_for_status`. A WebSocket upgrade failure other than HTTP 401 or a redirect also gives `closed`.
+If the supplied HTTP session uses a proxy and the proxy gives HTTP 401 for `CONNECT`, the client also gives `unauthorized`.
+
+From client `0.1.0a2`, a refused WebSocket redirect gives the message `redirect refused`, and a closed supplied session gives `session closed`. Use `kind`, not the message text, to select the next step.
 `ProtocolError(*args)` keeps its arguments and defaults to `kind=None`.
 For callers, `None` means an unclassified error. All client error sites set `kind`.
 

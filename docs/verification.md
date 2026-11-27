@@ -5047,3 +5047,19 @@ That `task check` run took 265 s at high host load. The Python 3.14.2 and isolat
 The test has had this 20 s wait since 2026-10-26.
 The three subprocess startup waits in `tests/test_main.py` use a 60 s hang guard.
 The guard does not state a startup time requirement, and each test keeps its assertions.
+
+## Client HTTP authorization errors (2026-11-27 UTC)
+
+Client `0.1.0a3` gives `ProtocolError(kind="unauthorized")` for HTTP 401 on requests and WebSocket upgrades. For other statuses, `kind` does not change from `0.1.0a2`. `health()` gives `False` for HTTP 503 and timeouts.
+The server response codes do not change. Client `0.1.0a3` also gives `closed` on an event subscription close.
+
+The first loopback check gave `39 failed` before the client change. A change from `unauthorized` back to `refused` gave `24 failed`. After restoration, the check with the new health tests gave `99 passed`.
+The same file and the two IPv6 loopback tests gave `101 passed` with resource warnings set to errors.
+
+The package check gave `PASS isolated client and server packages`. The contract suite on the isolated runner gave `18 failed, 653 passed`. Those failures came from checks for Git history, IPv6 loopback, or packaged STT. The Git history checks gave `13 passed` in a repository with history.
+
+The release procedure specifies an approved, annotated `client-v<version>` tag at the published commit after publication. No release or tag operation ran.
+
+The compatibility check on the first reviewed version of this change gave `30 failed, 93 passed`. HTTP 403 and 503 gave `refused` in those failures, not `closed`. The repair keeps `closed` for those statuses on a WebSocket upgrade or when the HTTP session uses `raise_for_status`. An HTTP 403 or 503 response without a session error gives `refused`. Redirects give `refused`.
+
+The repaired error-kind and redirect checks gave `133 passed` with resource warnings set to errors. The two IPv6 loopback checks also gave `2 passed`. A change from `unauthorized` to `refused` for HTTP 401 gave `25 failed, 98 passed`. The client keeps `unauthorized` for a proxy `CONNECT` reply with HTTP 401 on an HTTP request.

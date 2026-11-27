@@ -25,6 +25,8 @@ The project is experimental. The clients `0.1.0a1` and `0.1.0a2` are pre-release
 
 ### Client `0.1.0a3` (next pre-release)
 
+- Give `ProtocolError(kind="unauthorized")` for HTTP 401, also during a WebSocket upgrade.
+- Stop `health()` with `ProtocolError(kind="unauthorized")` on HTTP 401. Other failures, such as HTTP 503 and timeouts, give `False`.
 - Give `ProtocolError(kind="closed")` when the event subscription WebSocket closes.
 
 ### Client `0.1.0a2` (PyPI pre-release, 2026-11-25)

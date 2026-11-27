@@ -94,7 +94,8 @@ Local native checks include amd64 only. A CI definition does not prove a complet
 ## Publication approval
 
 Repository publication does not give permission to publish packages or images.
-Get new operator approval before PyPI publication, a registry login, an image push, a tag, or a release.
+Get new approval from the maintainer before PyPI publication, a registry login, or an image push.
+Get the maintainer's approval for the release before you tag it.
 The manual artifact workflow first makes sure that `vars.ASSIST_LIVE_RELEASES_APPROVED` equals `true`.
 Its default permission is `contents: read`. It has no upload or publish step.
 
@@ -130,10 +131,13 @@ Before the first publication, complete these steps:
    - Environment name: `pypi`.
 4. In the GitHub repository settings, make the environment `pypi`.
 5. Add a `required reviewer` to that environment before publication.
-6. Set the repository `variable` `ASSIST_LIVE_RELEASES_APPROVED` to `true` only after operator approval.
+6. Set the repository `variable` `ASSIST_LIVE_RELEASES_APPROVED` to `true` only after the maintainer gives approval.
 
 To publish, open **Actions → Publish client to PyPI → Run workflow** on the approved revision.
 Give approval for the `pypi` environment after the `build` task succeeds.
+
+After the publish workflow succeeds, make an annotated tag `client-v<version>` at the published commit. Push that tag to the repository.
+This name uses the release-please component `client` and separator `-`.
 
 After publication, run **Actions → Release artifact checks → Run workflow** on the same revision.
 Its client check uses `--require-published` to check that PyPI supplies a wheel for the specified version.

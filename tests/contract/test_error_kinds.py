@@ -2,14 +2,16 @@ import ast
 import asyncio
 import inspect
 import json
-from contextlib import asynccontextmanager
+from contextlib import aclosing, asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid7
 
 import aiohttp
 import pytest
-from assist_live_client import AssistLiveClient
+from aiohttp import web
+from aiohttp.test_utils import TestServer
+from assist_live_client import AssistLiveClient, TimingEvent, TurnOpen
 from assist_live_client.protocol import ProtocolError, encode_audio, encode_control
 
 
@@ -36,6 +38,7 @@ def test_every_protocol_error_raise_has_an_explicit_valid_kind():
                     assert len(kinds) == 1, (path.name, node.lineno)
                     assert isinstance(kinds[0], ast.Constant)
                     assert kinds[0].value in {
+                        "unauthorized",
                         "refused",
                         "closed",
                         "timeout",
@@ -123,6 +126,129 @@ async def source(value=None, signal=None):
         signal.set()
     if value is not None:
         yield value
+
+
+@pytest.mark.parametrize(
+    "operation,method,path",
+    [
+        ("bindings", "GET", "/v1/bindings"),
+        ("health", "GET", "/health"),
+        ("health_capabilities", "GET", "/health"),
+        ("set_hints", "PUT", "/v1/satellites/satellite-a/hints"),
+        ("open_turn", "POST", "/v1/turns"),
+        ("event", "POST", "/v1/event"),
+        ("turn", "GET", "/v1/turns/{turn_id}"),
+        ("export", "GET", "/v1/export"),
+        ("events", "WS", "/v1/events"),
+        ("stt", "WS", "/v1/audio"),
+        ("tts", "WS", "/v1/audio"),
+        ("tts_stream", "WS", "/v1/audio"),
+    ],
+)
+@pytest.mark.parametrize("status", [401, 403, 503])
+@pytest.mark.parametrize("raise_for_status", [False, True])
+def test_http_status_error_kind(
+    turn_id, operation, method, path, status, raise_for_status
+):
+    async def run():
+        seen = []
+
+        async def refuse(request):
+            seen.append(
+                (
+                    "WS"
+                    if request.headers.get("Upgrade") == "websocket"
+                    else request.method,
+                    request.path,
+                    request.headers.get("Authorization"),
+                )
+            )
+            return web.Response(status=status)
+
+        app = web.Application()
+        app.router.add_route("*", "/{path:.*}", refuse)
+        async with (
+            TestServer(app) as server,
+            aiohttp.ClientSession(raise_for_status=raise_for_status) as session,
+            AssistLiveClient(
+                str(server.make_url("/")), "test-token", session=session
+            ) as client,
+        ):
+            args = {
+                "set_hints": ("satellite-a", ["lamp"]),
+                "open_turn": (TurnOpen(turn_id, "satellite-a", "voice", None, None),),
+                "event": (
+                    TimingEvent(
+                        turn_id,
+                        "satellite-a",
+                        "integration",
+                        "mic_open",
+                        10,
+                        "measured",
+                        None,
+                    ),
+                ),
+                "turn": (turn_id,),
+                "export": ("satellite-a", 0),
+                "events": ("satellite-a",),
+                "stt": (turn_id, source(b"\0\0")),
+                "tts": (turn_id, source("test")),
+                "tts_stream": (turn_id, source("test")),
+            }
+            call = getattr(client, operation)(*args.get(operation, ()))
+            if operation == "health" and status != 401:
+                assert await call is False
+            else:
+                with pytest.raises(ProtocolError) as caught:
+                    if method == "WS" or operation == "export":
+                        async with aclosing(call):
+                            await anext(call)
+                    else:
+                        await call
+                if status == 401:
+                    assert caught.value.kind == "unauthorized"
+                elif method == "WS" or raise_for_status:
+                    assert caught.value.kind == "closed"
+                else:
+                    assert caught.value.kind == "refused"
+        assert seen == [
+            (method, path.format(turn_id=turn_id), "Bearer " + "test-token")
+        ]
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("status", [401, 503, None], ids=["401", "503", "timeout"])
+def test_boolean_health_raises_only_for_unauthorized(status):
+    async def run():
+        release = asyncio.Event()
+
+        async def health(_request):
+            if status is None:
+                await release.wait()
+            return web.Response(status=status or 200)
+
+        app = web.Application()
+        app.router.add_get("/health", health)
+        async with (
+            TestServer(app) as server,
+            AssistLiveClient(str(server.make_url("/")), "test-token") as client,
+        ):
+            try:
+                if status == 401:
+                    with pytest.raises(ProtocolError) as caught:
+                        await client.health(timeout=1)
+                    assert caught.value.kind == "unauthorized"
+                else:
+                    timeout = 0.05 if status is None else 1
+                    assert (
+                        await asyncio.wait_for(client.health(timeout=timeout), 2)
+                        is False
+                    )
+            finally:
+                release.set()
+
+    asyncio.run(run())
 
 
 @pytest.mark.parametrize(
