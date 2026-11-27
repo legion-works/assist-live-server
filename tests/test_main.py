@@ -35,6 +35,12 @@ runpy.run_module("assist_live_server", run_name="__main__")
     return [sys.executable, "-c", code, *args]
 
 
+# A hang guard for subprocess startup only. It is not a startup time
+# requirement: under host load the interpreter and imports can take
+# more than 20 s before the first line.
+STARTUP_GUARD = 60
+
+
 def environment(tmp_path):
     return {
         **os.environ,
@@ -63,7 +69,7 @@ def test_valid_startup_serves_health(tmp_path, provisioned):
         text=True,
     )
     try:
-        assert select.select([process.stdout], [], [], 20)[0]
+        assert select.select([process.stdout], [], [], STARTUP_GUARD)[0]
         line = process.stdout.readline()
         assert line.startswith("PASS server: listening "), line
         port = int(line.split()[-1])
@@ -171,7 +177,7 @@ raise SystemExit(status)
     try:
         line = ""
         if failure is None:
-            assert select.select([process.stdout], [], [], 20)[0]
+            assert select.select([process.stdout], [], [], STARTUP_GUARD)[0]
             line = process.stdout.readline()
             assert line.startswith("PASS server: listening "), line
             health = subprocess.run(
@@ -479,7 +485,7 @@ raise SystemExit(startup.main([]))
         text=True,
     )
     try:
-        assert select.select([process.stdout], [], [], 20)[0]
+        assert select.select([process.stdout], [], [], STARTUP_GUARD)[0]
         line = process.stdout.readline()
         assert line.startswith("PASS server: listening "), line
         request = Request(
