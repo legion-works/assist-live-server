@@ -59,6 +59,7 @@ If maintenance gives an error or does not complete for 10 seconds, health gives 
 A device event write failure gives the same result.
 The next SQLite write transaction that completes without an error clears the device event write fault.
 A maintenance transaction also clears that fault and updates the maintenance deadline.
+A refused device credential gives `healthy: false` and `unavailable.credentials: credential_blocked`. Maintenance and device event writes do not clear it.
 
 Audio provider selection does not change `healthy`. A server with no audio functions can be healthy.
 
@@ -405,24 +406,44 @@ Each transaction keeps or removes its replay update and event together.
 
 If SQLite removes the two rows, acceptance of that event again adds the removed row. It does not duplicate a row that SQLite keeps.
 Use `await store.rotate(registry, device, secret)` to change credentials in an active service.
-This method clears the previous secret's replay rows in the SQLite writer.
-It clears replay state before it writes the new credential. A replay-clear error keeps the previous credential and its file unchanged.
+The `rotate` method refuses a secret that a different device uses.
 
-Credential-write errors put the previous in-memory credential and replay state back. The `rotate` method refuses a secret that a different device uses.
+The SQLite store is the only authority for the active credential of each device. It keeps a credential epoch and a SHA-256 fingerprint of the active key. It does not keep the key.
+The rotation has these steps:
+
+1. The method writes the new key to the credential file as a `pending` entry with the next epoch. The previous key stays active. The server does not accept the pending key.
+2. One SQLite transaction with `synchronous=FULL` clears the replay state, deletes the device-event rows, and records the new epoch and fingerprint.
+3. After the commit, the server replaces the key, the epoch, and the replay state in memory together. Then it writes the credential file with the pending key as the active key.
+
+If step 1 or step 2 has an error before the commit, the previous key stays active. The server or the next start removes the pending entry.
+
+A COMMIT error does not show if SQLite kept the transaction. The server then opens the database again and reads the committed epoch. If the epoch is new, the rotation continues with step 3. If the epoch is the previous epoch, the server removes the pending entry. If the server cannot read the epoch, it refuses events from both keys of that device and reports that it is not healthy. Restart the server.
+
+Each device event has the epoch of the key that authenticated it. The store refuses an event whose epoch is not the committed epoch.
 
 `Registry.rotate` refuses all calls. Only `SQLiteStore.rotate` can change a device secret.
 The registry must use that store's replay connection.
 
-A process crash can occur after the credential file changes but before the SQLite transaction commits.
-After restart, the file has the new secret, but the previous replay window and device-event rows can stay.
-This state refuses previous-key events and can refuse correct new-key events. It does not accept duplicates.
+If the process stops during a rotation, the next start completes or removes the rotation.
+For each pending entry, the start compares the pending epoch and fingerprint with the store. If they agree, the pending key becomes active. If the store has the previous epoch, the start removes the pending entry.
 
-For recovery, stop device traffic and load the credential file and store.
+If the start cannot write the credential file after this decision, the pending entry stays on disk. The server then refuses events from both keys of that device and logs `credential_file_write_failed`.
+If the file and the store do not agree in a different way, the server refuses events from that device and logs `credential_state_mismatch`.
+
+A device without a store row is correct only at file epoch 0. This is the state of a device that never rotated, also after an update from an earlier version.
+A nonzero file epoch without a store row can come from a database that you restored from an older backup. The server refuses events from that device and logs `credential_state_mismatch`.
+
+The server cannot find an older backup for a device at epoch 0. Restore the credential file and the database from the same point in time.
 Do not delete the database or clear replay state with the active secret.
-Use `await store.rotate(registry, device, fresh_secret)` with a different, new secret.
-Wait for the method to complete, then provision that secret to the device and resume traffic.
 
-If the process stops again, do these steps again with a different new secret.
+A refused device makes health give `healthy: false` and `unavailable.credentials: credential_blocked`. Maintenance and later writes do not clear this state. Only a later rotation of that device or a restart that resolves the device clears it.
+
+A file without a `pending` entry has the format that earlier server versions read. Earlier versions ignore the `pending` and `epoch` fields and use the `secret` field.
+Thus an earlier version uses the previous key while a pending entry exists, also when the store has committed the rotation. A rotation with an earlier version does not change the store row, so the next start of this version refuses that device.
+Before you install an earlier version, stop the server and run `assist-live-server --check-credentials` with the same `ASSIST_LIVE_DATA` directory.
+
+The command reads the credential file only. It gives exit code 0 and `PASS credentials: no pending entry` when no pending entry stays. Otherwise it gives exit code 1 and the satellite identifiers with a pending entry. It does not show keys.
+Install the earlier version only after the command gives exit code 0. If it gives exit code 1, start this version again and repair the cause of the file-write error first.
 Keep credentials out of logs and command arguments.
 
 Queue entries keep an immutable credential-generation snapshot. The writer refuses an entry from a revoked generation.

@@ -5,6 +5,7 @@ import logging
 import os
 import struct
 import tempfile
+from collections.abc import Iterator, MutableMapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Protocol
@@ -92,6 +93,42 @@ def verify_event(event: dict[str, Any], tag: object, secret: bytes) -> bool:
         return False
 
 
+def fingerprint(secret: bytes) -> str:
+    # The store keeps this value to identify the active key. It never keeps the key.
+    return hashlib.sha256(b"assist-live device credential\0" + secret).hexdigest()
+
+
+@dataclass(frozen=True)
+class Credential:
+    satellite: str
+    secret: bytes
+    epoch: int
+    replay: ReplayState
+    blocked: bool = False
+
+
+class ReplayView(MutableMapping[str, ReplayState]):
+    """Read and replace the replay state inside each credential record."""
+
+    def __init__(self, credentials: dict[str, Credential]) -> None:
+        self._credentials = credentials
+
+    def __getitem__(self, device: str) -> ReplayState:
+        return self._credentials[device].replay
+
+    def __setitem__(self, device: str, state: ReplayState) -> None:
+        self._credentials[device] = replace(self._credentials[device], replay=state)
+
+    def __delitem__(self, device: str) -> None:
+        raise TypeError("replay state belongs to its credential")
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._credentials)
+
+    def __len__(self) -> int:
+        return len(self._credentials)
+
+
 class Registry:
     def __init__(
         self,
@@ -105,11 +142,16 @@ class Registry:
         self.path = path
         self.boot_limit = boot_limit
         self.replay_store = replay_store
-        self.replay: dict[str, ReplayState] = {}
-        self.credential_epochs: dict[str, int] = {}
-        self.credentials: dict[str, tuple[str, bytes, int]] = {}
+        # Each device has one immutable record. A rotation replaces the key, the
+        # epoch, and the replay state with one assignment.
+        self.credentials: dict[str, Credential] = {}
+        self.replay = ReplayView(self.credentials)
         self.devices: dict[str, dict[str, Any]] = {}
         self.tokens: dict[str, list[str]] = {}
+
+    @property
+    def credential_epochs(self) -> dict[str, int]:
+        return {device: row.epoch for device, row in self.credentials.items()}
 
     def bind(
         self, device: str, satellite: str, secret: bytes, *, save: bool = True
@@ -128,9 +170,7 @@ class Registry:
             "satellite": satellite,
             "secret": secret.hex(),
         }
-        self.replay[device] = ReplayState()
-        self.credential_epochs[device] = 0
-        self.credentials[device] = (satellite, secret, 0)
+        self.credentials[device] = Credential(satellite, secret, 0, ReplayState())
         if save:
             self.save()
 
@@ -163,15 +203,26 @@ class Registry:
 
     def device(self, device: str) -> tuple[str, bytes] | None:
         row = self.credentials.get(device)
-        return (row[0], row[1]) if row else None
+        return (row.satellite, row.secret) if row and not row.blocked else None
 
     def device_snapshot(self, device: str) -> tuple[str, bytes, int] | None:
-        return self.credentials.get(device)
+        row = self.credentials.get(device)
+        if row is None or row.blocked:
+            return None
+        return row.satellite, row.secret, row.epoch
+
+    def blocked_devices(self) -> list[str]:
+        return sorted(device for device, row in self.credentials.items() if row.blocked)
+
+    def pending_satellites(self) -> list[str]:
+        return sorted(
+            row["satellite"] for row in self.devices.values() if "pending" in row
+        )
 
     def rotate(self, device: str, secret: bytes) -> None:
         raise ValueError("use SQLiteStore.rotate for credential rotation")
 
-    def _rotate(self, device: str, secret: bytes) -> None:
+    def _check_rotation(self, device: str, secret: bytes) -> None:
         row = self.devices[device]
         if hmac.compare_digest(bytes.fromhex(row["secret"]), secret):
             raise ValueError("new device credential required")
@@ -179,42 +230,51 @@ class Registry:
             not secret
             or any(hmac.compare_digest(t.encode(), secret) for t in self.tokens)
             or any(
-                other != device and hmac.compare_digest(value[1], secret)
+                other != device and hmac.compare_digest(value.secret, secret)
                 for other, value in self.credentials.items()
             )
         ):
             raise ValueError("invalid device credential")
-        previous = self.replay[device]
-        if self.replay_store is not None:
-            self.replay_store.clear_replay(device)
-        old_secret = row["secret"]
-        row.update(secret=secret.hex())
+
+    def _write_pending(self, device: str, secret: bytes, epoch: int) -> None:
+        # Readers that know only "satellite" and "secret" keep the active key.
+        row = self.devices[device]
+        row["pending"] = {"secret": secret.hex(), "epoch": epoch}
         try:
             self.save()
-        except OSError:
-            row["secret"] = old_secret
-            if self.replay_store is not None:
-                self.replay_store.save_replay(device, previous)
+        except BaseException:
+            row.pop("pending", None)
             raise
-        self.replay[device] = ReplayState()
-        self.credential_epochs[device] = self.credential_epochs.get(device, 0) + 1
-        self.credentials[device] = (
-            row["satellite"],
-            secret,
-            self.credential_epochs[device],
-        )
+
+    def _drop_pending(self, device: str) -> None:
+        if self.devices[device].pop("pending", None) is not None:
+            self.save()
+
+    def _promote_pending(self, device: str) -> None:
+        row = self.devices[device]
+        pending = row.pop("pending")
+        row["secret"] = pending["secret"]
+        row["epoch"] = pending["epoch"]
+        self.save()
+
+    def _publish(self, device: str, secret: bytes, epoch: int) -> None:
+        satellite = self.credentials[device].satellite
+        self.credentials[device] = Credential(satellite, secret, epoch, ReplayState())
+
+    def _block(self, device: str) -> None:
+        self.credentials[device] = replace(self.credentials[device], blocked=True)
 
     def accept_sequence(
         self, device: str, boot: int, seq: int, *, credential_epoch: int | None = None
     ) -> bool:
-        if (
-            credential_epoch is not None
-            and credential_epoch != self.credential_epochs.get(device, 0)
+        credential = self.credentials[device]
+        if credential.blocked or (
+            credential_epoch is not None and credential_epoch != credential.epoch
         ):
             return False
         unsigned(boot)
         unsigned(seq)
-        state = self.replay[device]
+        state = credential.replay
         if boot != state.boot and boot in state.seen_boots:
             updated = replace(
                 state,
@@ -306,13 +366,16 @@ class Registry:
         registry.tokens = value["tokens"]
         for device in registry.devices:
             row = registry.devices[device]
-            registry.credentials[device] = (
-                row["satellite"],
-                bytes.fromhex(row["secret"]),
-                0,
-            )
+            epoch = row.get("epoch", 0)
+            if type(epoch) is not int or epoch < 0:
+                raise ValueError("invalid credential epoch")
             state = (
                 replay_store.load_replay(device) if replay_store is not None else None
             )
-            registry.replay[device] = state or ReplayState()
+            registry.credentials[device] = Credential(
+                row["satellite"],
+                bytes.fromhex(row["secret"]),
+                epoch,
+                state or ReplayState(),
+            )
         return registry

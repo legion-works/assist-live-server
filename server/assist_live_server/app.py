@@ -382,12 +382,17 @@ def create_app(
         )
         if timing_store_failed:
             unavailable["timing_store"] = "timing_store_failed"
+        # Only a later rotation or a restart clears a blocked credential.
+        credentials_blocked = bool(registry.blocked_devices())
+        if credentials_blocked:
+            unavailable["credentials"] = "credential_blocked"
         return web.json_response(
             {
                 "version": 1,
                 "healthy": store is not None
                 and registry.replay_store is not None
-                and not timing_store_failed,
+                and not timing_store_failed
+                and not credentials_blocked,
                 "sequence_gaps_by_satellite": sequence_gaps_by_satellite,
                 "counters_since_utc_ns": counters_since_utc_ns,
                 "stt_hints_by_satellite": {

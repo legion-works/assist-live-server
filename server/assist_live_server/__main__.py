@@ -256,6 +256,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--fetch-models", action="store_true")
     parser.add_argument("--healthcheck", action="store_true")
+    parser.add_argument("--check-credentials", action="store_true")
     args = parser.parse_args(argv)
     try:
         if args.healthcheck:
@@ -280,6 +281,15 @@ def main(argv: list[str] | None = None) -> int:
                     ):
                         raise ValueError("health response invalid") from None
             print("PASS server: health checked")
+        elif args.check_credentials:
+            data = Path(os.environ.get("ASSIST_LIVE_DATA", "/data"))
+            # Read only: an earlier server version uses the previous key of a
+            # pending entry, so a downgrade must wait until none remains.
+            pending = Registry.load(data / "registry.json").pending_satellites()
+            if pending:
+                print("FAIL credentials: pending entry: " + ", ".join(pending))
+                return 1
+            print("PASS credentials: no pending entry")
         elif args.fetch_models:
             cache = Path(os.environ.get("ASSIST_LIVE_MODEL_CACHE", "/data/cache"))
             fetch_plan(
@@ -294,6 +304,8 @@ def main(argv: list[str] | None = None) -> int:
         failure = (
             "FAIL health: server unavailable or health response invalid"
             if args.healthcheck
+            else "FAIL credentials: credential file unreadable"
+            if args.check_credentials
             else "FAIL server: startup configuration or model check failed"
         )
         from .config import EndRuleError

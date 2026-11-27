@@ -5131,3 +5131,40 @@ Each of these four isolated changes gives test failures:
 - The whiteout check examines only the path of the asset.
 - The publication workflow uploads the full directory.
 - The minimum key length is 15 characters.
+
+## Credential rotation and SQL transaction failures (2026-11-28 UTC)
+
+On base `d823389`, the rotation started the SQL transaction and then wrote the new device key to the registry file. It also made the new key active in memory before the device-event delete and the commit. If the delete or the commit had a failure, the SQL data stayed at the previous state, but the new key stayed active.
+
+A first repair used a journal row and a file marker. Review found three problems in that version:
+
+- The journal row used `synchronous=NORMAL`. An electrical supply failure could remove the row while the new file stayed.
+- After a COMMIT error, the repair wrote the previous key back. SQLite can recover a commit frame that it wrote before the error. Then the previous key would be active with an empty replay window.
+- If the change in memory failed after the commit, the previous key and epoch stayed active. Events with the previous key could add rows to the cleared tables again.
+
+With this change, the SQLite store is the only authority for the active credential. In the rotation transaction, the store records the epoch and a SHA-256 fingerprint of the new key, not the key. This transaction uses `synchronous=FULL`, and the connection then gets its previous setting again.
+
+Before the transaction, the registry file gets the new key as a `pending` entry. The previous key stays active.
+After the commit, one assignment replaces the key, the epoch, and the replay state in memory. Then the file gets the pending key as the active key.
+
+After a COMMIT error, the server does not write the previous key back. It closes the connection, opens the database again, and reads the committed epoch. If it cannot read the epoch, it refuses events from both keys of that device and reports that it is not healthy. At start, the server resolves each pending entry from the committed epoch. Each device-event write must have the committed epoch.
+
+A file without a pending entry keeps the format that earlier versions read. An earlier version ignores a pending entry and uses the previous key.
+
+The new tests cause a failure at each step, or simulate a stop with a synthetic exception and a clean close of the store. Each test examines which key the server accepts before and after a restart.
+
+On the first repair, these tests gave `9 failed, 4 passed`. The synchronous check gave `assert 1 == 2`. A COMMIT error after the commit gave the error to the caller and kept the previous key. After a synthetic exception before the change in memory, the store accepted an event with the previous key.
+
+With the change, the rotation tests gave `13 passed`. A scratch change that removed the epoch read after a COMMIT error gave `2 failed`. A scratch change that removed the epoch check on device-event writes gave `1 failed`.
+
+A second review found one problem and two weak points:
+
+- A start logged a failed write of the credential file and continued. Thus the file could keep a pending entry after a start without errors, and an earlier version would use the previous key.
+- A missing store row was correct for each file epoch. A database from an older backup could then give a nonzero file epoch an incorrect replay state.
+- Health did not show a refused device. A later write or maintenance cleared the related fault.
+
+With the repair, a failed file write at start keeps the device refused. The new `--check-credentials` command reads the credential file and gives exit code 1 with the satellite identifiers that have a pending entry. A missing store row is correct only at file epoch 0. Health shows `unavailable.credentials: credential_blocked` until a rotation or a restart resolves the device.
+
+On the previous version, the new tests gave `5 failed, 14 passed`. The start tests accepted a key while the file kept a pending entry. The missing-row test accepted the key at epoch 2. The check command was not available, and health gave `healthy: true`.
+
+With the repair, the rotation tests gave `19 passed`. A scratch change that only logged the failed start write gave `2 failed`. A scratch change that removed the health check of refused devices gave `1 failed`.

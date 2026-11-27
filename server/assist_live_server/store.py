@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import json
 import logging
 import sqlite3
@@ -26,7 +27,7 @@ from assist_live_client.models import (
 )
 from assist_live_client.protocol import MAX_CONTROL
 
-from .auth import Registry
+from .auth import Credential, Registry, fingerprint
 from .protocol import DeviceEvent, TurnExistsError, stored_integer
 from .replay_store import SQLiteReplayStore, connect
 
@@ -40,6 +41,11 @@ type DeviceConversion = Callable[[DeviceEvent], tuple[TimingEvent, Callable[[], 
 class WrongOwnerError(ValueError):
     def __init__(self) -> None:
         super().__init__("wrong_owner")
+
+
+class CredentialStateError(RuntimeError):
+    def __init__(self) -> None:
+        super().__init__("device credential state unknown; restart required")
 
 
 class TurnLimitError(ValueError):
@@ -205,6 +211,10 @@ class SQLiteStore:
                 UNIQUE(device, boot, seq)
             );
             CREATE INDEX IF NOT EXISTS device_events_stored ON device_events(stored_ns);
+            CREATE TABLE IF NOT EXISTS credential_state (
+                device TEXT PRIMARY KEY, epoch INTEGER NOT NULL,
+                fingerprint TEXT NOT NULL
+            );
             UPDATE turns SET status='incomplete' WHERE status IN ('open','closing');
         """)
 
@@ -226,8 +236,58 @@ class SQLiteStore:
     def _configure_registry(self, registry: Registry) -> None:
         registry.replay_store = self.replay
         for device in registry.devices:
+            self._resolve_credential(registry, device)
             if state := self.replay.load_replay(device):
                 registry.replay[device] = state
+
+    def _committed(self, device: str, active: Credential) -> tuple[int, str] | None:
+        row = self.connection.execute(
+            "SELECT epoch, fingerprint FROM credential_state WHERE device=?",
+            (device,),
+        ).fetchone()
+        if row is not None:
+            return int(row[0]), str(row[1])
+        if active.epoch == 0:
+            # A device that never rotated has no row: keep its legacy key.
+            return 0, fingerprint(active.secret)
+        # A file epoch without a row can come from a database restored from an
+        # older backup. Its replay state can then belong to a different key.
+        return None
+
+    def _resolve_credential(self, registry: Registry, device: str) -> None:
+        row = registry.devices[device]
+        active = registry.credentials[device]
+        committed = self._committed(device, active)
+        pending = row.get("pending")
+        if pending is not None:
+            secret = bytes.fromhex(pending["secret"])
+            if committed == (pending["epoch"], fingerprint(secret)):
+                registry._publish(device, secret, pending["epoch"])
+                try:
+                    registry._promote_pending(device)
+                except OSError:
+                    self._refuse(registry, device, "credential_file_write_failed")
+                return
+        if committed != (active.epoch, fingerprint(active.secret)):
+            self._refuse(registry, device, "credential_state_mismatch")
+            return
+        if pending is not None:
+            try:
+                registry._drop_pending(device)
+            except OSError:
+                self._refuse(registry, device, "credential_file_write_failed")
+
+    def _refuse(self, registry: Registry, device: str, reason: str) -> None:
+        # An earlier server version reads only the "secret" field, so a pending
+        # entry that stays on disk must keep the device out of service.
+        registry._block(device)
+        LOGGER.error("%s: device events are refused", reason)
+
+    def _promote(self, registry: Registry, device: str) -> None:
+        try:
+            registry._promote_pending(device)
+        except OSError:
+            LOGGER.error("credential file promotion failed; the next start retries")
 
     async def rotate(self, registry: Registry, device: str, secret: bytes) -> None:
         await self._call(self._rotate, registry, device, secret)
@@ -235,13 +295,87 @@ class SQLiteStore:
     def _rotate(self, registry: Registry, device: str, secret: bytes) -> None:
         if registry.replay_store is not self.replay:
             raise ValueError("registry must use this store")
-        with self.connection:
-            self.connection.execute("BEGIN IMMEDIATE")
-            registry._rotate(device, secret)
-            self.connection.execute(
-                "DELETE FROM device_events WHERE device=?", (device,)
-            )
+        registry._check_rotation(device, secret)
+        active = registry.credentials[device]
+        if active.blocked or self._committed(device, active) != (
+            active.epoch,
+            fingerprint(active.secret),
+        ):
+            raise CredentialStateError()
+        epoch = active.epoch + 1
+        previous = (active.epoch, fingerprint(active.secret))
+        new = (epoch, fingerprint(secret))
+        # The file gets the new key as a pending entry before the store changes.
+        # The store row is the only authority for which entry is active.
+        registry._write_pending(device, secret, epoch)
+        try:
+            self._commit_rotation(device, *new)
+        except Exception:
+            # A COMMIT error does not show the result: SQLite can recover a
+            # written commit frame later. Read the result from a new connection.
+            committed = self._recover_committed(registry, device, active)
+            if committed == previous:
+                try:
+                    registry._drop_pending(device)
+                except OSError:
+                    LOGGER.error(
+                        "pending credential removal failed; the next start retries"
+                    )
+                raise
+            if committed != new:
+                registry._block(device)
+                LOGGER.error("credential_state_mismatch: device events are refused")
+                raise CredentialStateError() from None
+            LOGGER.warning("credential rotation committed after a commit error")
+        try:
+            registry._publish(device, secret, epoch)
+        except Exception:
+            registry._block(device)
+            LOGGER.error("credential_publish_failed: device events are refused")
+            raise
+        self._promote(registry, device)
         self.device_write_failed = False
+
+    def _commit_rotation(self, device: str, epoch: int, digest: str) -> None:
+        previous = int(self.connection.execute("PRAGMA synchronous").fetchone()[0])
+        # The rotation must stay after an electrical supply failure, because the
+        # registry file already holds the pending key.
+        self.connection.execute("PRAGMA synchronous=FULL")
+        try:
+            with self.connection:
+                self.connection.execute("BEGIN IMMEDIATE")
+                self.replay.clear_replay(device)
+                self.connection.execute(
+                    "DELETE FROM device_events WHERE device=?", (device,)
+                )
+                self.connection.execute(
+                    "INSERT INTO credential_state VALUES(?,?,?) "
+                    "ON CONFLICT(device) DO UPDATE SET "
+                    "epoch=excluded.epoch, fingerprint=excluded.fingerprint",
+                    (device, epoch, digest),
+                )
+        finally:
+            with contextlib.suppress(sqlite3.Error):
+                self.connection.execute(f"PRAGMA synchronous={previous}")
+
+    def _recover_committed(
+        self, registry: Registry, device: str, active: Credential
+    ) -> tuple[int, str] | None:
+        try:
+            with contextlib.suppress(sqlite3.Error):
+                self.connection.close()
+            # SQLite runs WAL recovery when the next connection opens.
+            self.connection = connect(self.path)
+            self.replay.connection = self.connection
+            committed = self._committed(device, active)
+        except (sqlite3.Error, OSError) as error:
+            registry._block(device)
+            self.device_write_failed = True
+            LOGGER.error(
+                "credential_state_unknown: device events are refused; restart required"
+            )
+            raise CredentialStateError() from error
+        return committed
 
     async def accept_device(
         self,
@@ -262,6 +396,13 @@ class SQLiteStore:
         try:
             with self.connection:
                 self.connection.execute("BEGIN IMMEDIATE")
+                committed = self.connection.execute(
+                    "SELECT epoch FROM credential_state WHERE device=?", (name,)
+                ).fetchone()
+                # A writer that authenticated with a replaced key must not add
+                # rows after the rotation cleared them.
+                if device.credential_epoch != (committed[0] if committed else 0):
+                    return False
                 if not registry.accept_sequence(
                     name,
                     device.event["boot"],
