@@ -27,11 +27,35 @@ class STTCheckpointDeadlineError(RuntimeError):
     """The checkpoint did not finish before its deadline."""
 
 
+class CredentialTranscriptError(ValueError):
+    """A provider result contains the configured provider credential."""
+
+
+# Check only a key of 16 characters or more. A shorter value can occur in
+# ordinary speech, thus a check of it can refuse a correct transcript.
+MIN_CHECKED_CREDENTIAL_CHARS = 16
+
+
+def refuse_credential(credential: str, parts: list[str]) -> None:
+    """Refuse accumulated transcript text that contains the credential.
+
+    Check the joined text and the text without separators, because a
+    credential that is split across results is visible when a reader joins
+    the published parts.
+    """
+    if len(credential) >= MIN_CHECKED_CREDENTIAL_CHARS and (
+        credential in " ".join(parts) or credential in "".join(parts)
+    ):
+        raise CredentialTranscriptError("transcript refused")
+
+
 class STTSession(Protocol):
     """Accept ordered mono 16 kHz little-endian int16 PCM.
 
     Sessions can set final_redecodes=True when finish decodes all audio again.
     Without this optional attribute, the gateway keeps the final unchanged.
+    Sessions can set transcript_refused=True after they refuse a result.
+    The gateway then ends the turn with a failure, also without a command.
     """
 
     async def push(self, pcm: bytes) -> None: ...

@@ -12,7 +12,7 @@ from urllib.request import urlopen
 import numpy as np
 from numpy.typing import NDArray
 
-from ..assets import load_asset_manifest
+from ..assets import TURN_MODEL_IDS, load_asset_manifest
 from ..assets import model_path as model_path
 from ..assets import verified_model as verified_model
 from .profiles import (
@@ -27,7 +27,7 @@ from .transcript_guard import complete_partial
 
 Samples = NDArray[np.float32]
 Probability = Callable[[Samples], float]
-MODEL_IDS = ("silero-vad", "smart-turn-v3.2-cpu")
+MODEL_IDS = TURN_MODEL_IDS
 WINDOW = 128000
 SMART_TURN_INTERVAL_SAMPLES = 2560
 
@@ -94,6 +94,26 @@ def fetch_models(cache: Path | str, manifest: Path | str) -> None:
         temporary.write_bytes(data)
         temporary.replace(path)
         verified_model(cache, record)
+
+
+def turn_models_unavailable(
+    cache: Path | str, manifest: Path | str | None = None
+) -> str | None:
+    """Give the reason that the default detector cannot load its models.
+
+    Startup uses this result for STT readiness. Each turn loads these models,
+    thus a missing or changed model makes every turn fail.
+    """
+    records = model_records(manifest).values()
+    try:
+        # A path that resolves outside the cache gives ValueError here.
+        if not all(model_path(Path(cache), record).is_file() for record in records):
+            return "turn_models_missing"
+        for record in records:
+            verified_model(Path(cache), record)
+    except OSError, ValueError:
+        return "turn_models_invalid"
+    return None
 
 
 def whisper_features(samples: Samples) -> Samples:

@@ -8,7 +8,12 @@ import aiohttp
 from assist_live_client.protocol import MAX_TRANSCRIPT_BYTES
 from yarl import URL
 
-from .stt import AudioLimitError, STTClosedError
+from .stt import (
+    AudioLimitError,
+    CredentialTranscriptError,
+    STTClosedError,
+    refuse_credential,
+)
 
 MAX_FINAL_SEGMENTS = 128
 MAX_SEGMENT_BYTES = 4096
@@ -75,12 +80,15 @@ class DeepgramSession:
         self._finishing = False
         self._finished = False
         self._failed = False
+        self._refused = False
         self._complete = False
         self._bytes = 0
 
     def _check(self) -> None:
         if self._cancelled:
             raise STTClosedError("STT session cancelled")
+        if self._refused:
+            raise DeepgramError("Deepgram transcript refused")
         if self._failed:
             raise DeepgramError("Deepgram stream failed")
 
@@ -158,6 +166,9 @@ class DeepgramSession:
                         > MAX_TRANSCRIPT_BYTES
                     ):
                         raise ValueError("transcript limit exceeded")
+                    # Check the text that partial() and finish() can publish
+                    # before the result changes the session state.
+                    refuse_credential(self._provider._api_key, [*self._finals, text])
                     if is_final:
                         self._final_count += 1
                         if self._final_count > MAX_FINAL_SEGMENTS:
@@ -182,12 +193,24 @@ class DeepgramSession:
                 self._failed = True
         except asyncio.CancelledError:
             raise
+        except CredentialTranscriptError:
+            self._refuse()
         except Exception:
             self._failed = True
         finally:
             self._changed.set()
             with suppress(Exception):
                 await self._ws.close()
+
+    def _refuse(self) -> None:
+        self._refused = True
+        self._failed = True
+        self._finals.clear()
+        self._interim = ""
+
+    @property
+    def transcript_refused(self) -> bool:
+        return self._refused
 
     def speech_started(self) -> None:
         self._check()
@@ -255,7 +278,11 @@ class DeepgramSession:
                 await self.aclose()
             if failed:
                 self._failed = True
-                raise DeepgramError("Deepgram finalization failed")
+                raise DeepgramError(
+                    "Deepgram transcript refused"
+                    if self._refused
+                    else "Deepgram finalization failed"
+                )
             self._finished = True
             return " ".join(self._finals)
 

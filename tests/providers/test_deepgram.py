@@ -650,6 +650,154 @@ def test_results_without_is_final_are_interim(cloud_ws_server):
     asyncio.run(run())
 
 
+async def applied(session, values):
+    last = values[-1]
+    text = last["channel"]["alternatives"][0]["transcript"]
+    for _ in range(200):
+        if session._reader is not None and session._reader.done():
+            return
+        if (
+            (session._finals[-1:] == [text])
+            if last["is_final"]
+            else (session._interim == text)
+        ):
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError("fake results not applied")
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        [result(KEY, True)],
+        [result("say " + KEY)],
+        [result("code " + KEY[:6], True), result(KEY[6:], True)],
+        [result("code " + KEY[:6], True), result(KEY[6:])],
+    ],
+    ids=["final", "interim", "split-finals", "split-final-interim"],
+)
+def test_result_with_credential_is_refused(cloud_ws_server, caplog, values):
+    caplog.set_level(logging.DEBUG)
+
+    async def run():
+        async def handler(request):
+            ws = web.WebSocketResponse()
+            await ws.prepare(request)
+            await ws.receive_bytes()
+            try:
+                for value in values:
+                    await ws.send_json(value)
+                async for message in ws:
+                    if message.type == WSMsgType.TEXT:
+                        await ws.send_json({"type": "Metadata"})
+                        await ws.close()
+            except ConnectionResetError:
+                pass
+            return ws
+
+        async with cloud_ws_server(handler) as fake:
+            session = DeepgramProvider(KEY, endpoint=fake.url, timeout=0.5).session()
+            try:
+                session.speech_started()
+                await session.push(b"\x01\x00")
+                await applied(session, values)
+                with pytest.raises(DeepgramError, match="transcript refused") as error:
+                    await session.partial()
+                with pytest.raises(DeepgramError, match="transcript refused") as final:
+                    await session.finish()
+                for value in (error.value, final.value):
+                    assert KEY not in "".join(traceback.format_exception(value))
+                    assert value.__context__ is None
+                assert session._finals == [] and session._interim == ""
+            finally:
+                await session.aclose()
+        assert KEY not in caplog.text
+
+    asyncio.run(asyncio.wait_for(run(), 5))
+
+
+@pytest.mark.parametrize(
+    "key,refused",
+    [("on", False), ("lights", False), ("turnonthelights", False), ("a" * 16, True)],
+)
+def test_credential_check_needs_sixteen_characters(cloud_ws_server, key, refused):
+    words = ["turn on", "the lights"] if not refused else ["say " + key[:8], key[8:]]
+
+    async def run():
+        async def handler(request):
+            ws = web.WebSocketResponse()
+            await ws.prepare(request)
+            await ws.receive_bytes()
+            await ws.receive_json()
+            for text in words:
+                await ws.send_json(result(text, True))
+            await ws.send_json({"type": "Metadata"})
+            await ws.close()
+            return ws
+
+        async with cloud_ws_server(handler) as fake:
+            session = DeepgramProvider(key, endpoint=fake.url).session()
+            try:
+                await session.push(b"\x01\x00")
+                if refused:
+                    with pytest.raises(DeepgramError, match="transcript refused"):
+                        await session.finish()
+                else:
+                    assert await session.finish() == " ".join(words)
+            finally:
+                await session.aclose()
+
+    asyncio.run(asyncio.wait_for(run(), 5))
+
+
+def test_gateway_publishes_no_transcript_with_credential(cloud_ws_server):
+    from assist_live_server.audio_gateway import AudioGateway
+    from assist_live_server.turn.detector import TurnDetector
+
+    async def run():
+        async def handler(request):
+            ws = web.WebSocketResponse()
+            await ws.prepare(request)
+            async for message in ws:
+                if message.type == WSMsgType.TEXT:
+                    await ws.send_json(result("code " + KEY[:6], True))
+                    await ws.send_json(result(KEY[6:], True))
+                    await ws.send_json({"type": "Metadata"})
+                    await ws.close()
+            return ws
+
+        async with cloud_ws_server(handler) as fake:
+            session = DeepgramProvider(KEY, endpoint=fake.url).session()
+            gateway = AudioGateway(
+                lambda _: session,
+                provider="deepgram",
+                local_only=False,
+                destination="cloud",
+                detector_factory=lambda: TurnDetector(
+                    vad_probability=lambda _: 1, turn_probability=lambda _: 0
+                ),
+            )
+
+            async def audio():
+                yield bytes(25600)
+
+            try:
+                replies = [
+                    reply
+                    async for reply in gateway.stt(
+                        "01900000-0000-7000-8000-000000000001", audio()
+                    )
+                ]
+            finally:
+                await session.aclose()
+            texts = [r.get("text", "") for r in replies]
+            assert all(KEY not in t and KEY not in t.replace(" ", "") for t in texts)
+            assert replies[-1]["type"] == "error"
+            assert replies[-1]["code"] == "stt_failed"
+
+    asyncio.run(asyncio.wait_for(run(), 5))
+
+
 def test_direct_url_parser_dependency_includes_installed_version():
     import tomllib
     from importlib.metadata import version

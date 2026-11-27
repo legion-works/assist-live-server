@@ -382,6 +382,10 @@ class AudioGateway:
                     ):
                         text = partial
                         replaced = True
+                # A provider can refuse a result while the end decision is
+                # sent. Without a command, finish() does not show the refusal.
+                if getattr(active_session, "transcript_refused", False) is True:
+                    raise RuntimeError("STT transcript refused")
                 reply = encode_transcript("final", turn_id, text)
                 if replaced:
                     self.stt_final_replaced_total += 1

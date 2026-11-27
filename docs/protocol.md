@@ -58,6 +58,12 @@ Audio provider selection does not change `healthy`. A server with no audio funct
 
 `capabilities.stt` is `true` when an audio gateway or legacy backend is available.
 
+With configured providers, the turn detector models must also be in the model cache.
+If startup does not find them, `capabilities.stt` is `false` and `destinations` has no `stt` key.
+The top-level `unavailable` object then gives `{"stt": "turn_models_missing"}` or `{"stt": "turn_models_invalid"}`.
+Without this condition, health does not send `unavailable`.
+The server sets this status at startup. After a change to the model cache, restart the server.
+
 `capabilities.tts` is `true` when a TTS gateway, TTS provider, or legacy backend is available.
 
 The client `health(timeout=0.2)` method keeps its boolean result: protocol version 1 and `healthy=true`.

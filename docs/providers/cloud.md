@@ -287,6 +287,15 @@ TLS is necessary. Numeric loopback endpoints for tests can use unencrypted conne
 Errors contain no provider response text. An error has no transport `__context__`.
 Logs, metrics, and close messages contain no credentials.
 
+The Deepgram and OpenAI STT adapters refuse a transcript result that contains the configured API key.
+They examine all the text that a `partial` or `final` can contain, also when the key is in more than one result.
+The error is `Deepgram transcript refused` or `OpenAI transcript refused`, and the turn gives `stt_failed`.
+The adapter keeps no transcript text of that turn. Thus the store cannot record it.
+A refusal also gives `stt_failed` when the turn has no command and the adapter does not request the `final` result.
+
+The adapters examine only a configured key of 16 characters or more.
+A shorter value can occur in ordinary spoken words. Thus a check of it can refuse a correct transcript.
+
 The adapters use the same aiohttp dependency. No vendor SDK is necessary.
 The server declares its `yarl` import with the pin `yarl==1.25.1`.
 The third-party notices include the wheel's license and copyright.

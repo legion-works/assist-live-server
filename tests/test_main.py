@@ -280,6 +280,222 @@ def test_default_cache_reaches_turn_detector_environment(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize(
+    "stt,tts,only",
+    [
+        ("deepgram", "none", ("silero-vad", "smart-turn-v3.2-cpu")),
+        ("openai", "elevenlabs", ("silero-vad", "smart-turn-v3.2-cpu")),
+        ("parakeet", "none", None),
+        ("deepgram", "piper", None),
+        ("none", "none", "skipped"),
+    ],
+)
+def test_startup_prefetches_turn_models_for_each_stt_provider(
+    tmp_path, monkeypatch, stt, tts, only
+):
+    import assist_live_server.__main__ as startup
+    from assist_live_server.config import ProviderFactory
+
+    monkeypatch.setenv("ASSIST_LIVE_DATA", str(tmp_path))
+    monkeypatch.setenv("ASSIST_LIVE_MODEL_CACHE", str(tmp_path / "cache"))
+    monkeypatch.setenv("ASSIST_LIVE_STT_PROVIDER", stt)
+    monkeypatch.setenv("ASSIST_LIVE_TTS_PROVIDER", tts)
+    monkeypatch.setenv("ASSIST_LIVE_LOCAL_ONLY", "false")
+    monkeypatch.setenv("ASSIST_LIVE_DOWNLOAD_MODELS", "false")
+    calls = []
+
+    def fetch(cache, document, *, download, only=None, basename_aliases=True):
+        calls.append((download, only, basename_aliases))
+
+    async def load(config, *, cache):
+        raise RuntimeError("stop before app setup")
+
+    monkeypatch.setattr(startup, "fetch_plan", fetch)
+    monkeypatch.setattr(ProviderFactory, "load", load)
+    with pytest.raises(RuntimeError, match="stop before app setup"):
+        asyncio.run(startup.serve())
+    # The scoped fetch makes no basename aliases; the full plan keeps them.
+    assert calls == ([] if only == "skipped" else [(False, only, only is None)])
+
+
+def turn_entries():
+    from assist_live_server.assets import TURN_MODEL_IDS, load_asset_manifest
+
+    selected = [
+        entry
+        for entry in load_asset_manifest()["download_plan"]
+        if entry["id"] in TURN_MODEL_IDS
+    ]
+    assert sorted(entry["id"] for entry in selected) == sorted(TURN_MODEL_IDS)
+    return selected
+
+
+def test_changed_turn_models_do_not_stop_cloud_startup(tmp_path, monkeypatch):
+    import assist_live_server.__main__ as startup
+    from assist_live_server.config import ProviderFactory
+
+    cache = tmp_path / "cache"
+    for entry in turn_entries():
+        path = cache / entry["path"]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"changed model")
+    monkeypatch.setenv("ASSIST_LIVE_DATA", str(tmp_path))
+    monkeypatch.setenv("ASSIST_LIVE_MODEL_CACHE", str(cache))
+    monkeypatch.setenv("ASSIST_LIVE_STT_PROVIDER", "deepgram")
+    monkeypatch.setenv("ASSIST_LIVE_TTS_PROVIDER", "none")
+    monkeypatch.setenv("ASSIST_LIVE_LOCAL_ONLY", "false")
+    monkeypatch.setenv("ASSIST_LIVE_DOWNLOAD_MODELS", "false")
+    reached = []
+
+    async def load(config, *, cache):
+        reached.append(cache)
+        raise RuntimeError("stop before app setup")
+
+    monkeypatch.setattr(ProviderFactory, "load", load)
+    # The changed turn models must reach the readiness check, not stop startup.
+    with pytest.raises(RuntimeError, match="stop before app setup"):
+        asyncio.run(startup.serve())
+    assert reached == [cache]
+
+
+def synthetic_turn_manifest(tmp_path, cache):
+    """Write valid synthetic turn models and a manifest that pins them."""
+    records, plan = [], []
+    for name in ("silero-vad", "smart-turn-v3.2-cpu"):
+        data = f"synthetic {name} model".encode()
+        relative = f"models/{name}/{name}.onnx"
+        (cache / relative).parent.mkdir(parents=True, exist_ok=True)
+        (cache / relative).write_bytes(data)
+        revision = "a" * 40
+        url = f"https://example.com/{revision}/{name}.onnx"
+        digest = hashlib.sha256(data).hexdigest()
+        records.append(
+            {
+                "id": name,
+                "kind": "model",
+                "download": "startup",
+                "status": "included",
+                "revision": revision,
+                "url": url,
+                "sha256": digest,
+                "paths": [relative],
+                "components": [],
+            }
+        )
+        plan.append({"id": name, "url": url, "sha256": digest, "path": relative})
+    manifest = tmp_path / "synthetic-manifest.json"
+    manifest.write_text(json.dumps({"assets": records, "download_plan": plan}))
+    return manifest
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["changed", "download_failed", "read_failed", "missing", "outside", "alias"],
+)
+def test_cloud_startup_serves_health_without_turn_models(tmp_path, case):
+    cache = tmp_path / "cache"
+    manifest = ""
+    if case in {"changed", "outside"}:
+        for entry in turn_entries():
+            path = cache / entry["path"]
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if case == "changed":
+                path.write_bytes(b"changed model")
+            else:
+                # A canonical path that resolves outside the cache.
+                outside = tmp_path / f"outside-{entry['id']}.onnx"
+                outside.write_bytes(b"outside model")
+                path.symlink_to(outside)
+    elif case == "alias":
+        manifest = str(synthetic_turn_manifest(tmp_path, cache))
+    registry = Registry(tmp_path / "registry.json")
+    registry.bind("test-satellite", "test-satellite", b"x" * 32)
+    registry.add_token("synthetic-health-token", ["test-satellite"])
+    code = """
+import json
+import os
+from pathlib import Path
+from http.client import IncompleteRead
+from urllib.error import URLError
+import assist_live_server.__main__ as startup
+from assist_live_server.turn import detector
+def refused(*args, **kwargs):
+    raise URLError("synthetic download failure")
+class Interrupted:
+    def __enter__(self):
+        return self
+    def __exit__(self, *args):
+        return False
+    def read(self, size):
+        raise IncompleteRead(b"synthetic download failure")
+def interrupted(*args, **kwargs):
+    return Interrupted()
+read_failed = os.environ["SYNTHETIC_CASE"] == "read_failed"
+startup.urlopen = interrupted if read_failed else refused
+if os.environ["SYNTHETIC_MANIFEST"]:
+    document = json.loads(Path(os.environ["SYNTHETIC_MANIFEST"]).read_text())
+    startup.load_asset_manifest = lambda path=None: document
+    detector.load_asset_manifest = lambda path=None: document
+raise SystemExit(startup.main([]))
+"""
+    env = {
+        **environment(tmp_path),
+        "ASSIST_LIVE_STT_PROVIDER": "deepgram",
+        "ASSIST_LIVE_TTS_PROVIDER": "elevenlabs",
+        "ASSIST_LIVE_LOCAL_ONLY": "false",
+        "ASSIST_LIVE_DOWNLOAD_MODELS": (
+            "true" if case in {"download_failed", "read_failed"} else "false"
+        ),
+        "SYNTHETIC_CASE": case,
+        "ELEVENLABS_API_KEY": "synthetic-key",
+        "ELEVENLABS_VOICE_ID": "test-voice",
+        "ELEVENLABS_VOICE_NAME": "Test voice",
+        "ELEVENLABS_VOICE_LANGUAGE": "en-US",
+        "SYNTHETIC_MANIFEST": manifest,
+    }
+    process = subprocess.Popen(
+        [sys.executable, "-c", code],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert select.select([process.stdout], [], [], 20)[0]
+        line = process.stdout.readline()
+        assert line.startswith("PASS server: listening "), line
+        request = Request(
+            f"http://127.0.0.1:{int(line.split()[-1])}/health",
+            headers={"Authorization": "Bearer synthetic-health-token"},
+        )
+        with urlopen(request, timeout=5) as response:
+            body = json.load(response)
+    finally:
+        process.terminate()
+        stdout, stderr = process.communicate(timeout=10)
+    assert process.returncode == 0, stdout + stderr
+    assert body["healthy"] is True
+    assert body["capabilities"]["tts"] is True
+    assert "synthetic download failure" not in stdout + stderr
+    files = sorted(p.relative_to(cache).as_posix() for p in cache.rglob("*"))
+    if case == "alias":
+        # The turn detector reads canonical paths. Startup makes no alias.
+        assert body["capabilities"]["stt"] is True
+        assert "unavailable" not in body
+        assert [f for f in files if "/" not in f and f.endswith(".onnx")] == []
+        return
+    assert body["capabilities"]["stt"] is False
+    assert body["unavailable"] == {
+        "stt": "turn_models_invalid"
+        if case in {"changed", "outside"}
+        else "turn_models_missing"
+    }
+    leftovers = [f for f in files if (cache / f).is_file() or (cache / f).is_symlink()]
+    assert len(leftovers) == (
+        0 if case in {"download_failed", "read_failed", "missing"} else 2
+    )
+
+
+@pytest.mark.parametrize(
     "provisioned,status,body",
     [
         (False, 401, b"different server"),

@@ -12,7 +12,12 @@ from yarl import URL
 
 from .deepgram import MAX_FINAL_SEGMENTS, MAX_SEGMENT_BYTES, MAX_TRANSCRIPT_BYTES
 from .parakeet import MAX_AUDIO_BYTES
-from .stt import AudioLimitError, STTClosedError
+from .stt import (
+    AudioLimitError,
+    CredentialTranscriptError,
+    STTClosedError,
+    refuse_credential,
+)
 
 
 class OpenAIError(RuntimeError):
@@ -85,6 +90,7 @@ class OpenAISession:
         self._finishing = False
         self._finished = False
         self._failed = False
+        self._refused = False
         self._complete = False
         self._bytes = 0
         self._last_sample = 0
@@ -92,6 +98,8 @@ class OpenAISession:
     def _check(self) -> None:
         if self._cancelled:
             raise STTClosedError("STT session cancelled")
+        if self._refused:
+            raise OpenAIError("OpenAI transcript refused")
         if self._failed:
             raise OpenAIError("OpenAI stream failed")
 
@@ -186,10 +194,11 @@ class OpenAISession:
                 if (
                     not isinstance(text, str)
                     or len(text.encode("utf-8")) > MAX_SEGMENT_BYTES
-                    or self._provider._api_key in text
                 ):
                     raise ValueError("invalid transcript segment")
                 text = self._items.get(item, "") + text if delta else text
+                # Check the accumulated item text: deltas can split a credential.
+                refuse_credential(self._provider._api_key, [text])
                 others = [v for k, v in self._items.items() if k != item]
                 budget = sum(len(json.dumps(v).encode()) - 2 for v in [*others, text])
                 if budget + len(others) > MAX_TRANSCRIPT_BYTES:
@@ -231,6 +240,11 @@ class OpenAISession:
                 self._failed = True
         except asyncio.CancelledError:
             raise
+        except CredentialTranscriptError:
+            self._refused = True
+            self._failed = True
+            self._items.clear()
+            self._final = ""
         except Exception:
             self._failed = True
         finally:
@@ -239,6 +253,10 @@ class OpenAISession:
                 await self._ws.close()
             except Exception:
                 self._failed = True
+
+    @property
+    def transcript_refused(self) -> bool:
+        return self._refused
 
     def speech_started(self) -> None:
         self._check()
@@ -326,7 +344,11 @@ class OpenAISession:
                 await self.aclose()
             if failed or self._failed:
                 self._failed = True
-                raise OpenAIError("OpenAI finalization failed")
+                raise OpenAIError(
+                    "OpenAI transcript refused"
+                    if self._refused
+                    else "OpenAI finalization failed"
+                )
             self._finished = True
             return self._final
 

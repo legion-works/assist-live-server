@@ -5,6 +5,9 @@ import json
 from pathlib import Path
 from typing import Any
 
+# The default turn detector loads these pinned models for each STT turn.
+TURN_MODEL_IDS = ("silero-vad", "smart-turn-v3.2-cpu")
+
 
 def asset_manifest_path() -> Path:
     packaged = Path(__file__).resolve().parent / "assets/manifest.json"

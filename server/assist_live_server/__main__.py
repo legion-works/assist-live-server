@@ -14,7 +14,12 @@ from urllib.request import Request, urlopen
 # ONNX Runtime reads this opt-out before its first import, not at session setup.
 os.environ["ORT_DISABLE_TELEMETRY"] = "1"
 
-from .assets import load_asset_manifest, model_path, verified_model  # noqa: E402
+from .assets import (  # noqa: E402
+    TURN_MODEL_IDS,
+    load_asset_manifest,
+    model_path,
+    verified_model,
+)
 from .auth import Registry  # noqa: E402
 
 
@@ -60,8 +65,19 @@ def download_records(document: dict[str, Any]) -> list[dict[str, Any]]:
     return result
 
 
-def fetch_plan(cache: Path, document: dict[str, Any], *, download: bool) -> None:
-    entries = download_records(document)
+def fetch_plan(
+    cache: Path,
+    document: dict[str, Any],
+    *,
+    download: bool,
+    only: tuple[str, ...] | None = None,
+    basename_aliases: bool = True,
+) -> None:
+    entries = [
+        entry
+        for entry in download_records(document)
+        if only is None or entry["id"] in only
+    ]
     cache.mkdir(parents=True, exist_ok=True)
     aliases: dict[str, str] = {}
     for entry in entries:
@@ -91,7 +107,7 @@ def fetch_plan(cache: Path, document: dict[str, Any], *, download: bool) -> None
         else:
             continue
         # Provider loaders use basenames; the manifest retains canonical paths.
-        if path.suffix in {".onnx", ".json", ".txt"}:
+        if basename_aliases and path.suffix in {".onnx", ".json", ".txt"}:
             name = path.name
             if name in aliases and aliases[name] != entry["sha256"]:
                 raise ValueError("ambiguous model basename")
@@ -124,13 +140,30 @@ async def serve() -> None:
     data.mkdir(parents=True, exist_ok=True, mode=0o700)
     cache = Path(os.environ.get("ASSIST_LIVE_MODEL_CACHE", str(data / "cache")))
     os.environ["ASSIST_LIVE_MODEL_CACHE"] = str(cache)
+    download = boolean("ASSIST_LIVE_DOWNLOAD_MODELS", "true")
     if config.stt_provider == "parakeet" or config.tts_provider == "piper":
         await asyncio.to_thread(
-            fetch_plan,
-            cache,
-            load_asset_manifest(),
-            download=boolean("ASSIST_LIVE_DOWNLOAD_MODELS", "true"),
+            fetch_plan, cache, load_asset_manifest(), download=download
         )
+    elif config.stt_provider is not None:
+        # A cloud STT turn also uses the local turn detector models. No failure
+        # of this fetch may stop the server or its TTS: the readiness check in
+        # ProviderFactory.load reads the cache and reports STT as unavailable.
+        # The catch is broad because download errors come from several
+        # families (OSError, ValueError, http.client.HTTPException).
+        # The turn detector reads canonical paths only, thus this fetch makes
+        # no basename aliases: an alias error cannot hide behind a ready STT.
+        try:
+            await asyncio.to_thread(
+                fetch_plan,
+                cache,
+                load_asset_manifest(),
+                download=download,
+                only=TURN_MODEL_IDS,
+                basename_aliases=False,
+            )
+        except Exception:
+            pass
     factory = await ProviderFactory.load(config, cache=cache)
     from aiohttp import web
 

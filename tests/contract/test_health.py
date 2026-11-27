@@ -328,6 +328,104 @@ def test_health_reports_config_policy_and_registry_destination(
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("present", [False, True])
+@pytest.mark.parametrize("provider", ["deepgram", "openai", "parakeet"])
+def test_health_reports_stt_only_with_turn_models(
+    tmp_path, store, replay_store, monkeypatch, provider, present
+):
+    import hashlib
+
+    from assist_live_server.app import create_app
+    from assist_live_server.auth import Registry
+    from assist_live_server.config import ProviderFactory, ServerConfig
+    from assist_live_server.providers.parakeet import ParakeetProvider
+    from assist_live_server.turn import detector
+
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    records = {}
+    for name in detector.MODEL_IDS:
+        data = f"synthetic {name} model".encode()
+        if present:
+            (cache / f"{name}.onnx").write_bytes(data)
+        records[name] = {
+            "id": name,
+            "path": f"{name}.onnx",
+            "sha256": hashlib.sha256(data).hexdigest(),
+        }
+    monkeypatch.setattr(detector, "model_records", lambda manifest=None: records)
+
+    async def load(cls, cache):
+        return object()
+
+    monkeypatch.setattr(ParakeetProvider, "load", classmethod(load))
+    monkeypatch.setenv("DEEPGRAM_API_KEY", "synthetic-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "synthetic-key")
+
+    async def run():
+        config = ServerConfig(
+            stt_provider=provider, tts_provider=None, local_only=False
+        )
+        providers = await ProviderFactory.load(config, cache=cache)
+        registry = Registry(replay_store=replay_store)
+        registry.bind("satellite-a", "satellite-a", b"test-device-secret")
+        registry.add_token("test-token", ["satellite-a"])
+        app = create_app(registry, store, providers=providers)
+        async with health_service(tmp_path, app) as (client, session):
+            status = await client.health_capabilities()
+            async with session.get(
+                "http://service.invalid/health",
+                headers={"Authorization": "Bearer test-token"},
+            ) as response:
+                body = await response.json()
+        assert status.stt is present
+        if present:
+            assert "unavailable" not in body
+        else:
+            assert body["unavailable"] == {"stt": "turn_models_missing"}
+            assert status.destinations == {}
+
+    asyncio.run(run())
+
+
+def test_health_reports_changed_turn_model_by_name(
+    tmp_path, store, replay_store, monkeypatch
+):
+    from assist_live_server.app import create_app
+    from assist_live_server.auth import Registry
+    from assist_live_server.config import ProviderFactory, ServerConfig
+    from assist_live_server.turn import detector
+
+    records = {
+        name: {"id": name, "path": f"{name}.onnx", "sha256": "0" * 64}
+        for name in detector.MODEL_IDS
+    }
+    for name in detector.MODEL_IDS:
+        (tmp_path / f"{name}.onnx").write_bytes(b"changed model")
+    monkeypatch.setattr(detector, "model_records", lambda manifest=None: records)
+    monkeypatch.setenv("DEEPGRAM_API_KEY", "synthetic-key")
+
+    async def run():
+        config = ServerConfig(
+            stt_provider="deepgram", tts_provider=None, local_only=False
+        )
+        providers = await ProviderFactory.load(config, cache=tmp_path)
+        registry = Registry(replay_store=replay_store)
+        registry.bind("satellite-a", "satellite-a", b"test-device-secret")
+        registry.add_token("test-token", ["satellite-a"])
+        app = create_app(registry, store, providers=providers)
+        async with health_service(tmp_path, app) as (client, session):
+            assert (await client.health_capabilities()).stt is False
+            async with session.get(
+                "http://service.invalid/health",
+                headers={"Authorization": "Bearer test-token"},
+            ) as response:
+                body = await response.json()
+        assert body["unavailable"] == {"stt": "turn_models_invalid"}
+
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("mode", [None, "local", "cloud"])
 def test_health_reports_checked_speaker_without_resolving(tmp_path, store, mode):
     from assist_live_server.app import create_app

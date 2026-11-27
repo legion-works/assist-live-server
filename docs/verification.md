@@ -4944,3 +4944,47 @@ The provision command replaces the registry file one time.
 
 The five test files give `156 passed`.
 `task check`, the Python 3.14.2 suite, and the network-isolated suite each give `2765 passed, 1 skipped`.
+
+## Cloud STT readiness and transcript credential check (2026-11-27 UTC)
+
+Tests examine these rules with fake provider servers and synthetic model files:
+
+- Health reports STT only when the turn detector models are in the model cache. If they are not, `unavailable.stt` gives `turn_models_missing` or `turn_models_invalid`.
+- With a cloud STT provider and no Parakeet or Piper selection, startup checks or downloads only the two turn detector models.
+- The Deepgram and OpenAI STT adapters refuse a `partial` or `final` that contains the configured API key.
+- The adapters also refuse the result when the key is in more than one result.
+
+The tests give 14 failures on `7a2827e` and 20 satisfactory results with these rules.
+For each rule, one code change gives failures in an isolated copy.
+When the turn models are in the cache, the Parakeet health result does not change.
+
+`task check`, the Python 3.14.2 suite, and the network-isolated suite each give `2785 passed, 1 skipped`.
+The public-tree check gives `PASS public data matches=0`.
+
+### Review changes
+
+Tests examine three more rules:
+
+- With a cloud STT provider, a download error or a changed turn model does not stop startup. The server command starts the HTTP service and the selected TTS, and health gives the cause in `unavailable.stt`.
+- The adapters examine only a configured key of 16 characters or more. A shorter key in ordinary words does not cause a refusal.
+- A refusal during the end decision of a turn without a command gives `stt_failed`, not an empty `final`.
+
+The tests give 9 failures on `cafeab7` and 13 satisfactory results with these rules.
+For each rule, one code change gives failures in an isolated copy.
+
+`task check`, the Python 3.14.2 suite, and the network-isolated suite each give `2797 passed, 1 skipped`.
+
+### Second review changes
+
+- A turn model path that resolves to a location that is not in the cache does not stop startup. Health gives `turn_models_invalid`.
+- The cloud STT startup check makes no basename alias, because the turn detector reads only the canonical paths.
+- The no-command refusal test records the refusal at the end decision. Thus a defective test setup gives a failure, and a correct `stt_failed` result is not sufficient.
+
+The server command test gives 2 failures on `b2a1268`.
+For this check, a test server sends no result.
+The earlier refusal test then gives 2 satisfactory results, and the new test gives 2 failures.
+For each startup rule, one code change gives one failure in an isolated copy.
+
+`task check`, the Python 3.14.2 suite, and the network-isolated suite each give `2799 passed, 1 skipped`.
+
+Review round 3 (parent repair): the cloud-only turn-model fetch at startup catches each `Exception`. Thus a body read that stops before its end (`http.client.IncompleteRead`) does not stop HTTP and TTS. The real-CLI test `test_cloud_startup_serves_health_without_turn_models` adds the case `read_failed`. Before the repair, the case `read_failed` gave an assertion error at `tests/test_main.py:464` with `FAIL server: startup configuration or model check failed`. The run gave `1 failed, 5 passed`.

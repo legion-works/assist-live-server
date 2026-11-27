@@ -109,7 +109,7 @@ def create_app(
             raise ValueError("configured providers and injected providers conflict")
         config = providers.config
         record_transcripts = config.record_transcripts
-        if config.stt_provider is not None:
+        if config.stt_provider is not None and providers.stt_unavailable is None:
             audio_gateway = AudioGateway(
                 providers.stt,
                 provider=config.stt_provider,
@@ -378,6 +378,13 @@ def create_app(
                 if providers is not None
                 else None,
                 "destinations": destinations,
+                **(
+                    {"unavailable": {"stt": providers.stt_unavailable}}
+                    if providers is not None
+                    and providers.config.stt_provider is not None
+                    and providers.stt_unavailable is not None
+                    else {}
+                ),
             }
         )
 

@@ -240,6 +240,98 @@ def test_each_remote_limit_fails_closed(cloud_ws_server, kind):
     asyncio.run(asyncio.wait_for(run(), 5))
 
 
+@pytest.mark.parametrize(
+    "parts",
+    [[KEY[:6], KEY[6:]], ["say " + KEY[:3], KEY[3:12], KEY[12:] + " now"]],
+    ids=["two-deltas", "three-deltas"],
+)
+def test_split_credential_in_deltas_is_refused(cloud_ws_server, caplog, parts):
+    module = adapter()
+    caplog.set_level(logging.DEBUG)
+
+    async def run():
+        async def handler(request):
+            ws = web.WebSocketResponse()
+            await ws.prepare(request)
+            await ws.receive_json()
+            await ws.receive_json()
+            try:
+                for text in parts:
+                    await ws.send_json(event("delta", text=text))
+                async for message in ws:
+                    if message.json()["type"] == "input_audio_buffer.commit":
+                        await ws.send_json(
+                            {
+                                "type": "input_audio_buffer.committed",
+                                "item_id": "selected",
+                            }
+                        )
+                        await ws.send_json(event("completed", text="turn on"))
+            except ConnectionResetError:
+                pass
+            return ws
+
+        async with cloud_ws_server(handler) as fake:
+            session = module.OpenAIProvider(
+                KEY, endpoint=fake.url, timeout=0.5
+            ).session()
+            try:
+                session.speech_started()
+                await session.push(b"\0\0")
+                for _ in range(200):
+                    if session._reader.done() or session._items.get(
+                        "selected"
+                    ) == "".join(parts):
+                        break
+                    await asyncio.sleep(0.01)
+                with pytest.raises(
+                    module.OpenAIError, match="transcript refused"
+                ) as error:
+                    await session.partial()
+                with pytest.raises(
+                    module.OpenAIError, match="transcript refused"
+                ) as final:
+                    await session.finish()
+                for value in (error.value, final.value):
+                    assert KEY not in "".join(traceback.format_exception(value))
+                    assert value.__context__ is None
+                assert session._items == {}
+            finally:
+                await session.aclose()
+        assert KEY not in caplog.text
+
+    asyncio.run(asyncio.wait_for(run(), 5))
+
+
+@pytest.mark.parametrize("key", ["on", "lights", "turnonthelights"])
+def test_short_key_does_not_refuse_ordinary_speech(cloud_ws_server, key):
+    module = adapter()
+
+    async def run():
+        async def handler(request):
+            ws = web.WebSocketResponse()
+            await ws.prepare(request)
+            async for message in ws:
+                if message.json()["type"] == "input_audio_buffer.commit":
+                    await ws.send_json(event("delta", text="turn on the "))
+                    await ws.send_json(event("delta", text="lights"))
+                    await ws.send_json(
+                        {"type": "input_audio_buffer.committed", "item_id": "selected"}
+                    )
+                    await ws.send_json(event("completed", text="turn on the lights"))
+            return ws
+
+        async with cloud_ws_server(handler) as fake:
+            session = module.OpenAIProvider(key, endpoint=fake.url).session()
+            try:
+                await session.push(b"\0\0")
+                assert await session.finish() == "turn on the lights"
+            finally:
+                await session.aclose()
+
+    asyncio.run(asyncio.wait_for(run(), 5))
+
+
 def test_redirect_refused_before_credential_forwarding(cloud_ws_server):
     module = adapter()
 

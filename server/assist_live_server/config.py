@@ -1,5 +1,6 @@
 """Load explicit provider selections before any content can leave the server."""
 
+import asyncio
 import math
 import os
 from collections import ChainMap
@@ -136,11 +137,15 @@ class ProviderFactory:
         stt: STTProvider | None = None,
         tts: TTSProvider | None = None,
         speaker: MurdockSpeaker | None = None,
+        *,
+        stt_unavailable: str | None = None,
     ) -> None:
         self.config = config
         self._stt = stt
         self._tts = tts
         self.speaker = speaker
+        # A named reason disables the STT gateway and its health capability.
+        self.stt_unavailable = stt_unavailable
 
     @property
     def tts_destination(self) -> Destination:
@@ -203,7 +208,12 @@ class ProviderFactory:
         )
         stt: STTProvider | None = None
         tts: TTSProvider | None = None
+        stt_unavailable = None
         if config.stt_provider is not None:
+            from .turn.detector import turn_models_unavailable
+
+            # Each STT turn needs the detector models, also with a cloud provider.
+            stt_unavailable = await asyncio.to_thread(turn_models_unavailable, cache)
             stt = await stt_registry.provider_factory(config.stt_provider)(
                 os.environ.get(f"{config.stt_provider.upper()}_API_KEY", "")
                 if provider_destination(config.stt_provider) == "cloud"
@@ -236,7 +246,7 @@ class ProviderFactory:
                 mode=mode,
             )
             speaker.checked_destination = literal_destination(speaker.url, mode)
-        return cls(config, stt, tts, speaker)
+        return cls(config, stt, tts, speaker, stt_unavailable=stt_unavailable)
 
     def stt(self, provider: str) -> STTSession:
         require_destination(provider_destination(provider), self.config.local_only)
