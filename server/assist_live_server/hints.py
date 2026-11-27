@@ -57,6 +57,32 @@ def validate_hints(value: object) -> tuple[str, ...]:
     return tuple(names)
 
 
+def parse_hint_json(raw: bytearray) -> object:
+    # The published client parser accepts only objects. Apply its depth rule to lists.
+    text = raw.decode("utf-8")
+    depth = 0
+    quoted = escaped = False
+    for character in text:
+        if quoted:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                quoted = False
+        elif character == '"':
+            quoted = True
+        elif character in "[{":
+            depth += 1
+            if depth > 32:
+                raise ValueError("JSON depth limit")
+        elif character in "]}":
+            depth -= 1
+            if depth < 0:
+                raise ValueError("invalid JSON nesting")
+    return json.loads(text)
+
+
 def hint_summary(names: tuple[str, ...]) -> dict[str, str | int]:
     raw = json.dumps(names, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     return {"count": len(names), "digest": hashlib.sha256(raw).hexdigest()}

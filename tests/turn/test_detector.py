@@ -159,6 +159,7 @@ def test_fetch_plan_hash_checks_without_network(tmp_path):
             "sha256": hashlib.sha256(data).hexdigest(),
             "status": "included",
             "path": f"models/{name}.onnx",
+            "bytes": len(data),
         }
         for name in ("silero-vad", "smart-turn-v3.2-cpu")
     ]
@@ -167,7 +168,8 @@ def test_fetch_plan_hash_checks_without_network(tmp_path):
         json.dumps(
             {
                 "download_plan": [
-                    {k: a[k] for k in ("id", "url", "sha256", "path")} for a in assets
+                    {k: a[k] for k in ("id", "url", "sha256", "path", "bytes")}
+                    for a in assets
                 ],
                 "assets": assets,
             }
@@ -184,7 +186,8 @@ def test_fetch_plan_hash_checks_without_network(tmp_path):
         json.dumps(
             {
                 "download_plan": [
-                    {k: a[k] for k in ("id", "url", "sha256", "path")} for a in assets
+                    {k: a[k] for k in ("id", "url", "sha256", "path", "bytes")}
+                    for a in assets
                 ],
                 "assets": assets,
             }

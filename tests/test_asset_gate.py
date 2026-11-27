@@ -135,7 +135,7 @@ def test_gpl_runtime_in_either_delivery_path(tmp_path, download):
     path = write_manifest(
         tmp_path,
         [record],
-        download_plan=["piper-runtime"] if download == "startup" else [],
+        download_plan=[download_entry(record)] if download == "startup" else [],
         image_inventory=["piper-runtime"] if download == "included" else [],
     )
     assert check_assets(path, release=True) == []
@@ -151,7 +151,9 @@ def test_transitive_phonemizer_must_pass_same_policy(tmp_path):
     assert (
         check_assets(
             write_manifest(
-                tmp_path, [record], download_plan=[download_entry(record), "phonemizer"]
+                tmp_path,
+                [record],
+                download_plan=[download_entry(record), download_entry(child)],
             ),
             release=True,
         )
@@ -525,7 +527,26 @@ def download_entry(record):
         "url": record["url"],
         "sha256": record["sha256"],
         "path": record["paths"][0],
+        "bytes": 8,
     }
+
+
+@pytest.mark.parametrize("size", [None, 0, -1, True, "8"])
+def test_download_plan_requires_positive_integer_size(tmp_path, size):
+    from tools.check_assets import check_assets
+
+    record = asset()
+    entry = download_entry(record)
+    if size is None:
+        del entry["bytes"]
+    else:
+        entry["bytes"] = size
+    errors = check_assets(
+        write_manifest(tmp_path, [record], download_plan=[entry]), True
+    )
+    assert any(
+        "download-plan entry requires a positive byte size" in error for error in errors
+    )
 
 
 @pytest.mark.parametrize("kind", ["model", "voice", "tokenizer"])

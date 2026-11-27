@@ -23,6 +23,10 @@ The project is experimental. The clients `0.1.0a1` and `0.1.0a2` are pre-release
 - Accept the firmware's pre-roll length in microphone-open timing events. Keep the store available when historical rows are invalid.
 - Add standalone and Home Assistant app container targets for amd64 and arm64, pinned model downloads, and artifact license checks.
 
+### Client `0.1.0a3` (next pre-release)
+
+- Give `ProtocolError(kind="closed")` when the event subscription WebSocket closes.
+
 ### Client `0.1.0a2` (PyPI pre-release, 2026-11-25)
 
 - Refuse redirects for the event and audio WebSockets, also when the scheme, host, and port do not change. A WebSocket handshake uses only the connector, timeout, and default headers of the supplied session.

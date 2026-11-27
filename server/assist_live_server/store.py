@@ -154,6 +154,8 @@ class SQLiteStore:
         self.wrong_owners: Counter[str] = Counter()
         self.turn_limits: Counter[tuple[str, str]] = Counter()
         self.changed = asyncio.Event()
+        self.change_generation = 0
+        self.device_write_failed = False
         self.loop: asyncio.AbstractEventLoop | None = None
         self.writer = ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="timing-writer"
@@ -170,6 +172,8 @@ class SQLiteStore:
                 status TEXT NOT NULL, closed_ns INTEGER
             );
             CREATE INDEX IF NOT EXISTS turns_satellite ON turns(satellite, status);
+            CREATE INDEX IF NOT EXISTS turns_satellite_opened
+                ON turns(satellite, opened_ns);
             CREATE INDEX IF NOT EXISTS turns_opened ON turns(opened_ns);
             CREATE INDEX IF NOT EXISTS turns_status ON turns(status, opened_ns);
             CREATE TABLE IF NOT EXISTS events (
@@ -206,7 +210,11 @@ class SQLiteStore:
 
     def _notify(self) -> None:
         if self.loop is not None:
-            self.loop.call_soon_threadsafe(self.changed.set)
+            self.loop.call_soon_threadsafe(self._publish_change)
+
+    def _publish_change(self) -> None:
+        self.change_generation += 1
+        self.changed.set()
 
     async def configure_registry(self, registry: Registry) -> None:
         await self._call(self._configure_registry, registry)
@@ -229,6 +237,7 @@ class SQLiteStore:
             self.connection.execute(
                 "DELETE FROM device_events WHERE device=?", (device,)
             )
+        self.device_write_failed = False
 
     async def accept_device(
         self,
@@ -283,10 +292,17 @@ class SQLiteStore:
                 self._append_device_rows(event, device.arrival_ns)
         except Exception as error:
             registry.replay[name] = original
+            if (
+                isinstance(error, sqlite3.Error)
+                and getattr(error, "sqlite_errorcode", None)
+                != sqlite3.SQLITE_CONSTRAINT_UNIQUE
+            ):
+                self.device_write_failed = True
             if isinstance(error, (sqlite3.Error, ValueError, TypeError, OverflowError)):
                 return False
             raise
         commit_conversion()
+        self.device_write_failed = False
         self._notify()
         return True
 
@@ -326,6 +342,8 @@ class SQLiteStore:
     ) -> TurnOpen | None:
         try:
             value = json.loads(raw)
+            if not isinstance(value, dict):
+                raise ValueError("stored turn object required")
             value.pop("late_open", None)
             parent = value.pop("received_parent_turn_id", value.get("parent_turn_id"))
             opened = value.pop("requested_opened_utc_ns", value.get("opened_utc_ns"))
@@ -506,6 +524,7 @@ class SQLiteStore:
                 self.connection.execute(
                     "DELETE FROM device_events WHERE stored_ns<?", (cutoff,)
                 )
+        self.device_write_failed = False
         if retention_due:
             self.connection.execute("PRAGMA wal_checkpoint(PASSIVE)")
             self.last_retention_ns = now
@@ -589,10 +608,14 @@ class SQLiteStore:
                 for pending_id, raw in pending:
                     event = self._decode_event(raw, turn.satellite, "pending")
                     if event is not None:
-                        self._insert(replace(event, turn_id=turn.turn_id))
+                        try:
+                            self._insert(replace(event, turn_id=turn.turn_id))
+                        except TurnLimitError:
+                            self._insert(self._unmatched(event))
                     self.connection.execute(
                         "DELETE FROM pending WHERE pending_id=?", (pending_id,)
                     )
+        self.device_write_failed = False
         if removal is not None:
             self.removed_parents[turn.satellite] += 1
             LOGGER.info("turn parent removed: %s", removal)
@@ -637,6 +660,7 @@ class SQLiteStore:
         with self.connection:
             self.connection.execute("BEGIN IMMEDIATE")
             transcript_omitted = self._insert(self._sanitize(event))
+        self.device_write_failed = False
         if transcript_omitted:
             self.transcript_omissions[event.satellite] += 1
         self._notify()
@@ -650,6 +674,7 @@ class SQLiteStore:
         with self.connection:
             self.connection.execute("BEGIN IMMEDIATE")
             self._append_device_rows(event, arrival_ns)
+        self.device_write_failed = False
         self._notify()
 
     def _append_device_rows(self, event: TimingEvent, arrival_ns: int) -> None:
@@ -721,7 +746,7 @@ class SQLiteStore:
         self, satellite: str, after_event_id: int
     ) -> AsyncIterator[dict[str, Any]]:
         while True:
-            self.changed.clear()
+            generation = self.change_generation
             while row := await self._call(
                 self._next_event, satellite, after_event_id, 0
             ):
@@ -731,7 +756,9 @@ class SQLiteStore:
                     "event_id": after_event_id,
                     "event": json.loads(row[1]),
                 }
-            await self.changed.wait()
+            if generation == self.change_generation:
+                self.changed.clear()
+                await self.changed.wait()
 
     def _next_event(
         self, satellite: str, cursor: int, since: int

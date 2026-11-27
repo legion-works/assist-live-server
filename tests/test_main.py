@@ -147,7 +147,8 @@ record = {{
 startup.load_asset_manifest = lambda: {{
     "assets": [record],
     "download_plan": [{{"id": "voice", "path": "models/voice.onnx",
-                       "url": record["url"], "sha256": record["sha256"]}}],
+                        "url": record["url"], "sha256": record["sha256"],
+                        "bytes": path.stat().st_size}}],
 }}
 status = startup.main([])
 assert seen == ["onnxruntime"]
@@ -381,7 +382,15 @@ def synthetic_turn_manifest(tmp_path, cache):
                 "components": [],
             }
         )
-        plan.append({"id": name, "url": url, "sha256": digest, "path": relative})
+        plan.append(
+            {
+                "id": name,
+                "url": url,
+                "sha256": digest,
+                "path": relative,
+                "bytes": len(data),
+            }
+        )
     manifest = tmp_path / "synthetic-manifest.json"
     manifest.write_text(json.dumps({"assets": records, "download_plan": plan}))
     return manifest
@@ -389,7 +398,15 @@ def synthetic_turn_manifest(tmp_path, cache):
 
 @pytest.mark.parametrize(
     "case",
-    ["changed", "download_failed", "read_failed", "missing", "outside", "alias"],
+    [
+        "changed",
+        "download_failed",
+        "read_failed",
+        "missing",
+        "outside",
+        "alias",
+        "timeout",
+    ],
 )
 def test_cloud_startup_serves_health_without_turn_models(tmp_path, case):
     cache = tmp_path / "cache"
@@ -419,13 +436,15 @@ from urllib.error import URLError
 import assist_live_server.__main__ as startup
 from assist_live_server.turn import detector
 def refused(*args, **kwargs):
+    if os.environ["SYNTHETIC_CASE"] == "timeout":
+        raise URLError(TimeoutError("synthetic download failure"))
     raise URLError("synthetic download failure")
 class Interrupted:
     def __enter__(self):
         return self
     def __exit__(self, *args):
         return False
-    def read(self, size):
+    def read1(self, size):
         raise IncompleteRead(b"synthetic download failure")
 def interrupted(*args, **kwargs):
     return Interrupted()
@@ -443,7 +462,7 @@ raise SystemExit(startup.main([]))
         "ASSIST_LIVE_TTS_PROVIDER": "elevenlabs",
         "ASSIST_LIVE_LOCAL_ONLY": "false",
         "ASSIST_LIVE_DOWNLOAD_MODELS": (
-            "true" if case in {"download_failed", "read_failed"} else "false"
+            "true" if case in {"download_failed", "read_failed", "timeout"} else "false"
         ),
         "SYNTHETIC_CASE": case,
         "ELEVENLABS_API_KEY": "synthetic-key",
@@ -476,6 +495,7 @@ raise SystemExit(startup.main([]))
     assert body["healthy"] is True
     assert body["capabilities"]["tts"] is True
     assert "synthetic download failure" not in stdout + stderr
+    assert ("model_download_time_limit" in stderr) == (case == "timeout")
     files = sorted(p.relative_to(cache).as_posix() for p in cache.rglob("*"))
     if case == "alias":
         # The turn detector reads canonical paths. Startup makes no alias.
@@ -491,7 +511,7 @@ raise SystemExit(startup.main([]))
     }
     leftovers = [f for f in files if (cache / f).is_file() or (cache / f).is_symlink()]
     assert len(leftovers) == (
-        0 if case in {"download_failed", "read_failed", "missing"} else 2
+        0 if case in {"download_failed", "read_failed", "missing", "timeout"} else 2
     )
 
 
@@ -575,6 +595,7 @@ def test_bad_cached_hash_exits_without_traceback(tmp_path, fetch_only):
                         "url": record["url"],
                         "sha256": record["sha256"],
                         "path": "models/voice.onnx",
+                        "bytes": 5,
                     }
                 ],
             }
@@ -664,6 +685,7 @@ def test_startup_refuses_runtime_wheels_and_path_escape(tmp_path, kind, path):
                 "url": record["url"],
                 "sha256": record["sha256"],
                 "path": path,
+                "bytes": 1,
             }
         ],
     }
@@ -697,6 +719,7 @@ def test_startup_download_checks_bytes_and_supplies_provider_basename(
                 "url": record["url"],
                 "sha256": record["sha256"],
                 "path": "models/file.onnx",
+                "bytes": len(data),
             }
         ],
     }
@@ -715,3 +738,60 @@ def test_startup_download_checks_bytes_and_supplies_provider_basename(
     (tmp_path / "file.onnx").write_bytes(b"wrong hash")
     with pytest.raises(ValueError, match="SHA-256 mismatch"):
         fetch_plan(tmp_path, document, download=True)
+
+
+@pytest.mark.parametrize("past_limit", [False, True])
+def test_largest_download_budget_allows_slow_link(tmp_path, monkeypatch, past_limit):
+    import assist_live_server.__main__ as startup
+
+    asset_bytes = 652_184_014
+    elapsed = 120 + asset_bytes / (256 * 1024) + (1 if past_limit else -1)
+    document = startup.load_asset_manifest()
+    entry = next(
+        row for row in document["download_plan"] if row["id"] == "stt-parakeet"
+    )
+    record = next(row for row in document["assets"] if row["id"] == entry["id"])
+    data = b"synthetic encoder"
+    digest = hashlib.sha256(data).hexdigest()
+    entry.update(bytes=asset_bytes, sha256=digest)
+    record.update(bytes=asset_bytes, sha256=digest)
+    clock = [0.0]
+
+    class Transfer(io.BytesIO):
+        def read1(self, size):
+            clock[0] = elapsed
+            return super().read1(size)
+
+    monkeypatch.setattr(startup, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(startup, "urlopen", lambda *args, **kwargs: Transfer(data))
+    target = tmp_path / entry["path"]
+    if past_limit:
+        with pytest.raises(ValueError, match="model_download_time_limit"):
+            fetch_plan(tmp_path, document, download=True, only=(entry["id"],))
+        assert list(target.parent.iterdir()) == []
+    else:
+        fetch_plan(tmp_path, document, download=True, only=(entry["id"],))
+        assert target.read_bytes() == data
+
+
+def test_local_startup_prints_wrapped_download_timeout(tmp_path, monkeypatch, capsys):
+    from urllib.error import URLError
+
+    import assist_live_server.__main__ as startup
+
+    for name, value in {
+        **environment(tmp_path),
+        "ASSIST_LIVE_STT_PROVIDER": "parakeet",
+        "ASSIST_LIVE_DOWNLOAD_MODELS": "true",
+    }.items():
+        monkeypatch.setenv(name, value)
+
+    def timeout(*args, **kwargs):
+        raise URLError(TimeoutError("synthetic download failure"))
+
+    monkeypatch.setattr(startup, "urlopen", timeout)
+    assert startup.main([]) == 1
+    assert capsys.readouterr().out == (
+        "FAIL server: startup configuration or model check failed: "
+        "model_download_time_limit\n"
+    )

@@ -117,6 +117,17 @@ No speaker entry means that the server has no configured speaker plug-in.
 
 Startup downloads are explicit model setup, not audio requests. `download_models` controls them.
 The startup command checks the pinned SHA-256 values before it loads providers.
+
+The download time limit for each missing file is 120 seconds plus the pinned size divided by 256 KiB/s.
+This time starts before connection setup and does not start again on a redirect.
+The byte limit is the `bytes` value in the download plan. Each entry must have a positive integer size.
+If a download uses more time or bytes than the limit, the server gives `model_download_time_limit` or `model_download_bytes_limit`.
+It removes the temporary file without installing it.
+
+The downloader checks the time before and after each body read. A body read can add one socket wait of a maximum of 120 seconds.
+DNS, redirects, and HTTP headers and chunk metadata use the HTTP library's usual limits. They do not have a wall time limit.
+Proxy settings, certificate checks, and redirects stay the same.
+
 Provider requests use the checked local cache.
 The command gives the same cache path to the provider factory and the turn detector through `ASSIST_LIVE_MODEL_CACHE`.
 

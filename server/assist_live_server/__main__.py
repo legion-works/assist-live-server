@@ -2,14 +2,15 @@ import argparse
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import re
 import signal
 import tempfile
-from contextlib import suppress
 from pathlib import Path
+from time import monotonic
 from typing import Any
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 # ONNX Runtime reads this opt-out before its first import, not at session setup.
@@ -22,6 +23,17 @@ from .assets import (  # noqa: E402
     verified_model,
 )
 from .auth import Registry  # noqa: E402
+
+DOWNLOAD_DEADLINE = 120.0
+DOWNLOAD_SOCKET_TIMEOUT = 120.0
+DOWNLOAD_MIN_BYTES_PER_SECOND = 256 * 1024
+LOGGER = logging.getLogger(__name__)
+
+
+class ModelDownloadLimitError(ValueError):
+    def __init__(self, reason: str, asset: str) -> None:
+        super().__init__(f"{reason}: {asset}")
+        self.reason = reason
 
 
 def boolean(name: str, default: str) -> bool:
@@ -46,6 +58,7 @@ def download_records(document: dict[str, Any]) -> list[dict[str, Any]]:
     seen: set[str] = set()
     for entry in document["download_plan"]:
         row = records[entry["id"]]
+        byte_limit = entry.get("bytes")
         if (
             row["status"] != "included"
             or row["kind"] not in {"model", "voice", "tokenizer"}
@@ -59,6 +72,9 @@ def download_records(document: dict[str, Any]) -> list[dict[str, Any]]:
             or not entry["url"].startswith("https://")
             or Path(entry["path"]).is_absolute()
             or ".." in Path(entry["path"]).parts
+            or type(byte_limit) is not int
+            or byte_limit <= 0
+            or ("bytes" in row and row["bytes"] != byte_limit)
         ):
             raise ValueError("invalid selected download plan")
         seen.add(entry["id"])
@@ -94,10 +110,43 @@ def fetch_plan(
                 ) as output:
                     temporary = Path(output.name)
                     digest = hashlib.sha256()
-                    with urlopen(entry["url"], timeout=120) as response:
-                        while data := response.read(1024 * 1024):
-                            digest.update(data)
-                            output.write(data)
+                    size = 0
+                    byte_limit = entry["bytes"]
+                    deadline = (
+                        monotonic()
+                        + DOWNLOAD_DEADLINE
+                        + byte_limit / DOWNLOAD_MIN_BYTES_PER_SECOND
+                    )
+                    try:
+                        with urlopen(
+                            entry["url"], timeout=DOWNLOAD_SOCKET_TIMEOUT
+                        ) as response:
+                            while True:
+                                if monotonic() >= deadline:
+                                    raise TimeoutError
+                                # A buffered read can wait for many socket reads.
+                                data = response.read1(
+                                    min(1024 * 1024, byte_limit - size + 1)
+                                )
+                                if monotonic() >= deadline:
+                                    raise TimeoutError
+                                if not data:
+                                    break
+                                size += len(data)
+                                if size > byte_limit:
+                                    raise ModelDownloadLimitError(
+                                        "model_download_bytes_limit", entry["id"]
+                                    )
+                                digest.update(data)
+                                output.write(data)
+                    except (TimeoutError, URLError) as error:
+                        if isinstance(error, URLError) and not isinstance(
+                            error.reason, TimeoutError
+                        ):
+                            raise
+                        raise ModelDownloadLimitError(
+                            "model_download_time_limit", entry["id"]
+                        ) from None
                     if digest.hexdigest() != entry["sha256"]:
                         raise ValueError("download SHA-256 mismatch")
                 temporary.replace(path)
@@ -154,7 +203,7 @@ async def serve() -> None:
         # families (OSError, ValueError, http.client.HTTPException).
         # The turn detector reads canonical paths only, thus this fetch makes
         # no basename aliases: an alias error cannot hide behind a ready STT.
-        with suppress(Exception):
+        try:
             await asyncio.to_thread(
                 fetch_plan,
                 cache,
@@ -163,6 +212,10 @@ async def serve() -> None:
                 only=TURN_MODEL_IDS,
                 basename_aliases=False,
             )
+        except ModelDownloadLimitError as error:
+            LOGGER.warning("%s", error.reason)
+        except Exception:
+            pass
     factory = await ProviderFactory.load(config, cache=cache)
     from aiohttp import web
 
@@ -247,6 +300,8 @@ def main(argv: list[str] | None = None) -> int:
 
         if isinstance(error, EndRuleError):
             failure += ": " + str(error)
+        elif isinstance(error, ModelDownloadLimitError):
+            failure += ": " + error.reason
         print(failure, flush=True)
         return 1
     return 0

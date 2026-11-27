@@ -20,6 +20,7 @@ class EventGateway:
         self.clocks: dict[str, ClockWindow] = {}
         self.sequences: dict[str, tuple[int, int, int]] = {}
         self.metrics = Metrics()
+        self.acceptance_failed = False
 
     async def accept(self, device: DeviceEvent) -> None:
         event, commit = self.convert(device)
@@ -90,6 +91,7 @@ class EventGateway:
                     if accepted:
                         await self.accept(event)
                 if accepted:
+                    self.acceptance_failed = False
                     ingress.accepted += 1
                 else:
                     ingress.refused += 1
@@ -100,6 +102,7 @@ class EventGateway:
                 raise
             except Exception:
                 accepted = False
+                self.acceptance_failed = True
                 # Exception text can contain credentials or event data.
                 LOGGER.error("timing acceptance failed")
                 ingress.worker_errors += 1

@@ -49,6 +49,7 @@ The package check installs it in a new environment without server model dependen
 - `build_plan` identifies runtime, phonemizer, and voice-data wheels from `uv.lock`.
 
 The startup command downloads only `download_plan`. It checks each SHA-256 before an atomic rename.
+Each download has the time and byte limits in [Server configuration](configuration.md#local-only-runtime-paths).
 It also checks files in the cache. A mismatch stops startup.
 
 The selected voice stays Lessac. No other bundled package file selects a different voice.

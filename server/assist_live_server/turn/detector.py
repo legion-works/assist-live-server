@@ -53,6 +53,7 @@ def model_records(manifest: Path | str | None = None) -> dict[str, dict[str, Any
             "url",
             "sha256",
             "path",
+            "bytes",
         }:
             raise ValueError("invalid or duplicate model download plan entry")
         if (
@@ -62,6 +63,8 @@ def model_records(manifest: Path | str | None = None) -> dict[str, dict[str, Any
             or len(entry["sha256"]) != 64
             or any(char not in "0123456789abcdef" for char in entry["sha256"])
             or any(entry[key] != row.get(key) for key in ("url", "sha256"))
+            or type(entry["bytes"]) is not int
+            or entry["bytes"] <= 0
         ):
             raise ValueError("model download plan pins differ from asset record")
         path = entry["path"]

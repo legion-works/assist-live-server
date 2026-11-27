@@ -375,6 +375,7 @@ class AssistLiveClient:
                     )
                     after_event_id = value["event_id"]
                     yield value
+                raise ProtocolError("event stream closed", kind="closed")
         except TimeoutError:
             raise ProtocolError("event stream failed", kind="timeout") from None
         except aiohttp.ClientError:

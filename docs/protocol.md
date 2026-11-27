@@ -54,6 +54,12 @@ Authenticated `GET /health` gives this body:
 `healthy` is `true` only when the store and replay storage are available.
 This value shows liveness and store readiness.
 
+Health does not wait for a timing-store operation. It uses the result of background maintenance and device event writes.
+If maintenance gives an error or does not complete for 10 seconds, health gives `healthy: false` and `unavailable.timing_store: timing_store_failed`.
+A device event write failure gives the same result.
+The next SQLite write transaction that completes without an error clears the device event write fault.
+A maintenance transaction also clears that fault and updates the maintenance deadline.
+
 Audio provider selection does not change `healthy`. A server with no audio functions can be healthy.
 
 `capabilities.stt` is `true` when an audio gateway or legacy backend is available.
@@ -61,7 +67,7 @@ Audio provider selection does not change `healthy`. A server with no audio funct
 With configured providers, the turn detector models must also be in the model cache.
 If startup does not find them, `capabilities.stt` is `false` and `destinations` has no `stt` key.
 The top-level `unavailable` object then gives `{"stt": "turn_models_missing"}` or `{"stt": "turn_models_invalid"}`.
-Without this condition, health does not send `unavailable`.
+Health sends `unavailable` only to identify a fault.
 The server sets this status at startup. After a change to the model cache, restart the server.
 
 `capabilities.tts` is `true` when a TTS gateway, TTS provider, or legacy backend is available.
@@ -156,7 +162,7 @@ Each string must equal its `lower()` and `strip()` values. Duplicate strings are
 The server validates the names but does not change them.
 
 Invalid JSON, invalid names, or a body above 386002 bytes gives `400` with `{"error":"invalid_hints"}`.
-This route has its own body bound. The control-message bound does not change.
+This route has its own body bound and uses the same JSON depth limit as the control routes.
 
 The response is `{"count": N, "digest": "SHA256"}`.
 The digest is SHA-256 of `json.dumps(names, ensure_ascii=False, separators=(",", ":"))` encoded as UTF-8, with names in the submitted order.
@@ -176,7 +182,7 @@ Older clients ignore the new health fields.
 
 The server starts a background prefix-graph build when it accepts a Parakeet list.
 The health digest identifies the accepted list before that build finishes.
-A turn that starts before the build finishes uses the previous prepared list, or no hints if none is prepared.
+A turn that starts before the build finishes uses the previous prepared list, or no hints if the server has no prepared list.
 Only the newest accepted list can replace the prepared list after its build finishes.
 
 Builds use the same serial executor as decodes, after queued `final` and `partial` decodes.
@@ -334,7 +340,7 @@ The canonical-vector tests and the string/number test supply byte-level examples
 The server uses HMAC and `hmac.compare_digest` for known and unknown device keys.
 An unknown key uses the constant `DUMMY_DEVICE_SECRET`. A dummy-key tag cannot authenticate an unknown device.
 
-All device, control, and HTTP JSON paths have a maximum nesting depth of 32, with the root object at depth 1.
+All device, control, and HTTP JSON paths have a maximum nesting depth of 32, with the root object or list at depth 1.
 Delimiters in strings do not increase the depth. Byte-size limits also apply.
 
 ### Replay acceptance
@@ -473,6 +479,7 @@ Rows stored before this rule use their stored parent and open time because the r
 A retry can get `turn_conflict` if the server had cleared its parent or supplied its open time.
 Two equal concurrent opens give one stored turn and two success responses.
 Concurrent opens with a different value give one success and one `turn_conflict`.
+SQLite uses the `turns_satellite_opened` index to check for a subsequent turn for the same satellite.
 
 ### Initial audio control
 
@@ -816,6 +823,9 @@ HTTP and export readers check each bounded chunk before they extend a buffer.
 Full device queues refuse new events without a new replay entry.
 Socket writes wait for flow control. No route makes an unbounded queue.
 
+Each export or subscription write has a 600 ms limit. If a write does not complete in time, the server stops the connection.
+Do not use an export that stops during a write as a complete export.
+
 ## Records and read routes
 
 ### Client errors
@@ -862,6 +872,7 @@ The server uses the initial time for turn expiry and retention.
 
 If the store contains a turn for the same satellite with a newer open time, the server records the earlier turn as `incomplete`.
 The server does not change the newer turn or give pending device events to the earlier turn.
+
 The open times come from the HA clock.
 The HA clock can move back, for example on a host that starts before its time synchronization.
 Then each turn of that satellite that opens before the clock gets back to the earlier time is `incomplete`.
@@ -986,8 +997,12 @@ The status rules are:
 Necessary `stage` values for `tts_only` are `tts_first_text`, `tts_first_byte`, `playback_start`, and `playback_end`.
 Voice turns also use these necessary values: `wake_detected`, `mic_open`, `speech_start`, `end_decision`, and `stt_final`.
 The `stt_partial`, `speaker_result`, and `end_candidate` events are optional.
+
 The server keeps unattached device events for five seconds from arrival, for the same satellite only.
-Expired events keep their quality and uncertainty, get `stage=unmatched`, and keep `data.original_stage`.
+When a turn opens, the server attaches pending events that fit its count and byte limits, in stored order.
+An event that does not fit does not prevent the turn from opening. The server counts it in the limit metric and stores it as `unmatched`.
+
+Expired pending events also get `stage=unmatched`. Unmatched events keep their quality, uncertainty, and `data.original_stage`.
 They do not keep `data.pre_roll_ms`, because an unmatched record has no turn audio.
 
 | Route | Contract |
@@ -1011,6 +1026,10 @@ They can export earlier `stage` values, but cannot parse exports with unknown va
 The server sends only event identifiers greater than that cursor.
 Each envelope has `version`, a monotonically increasing stored `event_id`, and a complete `event` object.
 Reconnect with the last consumed identifier. The client does not change that cursor automatically.
+
+Each subscriber checks for new events independently. A different subscriber cannot remove its notification.
+The subscription does not send an end message. From client `0.1.0a3`, a WebSocket close gives `ProtocolError(kind="closed")`.
+Client `0.1.0a2` can end the iteration without an error on a WebSocket close.
 Subscriptions, queries, exports, audio, and event writes apply the same satellite authorization.
 
 `TurnStore` specifies the store interface. `SQLiteStore` supplies the SQLite implementation with 30-day retention by default.
@@ -1036,6 +1055,8 @@ These metrics contain no transcript text or turn identifiers.
 
 Invalid stored rows do not stop maintenance, turn opening, queries, exports, or subscriptions.
 The server deletes invalid pending rows. It skips invalid event and turn rows on read, but does not delete them because of these read errors.
+
+A turn payload that is JSON but not an object is an invalid turn row.
 A query for an invalid turn gives no turn. An invalid closing turn gets `status=incomplete`.
 The server refuses new event writes to an invalid stored turn.
 

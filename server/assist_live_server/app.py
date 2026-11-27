@@ -34,7 +34,13 @@ from .auth import Registry
 from .config import ProviderFactory, provider_destination
 from .destinations import Destination
 from .event_gateway import EventGateway
-from .hints import MAX_HINT_BYTES, HintList, hint_summary, validate_hints
+from .hints import (
+    MAX_HINT_BYTES,
+    HintList,
+    hint_summary,
+    parse_hint_json,
+    validate_hints,
+)
 from .protocol import (
     WS_CLOSE_TIMEOUT,
     AudioBackend,
@@ -61,6 +67,7 @@ UDP_ADDRESS = web.AppKey("udp_address", tuple[str, int])
 TEXT_IDLE_TIMEOUT = 30.0
 MAX_AUTH_CONNECTIONS = 64
 MAX_AUTH_PER_TOKEN = 16
+STORE_READY_SECONDS = 10.0
 LOGGER = logging.getLogger(__name__)
 
 
@@ -208,6 +215,7 @@ def create_app(
     if timing.registry is not registry:
         raise ValueError("ingress registry mismatch")
     gateway = EventGateway(store) if store is not None else None
+    maintenance_deadline: float | None = None
     device_transport = WebSocketTransport(timing)
     if udp_address is not None and (
         store is None
@@ -216,20 +224,31 @@ def create_app(
         raise ValueError("timing and replay stores required")
 
     async def lifecycle(application: web.Application) -> AsyncIterator[None]:
+        nonlocal maintenance_deadline
         transport = None
         consumer = None
         maintenance = None
         if isinstance(store, SQLiteStore):
             await store.configure_registry(registry)
+            maintenance_deadline = (
+                asyncio.get_running_loop().time() + STORE_READY_SECONDS
+            )
 
         async def maintain() -> None:
+            nonlocal maintenance_deadline
             backoff = 0.1
             while True:
                 try:
                     if isinstance(store, SQLiteStore):
                         await store.maintain()
+                        if gateway is not None:
+                            gateway.acceptance_failed = False
+                        maintenance_deadline = (
+                            asyncio.get_running_loop().time() + STORE_READY_SECONDS
+                        )
                     backoff = 0.1
                 except Exception:
+                    maintenance_deadline = asyncio.get_running_loop().time()
                     LOGGER.error("timing maintenance failed")
                     if gateway is not None:
                         gateway.metrics.maintenance_errors_total += 1
@@ -346,10 +365,29 @@ def create_app(
             destinations["speaker"] = (
                 getattr(speaker, "checked_destination", None) or "unknown"
             )
+        unavailable: dict[str, str] = {}
+        if (
+            providers is not None
+            and providers.config.stt_provider is not None
+            and providers.stt_unavailable is not None
+        ):
+            unavailable["stt"] = providers.stt_unavailable
+        timing_store_failed = (
+            (
+                maintenance_deadline is not None
+                and asyncio.get_running_loop().time() >= maintenance_deadline
+            )
+            or (gateway is not None and gateway.acceptance_failed)
+            or (isinstance(store, SQLiteStore) and store.device_write_failed)
+        )
+        if timing_store_failed:
+            unavailable["timing_store"] = "timing_store_failed"
         return web.json_response(
             {
                 "version": 1,
-                "healthy": store is not None and registry.replay_store is not None,
+                "healthy": store is not None
+                and registry.replay_store is not None
+                and not timing_store_failed,
                 "sequence_gaps_by_satellite": sequence_gaps_by_satellite,
                 "counters_since_utc_ns": counters_since_utc_ns,
                 "stt_hints_by_satellite": {
@@ -378,13 +416,7 @@ def create_app(
                 if providers is not None
                 else None,
                 "destinations": destinations,
-                **(
-                    {"unavailable": {"stt": providers.stt_unavailable}}
-                    if providers is not None
-                    and providers.config.stt_provider is not None
-                    and providers.stt_unavailable is not None
-                    else {}
-                ),
+                **({"unavailable": unavailable} if unavailable else {}),
             }
         )
 
@@ -403,7 +435,7 @@ def create_app(
                     if len(raw) + len(chunk) > MAX_HINT_BYTES:
                         raise ValueError("invalid_hints")
                     raw.extend(chunk)
-            names = validate_hints(json.loads(raw))
+            names = validate_hints(parse_hint_json(raw))
         except ValueError, TypeError, UnicodeError, TimeoutError:
             return web.json_response({"error": "invalid_hints"}, status=400)
         candidate = HintList(names)
@@ -548,30 +580,50 @@ def create_app(
             return web.json_response({"error": str(error)}, status=403)
         return web.json_response({"version": 1})
 
+    async def event_output(request: web.Request, write: Awaitable[object]) -> bool:
+        try:
+            async with asyncio.timeout(MESSAGE_DEADLINE):
+                await write
+        except TimeoutError:
+            if request.transport is not None:
+                request.transport.abort()
+            return False
+        return True
+
     async def export(request: web.Request) -> web.StreamResponse:
         satellite = identifier(request.query["satellite"])
         allowed(request, satellite)
         since = stored_integer(int(request.query.get("since_utc_ns", "0")))
         records = storage().export(satellite, since)
         response = web.StreamResponse(headers={"Content-Type": "application/x-ndjson"})
-        await response.prepare(request)
-        async for row in records:
-            if row["event"]["satellite"] != satellite:
-                raise ValueError("store isolation violation")
-            raw = json.dumps(row, allow_nan=False, separators=(",", ":")).encode()
-            if len(raw) > MAX_CONTROL:
-                raise ValueError("stored record too large")
-            await response.write(raw + b"\n")
-        await response.write_eof()
+        if not await event_output(request, response.prepare(request)):
+            return response
+        try:
+            async for row in records:
+                if row["event"]["satellite"] != satellite:
+                    raise ValueError("store isolation violation")
+                raw = json.dumps(row, allow_nan=False, separators=(",", ":")).encode()
+                if len(raw) > MAX_CONTROL:
+                    raise ValueError("stored record too large")
+                if not await event_output(request, response.write(raw + b"\n")):
+                    return response
+            await event_output(request, response.write_eof())
+        finally:
+            if hasattr(records, "aclose"):
+                await records.aclose()
         return response
 
     async def events(request: web.Request) -> web.WebSocketResponse:
         satellites = allowed(request)
         target = storage()
         ws = web.WebSocketResponse(
-            max_msg_size=MAX_CONTROL, compress=False, timeout=WS_CLOSE_TIMEOUT
+            max_msg_size=MAX_CONTROL,
+            compress=False,
+            timeout=WS_CLOSE_TIMEOUT,
+            autoclose=False,
         )
-        await ws.prepare(request)
+        if not await event_output(request, ws.prepare(request)):
+            return ws
         try:
             first = await ws.receive(timeout=MESSAGE_DEADLINE)
             if first.type != WSMsgType.TEXT:
@@ -629,7 +681,8 @@ def create_app(
                             raise ValueError("stored event too large")
                         cursor = row["event_id"]
                         if row["event"]["stage"] in wanted:
-                            await ws.send_str(raw)
+                            if not await event_output(request, ws.send_str(raw)):
+                                return ws
                     finally:
                         next_event.cancel()
                         with contextlib.suppress(
@@ -643,9 +696,17 @@ def create_app(
                 if hasattr(iterator, "aclose"):
                     await iterator.aclose()
         except IntegerRangeError:
-            await ws.close(code=1008, message=b"integer_out_of_range")
+            await event_output(
+                request,
+                ws.close(code=1008, message=b"integer_out_of_range", drain=False),
+            )
         except ValueError, KeyError, TypeError, TimeoutError, StopAsyncIteration:
-            await ws.close(code=1008, message=b"subscription refused")
+            await event_output(
+                request,
+                ws.close(code=1008, message=b"subscription refused", drain=False),
+            )
+        else:
+            await event_output(request, ws.close(drain=False))
         return ws
 
     async def audio(request: web.Request) -> web.WebSocketResponse:

@@ -151,12 +151,19 @@ def download_entries(
     for item in value:
         if isinstance(item, str):
             label = item
+            errors.append(f"{label}: download-plan entry requires a positive byte size")
         elif (
             isinstance(item, dict)
-            and set(item) == {"id", "url", "sha256", "path"}
+            and {"id", "url", "sha256", "path"} <= item.keys()
+            and item.keys() <= {"id", "url", "sha256", "path", "bytes"}
             and isinstance(item.get("id"), str)
         ):
             label = item["id"]
+            size = item.get("bytes")
+            if type(size) is not int or size <= 0:
+                errors.append(
+                    f"{label}: download-plan entry requires a positive byte size"
+                )
             entries[label] = item
         else:
             errors.append("download plan: id, url, sha256, and path required")
@@ -352,6 +359,15 @@ def check_assets(manifest: Path, release: bool) -> list[str]:
         record = by_id.get(label, {})
         paths = record.get("paths")
         target = entry.get("path")
+        local = local_path(root, target)
+        size = entry.get("bytes")
+        if type(size) is int and (
+            ("bytes" in record and size != record["bytes"])
+            or (local is not None and local.is_file() and local.stat().st_size != size)
+        ):
+            errors.append(
+                f"{label}: download-plan byte size does not match selected file"
+            )
         if (
             entry.get("url") != record.get("url")
             or entry.get("sha256") != record.get("sha256")

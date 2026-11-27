@@ -318,12 +318,14 @@ def test_ci_and_task_fetch_pinned_turn_models(tmp_path):
         record["url"] = source.as_uri()
         record["sha256"] = hashlib.sha256(source.read_bytes()).hexdigest()
         record["path"] = f"models/{record['id']}.onnx"
+        record["bytes"] = source.stat().st_size
     manifest = tmp_path / "manifest.json"
     manifest.write_text(
         json.dumps(
             {
                 "download_plan": [
-                    {k: r[k] for k in ("id", "url", "sha256", "path")} for r in selected
+                    {k: r[k] for k in ("id", "url", "sha256", "path", "bytes")}
+                    for r in selected
                 ],
                 "assets": selected,
             }

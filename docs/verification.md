@@ -5011,3 +5011,31 @@ The pinned `uv` `0.13.1` does not know the Python `3.14.10` download.
 The workflows pin `uv` to `0.13.9`, the version that installed Python `3.14.10` for the local gates.
 The image build keeps `uv` `0.13.1`, because the base image supplies Python `3.14.10`.
 The local gates on those commits gave no failure, because they use the local `uv`.
+
+## HTTP, event, and store audit (2026-11-27 UTC)
+
+The name-hint route checks JSON depth before it parses the list.
+Export and subscription writes have a 600 ms limit. Store faults give `unavailable.timing_store` in health.
+The startup downloader checks the total time and bytes for each file.
+
+One subscriber cannot remove the notification for a different subscriber.
+Pending device events that do not fit in a turn keep their timing as `unmatched`.
+The store gives an invalid row result for a JSON turn payload that is not an object.
+The client gives `ProtocolError(kind="closed")` when a subscription socket closes.
+The check for a subsequent turn uses one `turns_satellite_opened` index search with the satellite and open time.
+
+The regression suite gave `14 failed` on base `3503ed1` and `14 passed` with the changes.
+Each of nine different source changes in scratch gave the related test failure again.
+
+`task check` gave `2815 passed, 1 skipped`.
+The Python 3.14.2 and network-isolated suites gave the same result.
+
+Review added a size to each of the eight download entries. HTTP HEAD on each pinned URL gives the size.
+The file time limit is 120 seconds plus one second for each 256 KiB.
+The next SQLite write that completes without an error clears a device event write fault.
+The client close rule starts with the next client release, `0.1.0a3`.
+
+New tests on `b2772ba` gave nine failures for the file time limit, size checks, and store recovery.
+The tests for startup error messages and maintenance stalls gave no failures on `b2772ba`.
+Four source changes in scratch gave the specified test failures.
+The review gates each gave `2827 passed, 1 skipped`.

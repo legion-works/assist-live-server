@@ -139,9 +139,9 @@ async def check_default_headers(turn_id):
         ) as client,
     ):
         async with aclosing(client.events("satellite-a")) as stream:
-            # The test server closes after the subscribe message, so the stream ends.
-            with pytest.raises(StopAsyncIteration):
+            with pytest.raises(ProtocolError) as error:
                 await anext(stream)
+            assert error.value.kind == "closed"
     assert seen == ["caller-agent"]
 
 
