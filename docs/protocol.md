@@ -37,6 +37,7 @@ Authenticated `GET /health` gives this body:
 {
   "version": 1,
   "healthy": true,
+  "turn_profile": "safe",
   "capabilities": {
     "stt": true,
     "tts": true,
@@ -62,6 +63,9 @@ A maintenance transaction also clears that fault and updates the maintenance dea
 A refused device credential gives `healthy: false` and `unavailable.credentials: credential_blocked`. Maintenance and device event writes do not clear it.
 
 Audio provider selection does not change `healthy`. A server with no audio functions can be healthy.
+
+`turn_profile` gives the server setting for turn detection: the string `safe` or `fast`.
+The response gives this setting also when the server cannot use STT.
 
 `capabilities.stt` is `true` when an audio gateway or legacy backend is available.
 
@@ -1051,7 +1055,7 @@ They do not keep `data.pre_roll_ms`, because an unmatched record has no turn aud
 
 | Route | Contract |
 |---|---|
-| `GET /health` | Authenticated `{"version": 1, "healthy": true, "capabilities": {"stt": true, "tts": true}}`. `healthy` shows store readiness, and `capabilities` shows audio paths. |
+| `GET /health` | Authenticated `{"version": 1, "healthy": true, "turn_profile": "safe", "capabilities": {"stt": true, "tts": true}}`. `healthy` shows store readiness, and `capabilities` shows audio paths. |
 | `GET /v1/bindings` | List of approved anonymous satellite mappings |
 | `POST /v1/turns` | Open a turn in the store |
 | `POST /v1/event` | Append an integration or HA-state timing event |

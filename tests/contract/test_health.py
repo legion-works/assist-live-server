@@ -189,6 +189,7 @@ def test_health_capabilities_and_legacy_boolean(
                     assert health == {
                         "version": 1,
                         "healthy": ready,
+                        "turn_profile": "safe",
                         "sequence_gaps_by_satellite": {
                             "satellite-a": {"boot_id": None, "missing": 0}
                         },

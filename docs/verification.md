@@ -5168,3 +5168,21 @@ With the repair, a failed file write at start keeps the device refused. The new 
 On the previous version, the new tests gave `5 failed, 14 passed`. The start tests accepted a key while the file kept a pending entry. The missing-row test accepted the key at epoch 2. The check command was not available, and health gave `healthy: true`.
 
 With the repair, the rotation tests gave `19 passed`. A scratch change that only logged the failed start write gave `2 failed`. A scratch change that removed the health check of refused devices gave `1 failed`.
+
+## Turn detection setting
+
+The Home Assistant app sets `ASSIST_LIVE_TURN_PROFILE` from its `turn_profile` option.
+The default is `safe`. An unknown value stops startup and the error names `ASSIST_LIVE_TURN_PROFILE`.
+The authenticated `/health` response gives `turn_profile`, also when the server cannot use STT.
+
+On base `247ecb4`, the new checks gave `8 failed, 2 passed`. With the change, the related tests gave `224 passed`.
+The tests give `fast` three different values and check each value on two turns with each end rule.
+The server keeps the same values for `safe` and `fast` until measurements give different values.
+
+One source change in scratch made all detectors use `safe`. It gave `2 failed, 2 passed` in the four turn cases.
+The published client `0.1.0a2` read the authenticated response with `fast`. Its `health()` and `health_capabilities()` calls completed without errors.
+
+The full suite on an isolated runner gave `2967 passed, 17 failed, 1 skipped`.
+The runner had no Git history or IPv6 loopback. These limits caused 16 failures.
+The second client bindings test on the same runner gave no error.
+On a runner with Git history and IPv6 loopback, these tests gave `17 passed`.

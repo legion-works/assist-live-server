@@ -17,6 +17,7 @@ ports_description:
 options:
   stt_provider: parakeet
   end_rule: partial
+  turn_profile: safe
   tts_provider: piper
   local_only: true
   record_transcripts: false
@@ -32,6 +33,7 @@ options:
 schema:
   stt_provider: list(parakeet|deepgram|openai|none)
   end_rule: list(partial|checkpoint)
+  turn_profile: list(safe|fast)
   tts_provider: list(piper|elevenlabs|none)
   local_only: bool
   record_transcripts: bool

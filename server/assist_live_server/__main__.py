@@ -185,6 +185,7 @@ async def serve() -> None:
         speaker_url=os.environ.get("ASSIST_LIVE_SPEAKER_URL") or None,
         stt_hint_bonus=float(os.environ.get("ASSIST_LIVE_STT_HINT_BONUS", "1.0")),
         end_rule=os.environ.get("ASSIST_LIVE_END_RULE", "partial"),
+        turn_profile=os.environ.get("ASSIST_LIVE_TURN_PROFILE", "safe"),
     )
     data = Path(os.environ.get("ASSIST_LIVE_DATA", "/data"))
     data.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -308,13 +309,17 @@ def main(argv: list[str] | None = None) -> int:
             if args.check_credentials
             else "FAIL server: startup configuration or model check failed"
         )
-        from .config import EndRuleError
+        from .config import EndRuleError, TurnProfileError
         from .providers.stt import STTCredentialLengthError
         from .providers.tts import ElevenLabsLoggingError
 
         # These messages are fixed text without configured values.
         if isinstance(
-            error, EndRuleError | STTCredentialLengthError | ElevenLabsLoggingError
+            error,
+            EndRuleError
+            | TurnProfileError
+            | STTCredentialLengthError
+            | ElevenLabsLoggingError,
         ):
             failure += ": " + str(error)
         elif isinstance(error, ModelDownloadLimitError):

@@ -83,14 +83,20 @@ def test_startup_refuses_short_cloud_stt_credential(
 
 
 @pytest.mark.parametrize("provisioned", [False, True])
-def test_valid_startup_serves_health(tmp_path, provisioned):
+@pytest.mark.parametrize("turn_profile", [None, "fast"], ids=["default", "fast"])
+def test_valid_startup_serves_health(tmp_path, provisioned, turn_profile):
     if provisioned:
         registry = Registry(tmp_path / "registry.json")
         registry.bind("test-satellite", "test-satellite", b"x" * 32)
         registry.add_token("synthetic-health-token", ["test-satellite"])
+    env = environment(tmp_path)
+    if turn_profile is None:
+        env.pop("ASSIST_LIVE_TURN_PROFILE", None)
+    else:
+        env["ASSIST_LIVE_TURN_PROFILE"] = turn_profile
     process = subprocess.Popen(
         entrypoint_command(tmp_path, "server"),
-        env=environment(tmp_path),
+        env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -118,6 +124,7 @@ def test_valid_startup_serves_health(tmp_path, provisioned):
             )
             with urlopen(request, timeout=5) as response:
                 assert response.status == 200
+                assert json.load(response)["turn_profile"] == (turn_profile or "safe")
         assert "synthetic-password-value" not in line
     finally:
         process.terminate()

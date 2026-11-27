@@ -218,6 +218,15 @@ In the two modes, `assist_live_end_decision_wait_seconds` records the time from 
 This histogram has `end_rule` as its only Prometheus `label`. It contains no transcript text or turn identifiers.
 See [the public design, end-of-turn and STT fallback](https://github.com/legion-works/assist-live/blob/main/docs/design.md#end-of-turn-and-stt-fallback).
 
+## Turn settings
+
+`ASSIST_LIVE_TURN_PROFILE` selects `safe` (default) or `fast`. The app option is `turn_profile`.
+The server uses this setting for all STT turns with the `partial` and `checkpoint` rules.
+
+The two settings use the same values until measurements give different values.
+The minimum time without voice is 400 ms, and the maximum is 1500 ms. The Smart Turn limit is 0.8.
+An unknown value stops startup with an error that names `ASSIST_LIVE_TURN_PROFILE`.
+
 ## Speaker destination checks
 
 With `local_only`, the speaker destination must resolve only to these address classes:
@@ -323,6 +332,7 @@ This stops ONNX Runtime from sending its default telemetry data. It also applies
 | `ASSIST_LIVE_STT_PROVIDER` | `parakeet` | `stt_provider` | Select STT, or `none` to disable it. |
 | `ASSIST_LIVE_STT_HINT_BONUS` | `1.0` | none | Set the last Parakeet transcript's name bonus, from `0` through `4`. |
 | `ASSIST_LIVE_END_RULE` | `partial` | `end_rule` | Select `partial` or the Parakeet-only `checkpoint` rule. |
+| `ASSIST_LIVE_TURN_PROFILE` | `safe` | `turn_profile` | Select `safe` or `fast` for turn detection. |
 | `ASSIST_LIVE_TTS_PROVIDER` | `piper` | `tts_provider` | Select TTS, or `none` to disable it. |
 | `ASSIST_LIVE_LOCAL_ONLY` | `true` | `local_only` | Refuse cloud providers. |
 | `ASSIST_LIVE_RECORD_TRANSCRIPTS` | `false` | `record_transcripts` | Set the server transcript policy. |

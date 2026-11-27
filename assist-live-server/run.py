@@ -5,6 +5,7 @@ from pathlib import Path
 OPTIONS = {
     "stt_provider": "ASSIST_LIVE_STT_PROVIDER",
     "end_rule": "ASSIST_LIVE_END_RULE",
+    "turn_profile": "ASSIST_LIVE_TURN_PROFILE",
     "tts_provider": "ASSIST_LIVE_TTS_PROVIDER",
     "local_only": "ASSIST_LIVE_LOCAL_ONLY",
     "record_transcripts": "ASSIST_LIVE_RECORD_TRANSCRIPTS",

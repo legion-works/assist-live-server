@@ -1,6 +1,7 @@
 """Keep one provider and one detector for each audio turn."""
 
 import asyncio
+import functools
 import logging
 import threading
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -15,6 +16,7 @@ from .providers.parakeet import MAX_AUDIO_BYTES
 from .providers.stt import STTBusyError, STTSession
 from .speaker import SpeakerPlugin
 from .turn.detector import TurnDetector
+from .turn.profiles import PROFILES
 from .turn.transcript_guard import transcript_words
 
 TURN_TIMEOUT = 15.0
@@ -31,7 +33,7 @@ class AudioGateway:
         provider_factory: Callable[[str], STTSession],
         *,
         provider: str = "parakeet",
-        detector_factory: Callable[[], TurnDetector] = TurnDetector,
+        detector_factory: Callable[[], TurnDetector] | None = None,
         destination: Destination | None = None,
         local_only: bool = True,
         speaker: SpeakerPlugin | None = None,
@@ -39,13 +41,21 @@ class AudioGateway:
         | None = None,
         hint_snapshot: Callable[[str], Awaitable[HintList]] | None = None,
         end_rule: str = "partial",
+        turn_profile: str = "safe",
     ) -> None:
         if end_rule not in {"partial", "checkpoint"}:
             raise ValueError("invalid ASSIST_LIVE_END_RULE")
+        if turn_profile not in PROFILES:
+            raise ValueError("invalid ASSIST_LIVE_TURN_PROFILE")
         self.end_rule = end_rule
+        self.turn_profile = turn_profile
         self.provider_factory = provider_factory
         self.provider = provider
-        self.detector_factory = detector_factory
+        self.detector_factory = (
+            functools.partial(TurnDetector, profile=turn_profile)
+            if detector_factory is None
+            else detector_factory
+        )
         self.destination: Destination = destination or "local"
         self.declared_destination = destination
         self.local_only = local_only

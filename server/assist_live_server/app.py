@@ -128,6 +128,7 @@ def create_app(
                 else None,
                 hint_snapshot=hint_snapshot,
                 end_rule=config.end_rule,
+                turn_profile=config.turn_profile,
             )
         if config.tts_provider is not None:
             tts_gateway = TTSGateway(
@@ -389,6 +390,11 @@ def create_app(
         return web.json_response(
             {
                 "version": 1,
+                "turn_profile": providers.config.turn_profile
+                if providers is not None
+                else audio_gateway.turn_profile
+                if audio_gateway is not None
+                else "safe",
                 "healthy": store is not None
                 and registry.replay_store is not None
                 and not timing_store_failed

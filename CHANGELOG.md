@@ -11,6 +11,7 @@ The project is experimental. The clients `0.1.0a1` and `0.1.0a2` are pre-release
 - Add `stage` ownership, sentence timing, late turn opens, per-turn size limits, and safe retries of the same turn open.
 - Add guarded turn detection with command-start checks and English transcript-ending checks. Human pause and prefix acceptance stays pending.
 - Add the optional Parakeet `checkpoint` end rule with audio-based checkpoints, decode deadlines, backpressure, and failure counters.
+- Add `safe` and `fast` settings for turn detection in the server and the Home Assistant app. Keep `safe` as the default. Report the selected setting in authenticated health responses.
 - Add local Parakeet STT, beam search for the last transcript, and satellite-specific name hints for that transcript only.
 - Cut STT audio at the detector's end sample. Send an empty transcript without a command start.
 - Replace a shorter, unrelated `final` with earlier text when the replacement guard accepts it.

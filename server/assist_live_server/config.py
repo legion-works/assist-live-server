@@ -26,6 +26,7 @@ from .providers import tts as tts_registry
 from .providers.stt import STTProvider, STTSession
 from .providers.tts import TTSProvider
 from .speaker import MurdockSpeaker
+from .turn.profiles import PROFILES
 
 PROVIDER_DESTINATIONS = ChainMap(
     stt_registry.PROVIDER_DESTINATIONS, tts_registry.PROVIDER_DESTINATIONS
@@ -33,6 +34,10 @@ PROVIDER_DESTINATIONS = ChainMap(
 
 
 class EndRuleError(ValueError):
+    pass
+
+
+class TurnProfileError(ValueError):
     pass
 
 
@@ -54,8 +59,11 @@ class ServerConfig:
     end_rule: str = "partial"
     tts_base_url: str | None = None
     tts_destination: Destination | None = None
+    turn_profile: str = "safe"
 
     def __post_init__(self) -> None:
+        if self.turn_profile not in PROFILES:
+            raise TurnProfileError("invalid ASSIST_LIVE_TURN_PROFILE")
         if self.end_rule not in {"partial", "checkpoint"}:
             raise EndRuleError("invalid ASSIST_LIVE_END_RULE")
         if self.end_rule == "checkpoint" and self.stt_provider not in {
@@ -104,6 +112,7 @@ class ServerConfig:
         speaker_url: str | None = None,
         stt_hint_bonus: float = 1.0,
         end_rule: str = "partial",
+        turn_profile: str = "safe",
         resolver: Resolver = resolve_addresses,
     ) -> ServerConfig:
         config = cls(
@@ -114,6 +123,7 @@ class ServerConfig:
             speaker_url,
             stt_hint_bonus,
             end_rule,
+            turn_profile=turn_profile,
         )
         if tts_provider == "openai_tts":
             base_url = os.environ.get("OPENAI_TTS_BASE_URL", "")
@@ -204,6 +214,7 @@ class ProviderFactory:
             speaker_url=config.speaker_url,
             stt_hint_bonus=config.stt_hint_bonus,
             end_rule=config.end_rule,
+            turn_profile=config.turn_profile,
             resolver=resolver,
         )
         stt: STTProvider | None = None
