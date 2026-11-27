@@ -5035,14 +5035,14 @@ The file time limit is 120 seconds plus one second for each 256 KiB.
 The next SQLite write that completes without an error clears a device event write fault.
 The client close rule starts with the next client release, `0.1.0a3`.
 
-New tests on `b2772ba` gave nine failures for the file time limit, size checks, and store recovery.
-The tests for startup error messages and maintenance stalls gave no failures on `b2772ba`.
+New tests on the first reviewed version of this change gave nine failures for the file time limit, size checks, and store recovery.
+The tests for startup error messages and maintenance stalls gave no failures on that version.
 Four source changes in scratch gave the specified test failures.
 The review gates each gave `2827 passed, 1 skipped`.
 
 ## Server startup test hang guard (2026-11-27 UTC)
 
-The S55 landing gate gave one failure in `tests/test_main.py::test_valid_startup_serves_health[False]`: the subprocess wrote no startup line in less than 20 s.
+The landing gate for this change gave one failure in `tests/test_main.py::test_valid_startup_serves_health[False]`: the subprocess wrote no startup line in less than 20 s.
 That `task check` run took 265 s at high host load. The Python 3.14.2 and isolated suites on the same commit gave no failure for that test.
 The test has had this 20 s wait since 2026-10-26.
 The three subprocess startup waits in `tests/test_main.py` use a 60 s hang guard.

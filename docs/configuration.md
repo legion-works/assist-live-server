@@ -128,6 +128,10 @@ The downloader checks the time before and after each body read. A body read can 
 DNS, redirects, and HTTP headers and chunk metadata use the HTTP library's usual limits. They do not have a wall time limit.
 Proxy settings, certificate checks, and redirects stay the same.
 
+On a slow connection, the first start can need more time than the 10-minute start period of the image health check.
+The health check then shows `unhealthy` while the download continues.
+Fill the model cache before the first start (`--fetch-models`), or wait for the startup line.
+
 Provider requests use the checked local cache.
 The command gives the same cache path to the provider factory and the turn detector through `ASSIST_LIVE_MODEL_CACHE`.
 
