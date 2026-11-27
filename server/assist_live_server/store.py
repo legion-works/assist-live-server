@@ -90,6 +90,8 @@ def safe_data(event: TimingEvent, transcript: bool = False) -> dict[str, object]
     )
     if event.stage.startswith("tts_"):
         fields.add("request")
+    if event.stage == "end_decision" and event.source != "server":
+        fields.discard("end_sample")
     for key in fields:
         if key in event.data:
             data[key] = event.data[key]

@@ -5097,3 +5097,19 @@ Review of the first version found two problems. A key-shaped identifier without 
 The new tests for these problems gave `5 failed` on that version. With the repair, the ElevenLabs, server command, and TTS contract tests gave `236 passed`.
 The on-wire logging test runs with and without a configured voice.
 Without the key-shaped identifier check, `1 failed`: the check of the published name refused the identifier when it was the name. Without the new startup diagnostic, `2 failed`.
+
+## End-decision sample count
+
+The store keeps `end_sample` on server `end_decision` events. It is the number of samples in the audio prefix for `final`.
+The tests compare the stored count with the audio prefix for the two end rules, `max_silence`, `input_end`, and the audio and wall limits.
+If a hard end stops a provider push, the count uses the audio that the provider accepted.
+
+On base `d823389`, the first tests gave `22 failed`: the store did not keep the field, and the client did not refuse invalid values.
+The related tests with the changes gave `229 passed`.
+A decrease of 512 samples and a change to the detector count after a stalled flush each gave one test failure.
+The published client `0.1.0a2` read a turn record with `end_sample` from the turn route. The wheel test gave `1 passed`.
+
+The store removes `end_sample` from decisions from other sources. An integration proxy decision keeps its other data.
+Before the source check, the store kept the field and the tests gave `4 failed`. The related tests gave `217 passed` after the repair.
+
+The four hard-end grace tests also check `end_sample`. A change to the detector count gave `2 failed, 2 passed`.

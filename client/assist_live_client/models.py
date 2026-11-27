@@ -80,6 +80,7 @@ EVENT_CODES = {
 }
 EVENT_NUMBERS = {
     "speech_start": frozenset({"onset_ms"}),
+    "end_decision": frozenset({"end_sample"}),
     "tts_sentence": frozenset(
         {"index", "text_end", "text_ms", "first_byte_ms", "audio_ms"}
     ),

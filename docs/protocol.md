@@ -954,7 +954,7 @@ The server keeps these optional data fields:
 | Stage | Fields and valid values |
 |---|---|
 | `fallback_used` | `part`: `stt` or `tts`. `reason`: one code below. |
-| `end_decision` | `reason`: `early`, `hard`, `max_silence`, or `input_end`. `decision_source`: `server` or `ha_audio_end`. |
+| `end_decision` | `reason`: `early`, `hard`, `max_silence`, or `input_end`. `decision_source`: `server` or `ha_audio_end`. `end_sample`: non-negative integer for a server decision only. |
 | `satellite_state` | `state`: `idle`, `listening`, `processing`, or `responding`. |
 | `speech_start` | `onset_ms`: non-negative integer, from the start of the turn audio to the first voice sample. |
 | Each `tts_` value | `request`: non-negative integer, from 0 for each turn. |
@@ -969,7 +969,11 @@ The other values are `open_refused`, `open_error`, `stream_refused`, `stream_clo
 The server's `tts_text_received` marks its first text. The integration owns `tts_first_text`.
 The integration uses `stt_final_received` and `tts_audio_received` for its receipt boundaries, not copies of the server's `stage` values.
 The `speech_start` event keeps the detector's confirmation time. Its `onset_ms` gives the earlier audio position, not a second host timestamp.
+
 The server's `end_decision` keeps its detector rule and `decision_source: server`.
+Its `end_sample` is the number of 16 kHz mono samples in the turn audio prefix for `final`.
+The integration's proxy `end_decision` does not have `end_sample`.
+The audio control message `end_decision` does not have this field.
 
 ### TTS sentence timing
 

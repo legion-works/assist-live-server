@@ -90,6 +90,25 @@ def test_http_wrong_owner_is_named_counted_and_client_refused(tmp_path):
     asyncio.run(run())
 
 
+def test_proxy_end_decision_stores_no_end_sample(tmp_path):
+    async def run():
+        async with service(tmp_path) as (client, _, _, _):
+            await client.event(event("fallback_used", "integration", {"part": "stt"}))
+            data = {"reason": "input_end", "decision_source": "ha_audio_end"}
+            await client.event(
+                event("end_decision", "integration", {**data, "end_sample": 512})
+            )
+            [stored] = [
+                row
+                for row in (await client.turn(TURN))["events"]
+                if row["stage"] == "end_decision"
+            ]
+            assert stored["source"] == "integration"
+            assert stored["data"] == data
+
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("fallback", [False, True])
 def test_current_integration_ha_state_event_is_stored(tmp_path, fallback):
     import time

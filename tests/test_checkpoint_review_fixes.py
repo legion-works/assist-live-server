@@ -225,9 +225,10 @@ def test_checkpoint_ui_and_past_end_cancellation_use_processed_position(past_res
         async def note(*args, **kwargs):
             pass
 
-        async def decide(reason):
+        async def decide(reason, end_sample):
             nonlocal decided
             decided = True
+            assert end_sample == 14848
             assert detector.samples == 14848
             pending = [
                 t
@@ -340,8 +341,9 @@ def test_end_decision_precedes_pending_in_scope_checkpoint(
         async def note(*args, **kwargs):
             pass
 
-        async def decide(reason):
+        async def decide(reason, end_sample):
             assert reason == "early"
+            assert end_sample == 6400
             order.append("decision")
             decided.set()
 

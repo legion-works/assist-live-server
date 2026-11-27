@@ -20,6 +20,7 @@ FIELDS = [
     ("fallback_used", "part", "stt", "stt_fallback"),
     ("end_decision", "reason", "early", "unknown"),
     ("end_decision", "decision_source", "server", "device"),
+    ("end_decision", "end_sample", 0, -1),
     ("satellite_state", "state", "listening", "unknown"),
     ("speech_start", "onset_ms", 32, -1),
     ("tts_first_byte", "request", 0, -1),
@@ -54,6 +55,18 @@ def test_bounded_field_refuses_invalid(stage, key, valid, invalid, kind):
 def test_sentence_time_refuses_nonfinite_or_nonnumber(value):
     with pytest.raises(ValueError, match="invalid event data"):
         event("tts_sentence", data={"text_ms": value})
+
+
+@pytest.mark.parametrize("value", [1.5, "1", None])
+def test_end_sample_refuses_noninteger(value):
+    with pytest.raises(ValueError, match="invalid event data"):
+        event("end_decision", data={"end_sample": value})
+
+
+@pytest.mark.parametrize("source", ["integration", "device", "ha_state"])
+def test_nonserver_end_decision_drops_end_sample(source):
+    data = {"reason": "early", "decision_source": "server"}
+    assert safe_data(event("end_decision", source, {**data, "end_sample": 512})) == data
 
 
 PUBLIC_FALLBACK_REASONS = """health_timeout health_error server_unhealthy

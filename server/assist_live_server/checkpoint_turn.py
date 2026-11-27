@@ -26,7 +26,7 @@ class CheckpointTurn:
         detector: TurnDetector,
         *,
         note: Callable[..., Awaitable[None]],
-        decide: Callable[[str], Awaitable[None]],
+        decide: Callable[[str, int], Awaitable[None]],
         publish: Callable[[str], Awaitable[None]],
         failure: Callable[[str], None],
         observe: Callable[[float], None],
@@ -207,7 +207,9 @@ class CheckpointTurn:
                             if end >= self.detector.samples
                         )
                         self.observe(loop.time() - arrival)
-                    await self.decide(events[-1]["reason"] if events else "input_end")
+                    await self.decide(
+                        events[-1]["reason"] if events else "input_end", sent // 2
+                    )
                     for position, task in self.checkpoints.items():
                         if position <= self.detector.samples:
                             await asyncio.shield(task)

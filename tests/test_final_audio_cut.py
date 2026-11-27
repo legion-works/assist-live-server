@@ -3,10 +3,12 @@ import threading
 
 import numpy as np
 import pytest
+from assist_live_client import TimingEvent, TurnOpen
 from assist_live_server import audio_gateway
 from assist_live_server.audio_gateway import AudioGateway
 from assist_live_server.providers.parakeet import ParakeetSession
 from assist_live_server.speaker import SpeakerResult
+from assist_live_server.store import SQLiteStore
 from assist_live_server.turn.detector import TurnDetector
 
 from tests.stt_fakes import FirstBlockCommandDetector
@@ -17,7 +19,43 @@ HANG_GUARD = 60
 TURN = "01900000-0000-7000-8000-000000000001"
 
 
-def test_speaker_and_final_get_same_end_sample_under_both_rules():
+@pytest.fixture
+def stored_decision(tmp_path):
+    async def run(gateway, audio):
+        store = SQLiteStore(tmp_path / "turns.db")
+        turn = TurnOpen(TURN, "satellite-a", "voice", None, None)
+
+        async def record(stage, data):
+            await store.append(
+                TimingEvent(
+                    TURN,
+                    turn.satellite,
+                    "server",
+                    stage,
+                    store.now_ns(),
+                    "measured",
+                    None,
+                    data=data,
+                )
+            )
+
+        try:
+            await store.open_turn(turn)
+            replies = [r async for r in gateway.stt(TURN, audio, record=record)]
+            saved = await store.get_turn(TURN)
+            assert saved is not None
+            [decision] = [
+                row["data"] for row in saved["events"] if row["stage"] == "end_decision"
+            ]
+            return replies, decision
+        finally:
+            store.close()
+
+    return run
+
+
+@pytest.mark.parametrize("mode", ["partial", "checkpoint"])
+def test_speaker_and_final_get_same_end_sample_under_both_rules(mode, stored_decision):
     pcm = np.arange(1024, dtype="<i2").tobytes()
     speaker_inputs = []
     final_inputs = []
@@ -39,31 +77,29 @@ def test_speaker_and_final_get_same_end_sample_under_both_rules():
         return "final words"
 
     async def run():
-        for mode in ("partial", "checkpoint"):
+        async def audio():
+            yield pcm
 
-            async def audio():
-                yield pcm
+        gateway = AudioGateway(
+            lambda _: ParakeetSession(lambda _: "", final),
+            detector_factory=Detector,
+            speaker=Speaker(),
+            end_rule=mode,
+        )
+        return await stored_decision(gateway, audio())
 
-            gateway = AudioGateway(
-                lambda _: ParakeetSession(lambda _: "", final),
-                detector_factory=Detector,
-                speaker=Speaker(),
-                end_rule=mode,
-            )
-            replies = [r async for r in gateway.stt(TURN, audio())]
-            assert [r["text"] for r in replies if r["type"] == "final"] == [
-                "final words"
-            ]
-            assert any(r["type"] == "speaker_result" for r in replies)
-
-    asyncio.run(asyncio.wait_for(run(), HANG_GUARD))
-    assert final_inputs == [pcm[:1400], pcm[:1400]]
+    replies, decision = asyncio.run(asyncio.wait_for(run(), HANG_GUARD))
+    assert [r["text"] for r in replies if r["type"] == "final"] == ["final words"]
+    assert any(r["type"] == "speaker_result" for r in replies)
+    assert final_inputs == [pcm[:1400]]
     assert speaker_inputs == final_inputs, "SPEAKER_MUST_USE_FINAL_AUDIO_PREFIX"
+    assert decision["reason"] == "early"
+    assert decision["end_sample"] == len(final_inputs[0]) // 2
 
 
 @pytest.mark.parametrize("chunk", [320, 640, 1024, 2048])
 @pytest.mark.parametrize("end", ["detector", "client", "no_command"])
-def test_final_decode_uses_exact_turn_prefix(chunk, end):
+def test_final_decode_uses_exact_turn_prefix(chunk, end, stored_decision):
     pcm = np.ones(8192, dtype="<i2").tobytes() + bytes(60000)
     expected_samples = 32256
     if end == "client":
@@ -95,13 +131,15 @@ def test_final_decode_uses_exact_turn_prefix(chunk, end):
             lambda _: ParakeetSession(lambda _: "", final),
             detector_factory=detector,
         )
-        return [reply async for reply in gateway.stt(TURN, audio())]
+        return await stored_decision(gateway, audio())
 
-    replies = asyncio.run(asyncio.wait_for(run(), HANG_GUARD))
+    replies, decision = asyncio.run(asyncio.wait_for(run(), HANG_GUARD))
     finals = [r["text"] for r in replies if r["type"] == "final"]
+    assert decision["reason"] == ("max_silence" if end == "detector" else "input_end")
     if end == "no_command":
         assert final_audio == [], "no command must not run a final decode"
         assert finals == [""]
+        assert decision["end_sample"] == len(pcm) // 2
     else:
         assert detectors[0].samples == expected_samples
         assert final_audio == [pcm[: expected_samples * 2]], (
@@ -109,6 +147,7 @@ def test_final_decode_uses_exact_turn_prefix(chunk, end):
             "without a lost or extra sample"
         )
         assert finals == [f"turn samples {expected_samples}"]
+        assert decision["end_sample"] == len(final_audio[0]) // 2
 
 
 @pytest.fixture
@@ -136,16 +175,40 @@ def gateway_deadline(monkeypatch):
     return deadlines, expired
 
 
-@pytest.mark.parametrize("end", ["wall_timeout", "audio_cap"])
-def test_hard_end_flushes_received_tail(monkeypatch, gateway_deadline, end):
+@pytest.mark.parametrize(
+    "end", ["wall_timeout", "audio_cap", "checkpoint_cap", "stalled_flush"]
+)
+def test_end_limit_uses_accepted_audio_prefix(
+    monkeypatch, gateway_deadline, end, stored_decision
+):
     pcm = np.ones(8192, dtype="<i2").tobytes()
     tail = np.arange(900, dtype="<i2").tobytes()
-    expected = pcm + tail
     final_audio = []
-    notes = []
     deadlines, _ = gateway_deadline
-    if end == "audio_cap":
-        monkeypatch.setattr(audio_gateway, "MAX_AUDIO_BYTES", len(expected))
+    grace = []
+    if end != "wall_timeout":
+        monkeypatch.setattr(audio_gateway, "MAX_AUDIO_BYTES", len(pcm + tail))
+    if end == "stalled_flush":
+        original_timeout = asyncio.timeout
+
+        def timeout(delay):
+            if delay == audio_gateway.HARD_END_GRACE:
+                deadline = asyncio.Timeout(None)
+                grace.append(deadline)
+                return deadline
+            return original_timeout(delay)
+
+        monkeypatch.setattr(audio_gateway.asyncio, "timeout", timeout)
+
+    class Session(ParakeetSession):
+        async def checkpoint(self, pcm):
+            return ""
+
+        async def push(self, block):
+            if end == "stalled_flush" and block == tail[1024:]:
+                grace[0].reschedule(asyncio.get_running_loop().time())
+                await asyncio.Event().wait()
+            await super().push(block)
 
     def final(data):
         final_audio.append(data)
@@ -159,22 +222,24 @@ def test_hard_end_flushes_received_tail(monkeypatch, gateway_deadline, end):
                 deadlines[0].reschedule(asyncio.get_running_loop().time())
             await asyncio.Event().wait()
 
-        async def record(stage, data):
-            notes.append((stage, data))
-
         gateway = AudioGateway(
-            lambda _: ParakeetSession(lambda _: "", final),
+            lambda _: Session(lambda _: "", final),
             detector_factory=lambda: TurnDetector(
                 vad_probability=lambda a: float(np.any(a)),
                 turn_probability=lambda _: 0,
             ),
+            end_rule="checkpoint" if end == "checkpoint_cap" else "partial",
         )
-        return [r async for r in gateway.stt(TURN, audio(), record=record)]
+        return await stored_decision(gateway, audio())
 
-    replies = asyncio.run(asyncio.wait_for(run(), HANG_GUARD))
-    assert final_audio == [expected], "hard end lost received detector audio"
-    assert [r["text"] for r in replies if r["type"] == "final"] == ["turn samples 9092"]
-    assert [d["reason"] for s, d in notes if s == "end_decision"] == ["hard"]
+    replies, decision = asyncio.run(asyncio.wait_for(run(), HANG_GUARD))
+    expected = pcm + (tail[:1024] if end == "stalled_flush" else tail)
+    assert final_audio == [expected]
+    assert [r["text"] for r in replies if r["type"] == "final"] == [
+        f"turn samples {len(expected) // 2}"
+    ]
+    assert decision["reason"] == ("input_end" if end == "checkpoint_cap" else "hard")
+    assert decision["end_sample"] == len(final_audio[0]) // 2
 
 
 @pytest.mark.parametrize("tail_samples", [388, 512])
@@ -267,18 +332,31 @@ def test_hard_grace_recovers_only_audio_from_finished_detector(
     final_audio = []
     speaker_audio = []
     pushes = []
+    decisions = []
     deadlines, _ = gateway_deadline
+    grace_deadlines = []
+    timeout_with_wall = asyncio.timeout
     original_to_thread = asyncio.to_thread
 
+    def timeout(delay):
+        if delay != audio_gateway.HARD_END_GRACE:
+            return timeout_with_wall(delay)
+        when = None if grace_deadlines else asyncio.get_running_loop().time()
+        deadline = asyncio.Timeout(when)
+        grace_deadlines.append(deadline)
+        return deadline
+
     async def to_thread(function, *args, **kwargs):
+        work = asyncio.create_task(original_to_thread(function, *args, **kwargs))
         try:
-            return await original_to_thread(function, *args, **kwargs)
+            return await asyncio.shield(work)
         except asyncio.CancelledError:
             if worker_state == "returned_during_cancel":
                 release.set()
-                assert await original_to_thread(finished.wait, 1)
+                await work
             raise
 
+    monkeypatch.setattr(audio_gateway.asyncio, "timeout", timeout)
     monkeypatch.setattr(audio_gateway.asyncio, "to_thread", to_thread)
 
     async def run():
@@ -292,9 +370,7 @@ def test_hard_grace_recovers_only_audio_from_finished_detector(
                 if block == tail:
                     loop.call_soon_threadsafe(entered.set)
                     try:
-                        if worker_state == "still_running":
-                            threading.Event().wait(0.6)
-                        assert release.wait(3), "detector barrier not released"
+                        assert release.wait(HANG_GUARD), "detector barrier not released"
                     finally:
                         finished.set()
                 return events
@@ -317,6 +393,7 @@ def test_hard_grace_recovers_only_audio_from_finished_detector(
                     if push_state == "callee_timeout":
                         raise TimeoutError("synthetic catch-up push timeout")
                     if push_state == "stalled":
+                        grace_deadlines[1].reschedule(loop.time())
                         try:
                             await asyncio.Event().wait()
                         finally:
@@ -335,14 +412,18 @@ def test_hard_grace_recovers_only_audio_from_finished_detector(
             yield tail
             await asyncio.Event().wait()
 
+        async def record(stage, data):
+            if stage == "end_decision":
+                decisions.append(data)
+
         async def consume():
-            return [r async for r in gateway.stt(TURN, audio())]
+            return [r async for r in gateway.stt(TURN, audio(), record=record)]
 
         task = asyncio.create_task(consume())
         try:
-            await asyncio.wait_for(entered.wait(), 1)
+            await entered.wait()
             deadlines[0].reschedule(loop.time())
-            replies = await asyncio.wait_for(asyncio.shield(task), 1.5)
+            replies = await asyncio.shield(task)
             assert detector.samples == 1024
             assert (worker_state == "returned_during_cancel") == finished.is_set()
             assert pushes == ([head, tail] if finished.is_set() else [head]), (
@@ -352,11 +433,14 @@ def test_hard_grace_recovers_only_audio_from_finished_detector(
                 assert [r["type"] for r in replies] == ["error"]
                 assert replies[0]["code"] == "stt_failed"
                 assert final_audio == speaker_audio == []
+                assert decisions == []
                 return
             expected = (
                 head + tail if finished.is_set() and push_state == "ready" else head
             )
             assert final_audio == [expected], "FINISHED_DETECTOR_AUDIO_MUST_REACH_FINAL"
+            [decision] = decisions
+            assert decision["end_sample"] == len(final_audio[0]) // 2
             assert speaker_audio == [expected]
             assert push_cancelled.is_set() == (push_state == "stalled")
             assert [r["text"] for r in replies if r["type"] == "final"] == [

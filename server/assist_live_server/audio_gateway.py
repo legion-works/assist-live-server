@@ -121,13 +121,18 @@ class AudioGateway:
                         asyncio.get_running_loop().time() - arrival
                     )
 
-        async def publish_end(reason: str) -> None:
-            await note("end_decision", reason=reason, decision_source="server")
+        async def publish_end(reason: str, end_sample: int) -> None:
+            await note(
+                "end_decision",
+                reason=reason,
+                decision_source="server",
+                end_sample=end_sample,
+            )
             await output.put(encode_control("end_decision", turn_id))
 
-        async def checkpoint_end(reason: str) -> None:
+        async def checkpoint_end(reason: str, end_sample: int) -> None:
             select_end(reason)
-            await publish_end(reason)
+            await publish_end(reason, end_sample)
 
         async def work() -> None:
             nonlocal session, stopped, detector, partial, onset
@@ -358,7 +363,8 @@ class AudioGateway:
                     # The audio deadline must not cancel decision publication.
                     if decision is None:
                         raise RuntimeError("end decision missing")
-                    await publish_end(decision)
+                    # A hard end can stop a push of samples that the detector counted.
+                    await publish_end(decision, sent_bytes // 2)
                 text = ""
                 replaced = False
                 if onset:
