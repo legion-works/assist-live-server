@@ -336,6 +336,7 @@ def test_health_reports_stt_only_with_turn_models(
     import hashlib
 
     from assist_live_server.app import create_app
+    from assist_live_server.assets import TURN_MODEL_IDS
     from assist_live_server.auth import Registry
     from assist_live_server.config import ProviderFactory, ServerConfig
     from assist_live_server.providers.parakeet import ParakeetProvider
@@ -344,7 +345,7 @@ def test_health_reports_stt_only_with_turn_models(
     cache = tmp_path / "cache"
     cache.mkdir()
     records = {}
-    for name in detector.MODEL_IDS:
+    for name in TURN_MODEL_IDS:
         data = f"synthetic {name} model".encode()
         if present:
             (cache / f"{name}.onnx").write_bytes(data)
@@ -392,15 +393,16 @@ def test_health_reports_changed_turn_model_by_name(
     tmp_path, store, replay_store, monkeypatch
 ):
     from assist_live_server.app import create_app
+    from assist_live_server.assets import TURN_MODEL_IDS
     from assist_live_server.auth import Registry
     from assist_live_server.config import ProviderFactory, ServerConfig
     from assist_live_server.turn import detector
 
     records = {
         name: {"id": name, "path": f"{name}.onnx", "sha256": "0" * 64}
-        for name in detector.MODEL_IDS
+        for name in TURN_MODEL_IDS
     }
-    for name in detector.MODEL_IDS:
+    for name in TURN_MODEL_IDS:
         (tmp_path / f"{name}.onnx").write_bytes(b"changed model")
     monkeypatch.setattr(detector, "model_records", lambda manifest=None: records)
     monkeypatch.setenv("DEEPGRAM_API_KEY", "synthetic-key")

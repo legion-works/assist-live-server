@@ -171,6 +171,67 @@ def test_replayed_older_open_keeps_newer_turn_completable(tmp_path, newer_status
     asyncio.run(run())
 
 
+def test_replayed_older_open_after_completion_leaves_pending_events_for_next_turn(
+    tmp_path,
+):
+    from assist_live_server.store import SQLiteStore
+
+    async def run():
+        now = 100_000_000_000
+        store = SQLiteStore(tmp_path / "turns.db", now_ns=lambda: now)
+        newer = TurnOpen(
+            str(uuid7()), "satellite-a", "tts_only", None, None, opened_utc_ns=now
+        )
+        older = replace(newer, turn_id=str(uuid7()), opened_utc_ns=now - 1)
+        try:
+            assert await store.get_turn(older.turn_id) is None
+            await store.open_turn(newer)
+            for stage, source in (
+                ("tts_first_text", "integration"),
+                ("tts_first_byte", "server"),
+                ("playback_start", "device"),
+                ("playback_end", "device"),
+            ):
+                await store.append(
+                    TimingEvent(
+                        newer.turn_id if source != "device" else None,
+                        newer.satellite,
+                        source,
+                        stage,
+                        now,
+                        "measured",
+                        None,
+                    )
+                )
+            completed = await store.get_turn(newer.turn_id)
+            assert completed["status"] == "complete"
+
+            now += 1
+            wake = TimingEvent(
+                None, newer.satellite, "device", "wake_detected", now, "measured", None
+            )
+            await store.append_device(wake, now)
+            await store.open_turn(older)
+            recorded = await store.get_turn(older.turn_id)
+            assert recorded["status"] == "incomplete"
+            assert recorded["events"] == []
+            assert await store.get_turn(newer.turn_id) == completed
+
+            following = TurnOpen(str(uuid7()), newer.satellite, "voice", None, None)
+            await store.open_turn(following)
+            await store.open_turn(older)
+            assert await store.get_turn(older.turn_id) == recorded
+            current = await store.get_turn(following.turn_id)
+            assert current["status"] == "open"
+            assert [(row["stage"], row["t_utc_ns"]) for row in current["events"]] == [
+                (wake.stage, wake.t_utc_ns)
+            ]
+        finally:
+            store.close()
+
+    asyncio.run(run())
+
+
 def test_retention_and_status_queries_use_indexes_and_acceptance_has_no_scans(tmp_path):
     from assist_live_server.auth import Registry
     from assist_live_server.event_gateway import EventGateway

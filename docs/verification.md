@@ -4988,3 +4988,18 @@ For each startup rule, one code change gives one failure in an isolated copy.
 `task check`, the Python 3.14.2 suite, and the network-isolated suite each give `2799 passed, 1 skipped`.
 
 Review round 3 (parent repair): the cloud-only turn-model fetch at startup catches each `Exception`. Thus a body read that stops before its end (`http.client.IncompleteRead`) does not stop HTTP and TTS. The real-CLI test `test_cloud_startup_serves_health_without_turn_models` adds the case `read_failed`. Before the repair, the case `read_failed` gave an assertion error at `tests/test_main.py:464` with `FAIL server: startup configuration or model check failed`. The run gave `1 failed, 5 passed`.
+
+## Late turn opens after a turn ends (2026-11-27 UTC)
+
+For the cloud STT change, `task check`, the Python 3.14.2 suite, and the network-isolated suite each gave `2800 passed, 1 skipped`.
+
+The server can get an open request for an earlier turn after a subsequent turn for the same satellite ends.
+The server records the earlier turn as `incomplete` and keeps the pending device events for the next turn.
+The store test examines the two turn records, the pending event on the next turn, and a retry with the same request.
+
+Before the change, the test gives `1 failed` because the earlier turn stays `open`.
+After the change, it gives `1 passed`.
+If the check examines only open or closing turns again, the test gives the same failure.
+
+The selected store, startup, and health tests gave `25 passed`.
+`task check`, the Python 3.14.2 suite, and the network-isolated suite each gave `2801 passed, 1 skipped` for this change.

@@ -6,6 +6,7 @@ import os
 import re
 import signal
 import tempfile
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError
@@ -153,7 +154,7 @@ async def serve() -> None:
         # families (OSError, ValueError, http.client.HTTPException).
         # The turn detector reads canonical paths only, thus this fetch makes
         # no basename aliases: an alias error cannot hide behind a ready STT.
-        try:
+        with suppress(Exception):
             await asyncio.to_thread(
                 fetch_plan,
                 cache,
@@ -162,8 +163,6 @@ async def serve() -> None:
                 only=TURN_MODEL_IDS,
                 basename_aliases=False,
             )
-        except Exception:
-            pass
     factory = await ProviderFactory.load(config, cache=cache)
     from aiohttp import web
 

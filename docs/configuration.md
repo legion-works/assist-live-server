@@ -121,8 +121,9 @@ Provider requests use the checked local cache.
 The command gives the same cache path to the provider factory and the turn detector through `ASSIST_LIVE_MODEL_CACHE`.
 
 Each STT turn uses the two turn detector models, also with a cloud STT provider.
-When startup does not select Parakeet or Piper, it checks or downloads only these two models.
-In that case, a download error or a changed model does not stop the server. The HTTP service and the selected TTS continue.
+When startup selects a cloud STT provider but does not select Parakeet or Piper, it checks or downloads only these two models.
+In that case, a download error or a changed model does not stop the server.
+The HTTP service and the selected TTS continue.
 
 If a turn model is missing or has a different SHA-256 value, health reports `capabilities.stt=false`.
 The `unavailable.stt` health field then gives `turn_models_missing` or `turn_models_invalid`, and the integration uses its fallback STT.

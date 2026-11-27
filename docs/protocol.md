@@ -860,8 +860,12 @@ The optional `opened_utc_ns` gives the initial open time in UTC nanoseconds.
 Without it, the server uses its receipt time. An earlier time gives `late_open: true` in the turn record.
 The server uses the initial time for turn expiry and retention.
 
-If an open or closing turn for the same satellite has a newer open time, the server records the earlier turn as `incomplete`.
+If the store contains a turn for the same satellite with a newer open time, the server records the earlier turn as `incomplete`.
 The server does not change the newer turn or give pending device events to the earlier turn.
+The open times come from the HA clock.
+The HA clock can move back, for example on a host that starts before its time synchronization.
+Then each turn of that satellite that opens before the clock gets back to the earlier time is `incomplete`.
+The server accepts the audio and events of these turns, but the turns do not get their earlier device events.
 An equal retry gives HTTP `200` and makes no changes.
 
 It refuses a time older than its retention with `late_open_too_old`.

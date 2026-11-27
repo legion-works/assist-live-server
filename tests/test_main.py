@@ -216,7 +216,7 @@ class Check(importlib.abc.MetaPathFinder):
         return None
 sys.meta_path.insert(0, Check())
 from assist_live_server.turn import detector
-from assist_live_server.assets import model_path, verified_model
+from assist_live_server.assets import TURN_MODEL_IDS, model_path, verified_model
 assert detector.model_path is model_path
 assert detector.verified_model is verified_model
 assert "onnxruntime" not in sys.modules
@@ -225,7 +225,7 @@ path = cache / "model.onnx"
 path.write_bytes(b"synthetic model bytes")
 record = {{"id": "model", "path": path.name,
            "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}}
-detector.model_records = lambda manifest: dict.fromkeys(detector.MODEL_IDS, record)
+detector.model_records = lambda manifest: dict.fromkeys(TURN_MODEL_IDS, record)
 try:
     detector.ModelRuntime(cache)
 except (ModuleNotFoundError, OSError) as error:

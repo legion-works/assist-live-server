@@ -27,7 +27,6 @@ from .transcript_guard import complete_partial
 
 Samples = NDArray[np.float32]
 Probability = Callable[[Samples], float]
-MODEL_IDS = TURN_MODEL_IDS
 WINDOW = 128000
 SMART_TURN_INTERVAL_SAMPLES = 2560
 
@@ -43,10 +42,10 @@ def model_records(manifest: Path | str | None = None) -> dict[str, dict[str, Any
     records = {row["id"]: row for row in document["assets"]}
     if len(records) != len(document["assets"]):
         raise ValueError("duplicate asset records")
-    if any(name not in plan or name not in records for name in MODEL_IDS):
+    if any(name not in plan or name not in records for name in TURN_MODEL_IDS):
         raise ValueError("both turn models must be in the download plan")
     selected = {}
-    for name in MODEL_IDS:
+    for name in TURN_MODEL_IDS:
         row = records[name]
         entry = plan[name]
         if sum(item["id"] == name for item in entries) != 1 or set(entry) != {
@@ -158,12 +157,12 @@ class ModelRuntime:
         options.intra_op_num_threads = 1
         options.inter_op_num_threads = 1
         self.vad = ort.InferenceSession(
-            str(paths[MODEL_IDS[0]]),
+            str(paths[TURN_MODEL_IDS[0]]),
             sess_options=options,
             providers=["CPUExecutionProvider"],
         )
         self.smart_turn = ort.InferenceSession(
-            str(paths[MODEL_IDS[1]]),
+            str(paths[TURN_MODEL_IDS[1]]),
             sess_options=options,
             providers=["CPUExecutionProvider"],
         )

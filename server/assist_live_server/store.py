@@ -551,8 +551,7 @@ class SQLiteStore:
                     turn = replace(turn, parent_turn_id=None)
             superseded = (
                 self.connection.execute(
-                    "SELECT 1 FROM turns WHERE satellite=? "
-                    "AND status IN ('open','closing') AND opened_ns>? LIMIT 1",
+                    "SELECT 1 FROM turns WHERE satellite=? AND opened_ns>? LIMIT 1",
                     (turn.satellite, opened),
                 ).fetchone()
                 is not None
