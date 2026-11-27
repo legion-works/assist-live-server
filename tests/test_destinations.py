@@ -170,7 +170,7 @@ def test_configured_stt_factory_sends_only_to_selected_destination(monkeypatch):
 
         monkeypatch.setattr(DeepgramProvider, "__init__", construct)
         monkeypatch.setattr(ParakeetProvider, "load", classmethod(load))
-        monkeypatch.setenv("DEEPGRAM_API_KEY", "synthetic-key")
+        monkeypatch.setenv("DEEPGRAM_API_KEY", "synthetic-cloud-key")
         try:
             for name in ("parakeet", "deepgram"):
                 config = await ServerConfig.load(
@@ -265,7 +265,8 @@ def test_provider_registries_are_the_configuration_source(monkeypatch):
 
     async def run():
         assert isinstance(
-            await stt.provider_factory("deepgram")("test-key"), DeepgramProvider
+            await stt.provider_factory("deepgram")("synthetic-cloud-key"),
+            DeepgramProvider,
         )
         assert isinstance(
             await tts.provider_factory("elevenlabs")("test-key"), ElevenLabsProvider
@@ -285,7 +286,7 @@ def test_provider_registries_are_the_configuration_source(monkeypatch):
 
         monkeypatch.setattr(stt, "provider_factory", stt_selected)
         monkeypatch.setattr(tts, "provider_factory", tts_selected)
-        monkeypatch.setenv("DEEPGRAM_API_KEY", "test-key")
+        monkeypatch.setenv("DEEPGRAM_API_KEY", "synthetic-cloud-key")
         monkeypatch.setenv("ELEVENLABS_API_KEY", "test-key")
         await config.ProviderFactory.load(
             config.ServerConfig(

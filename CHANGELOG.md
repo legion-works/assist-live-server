@@ -29,6 +29,7 @@ The project is experimental. The clients `0.1.0a1` and `0.1.0a2` are pre-release
 - Give `ProtocolError(kind="unauthorized")` for HTTP 401, also during a WebSocket upgrade.
 - Stop `health()` with `ProtocolError(kind="unauthorized")` on HTTP 401. Other failures, such as HTTP 503 and timeouts, give `False`.
 - Give `ProtocolError(kind="closed")` when the event subscription WebSocket closes.
+- Publish only the checked wheel on PyPI. Earlier pre-releases also had a source package (sdist). To build from source, use the `client-v0.1.0a3` Git tag.
 
 ### Client `0.1.0a2` (PyPI pre-release, 2026-11-25)
 

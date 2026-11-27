@@ -16,6 +16,59 @@ ROOT = Path(__file__).resolve().parents[1]
 APPROVAL = "${{ vars.ASSIST_LIVE_RELEASES_APPROVED }}"
 
 
+PUBLIC_TREE_STEP = re.compile(
+    r"set -eu\n"
+    r"curl -fsSL https://raw\.githubusercontent\.com/legion-works/assist-live/"
+    r"[a-f0-9]{40}/tools/check_public_tree\.py"
+    r' -o "\$RUNNER_TEMP/check_public_tree\.py"\n'
+    r'echo "[a-f0-9]{64}  \$RUNNER_TEMP/check_public_tree\.py" \| sha256sum -c -\n'
+    + re.escape(
+        'set --\nif [ -n "${PRIVATE_DENYLIST:-}" ]; then\n'
+        '  set -- --private-denylist "$PRIVATE_DENYLIST"\nfi\n'
+        'uv run --no-project --python 3.14 python "$RUNNER_TEMP/check_public_tree.py" '
+        '--history --root . "$@"'
+    )
+)
+
+
+def _publishes_only_checked_client_wheel(workflow: dict) -> bool:
+    jobs = workflow["jobs"]
+    build = jobs["build"]["steps"]
+    publish = jobs["publish"]["steps"]
+    check, upload = build[-2:]
+    uploads = [
+        step
+        for step in build
+        if step.get("uses", "").startswith("actions/upload-artifact@")
+    ]
+    return (
+        set(jobs) == {"build", "publish"}
+        and jobs["publish"].get("needs") == "build"
+        and "if" not in jobs["publish"]
+        and not jobs["build"].get("continue-on-error")
+        and "if" not in check
+        and not check.get("continue-on-error")
+        and check.get("run", "").splitlines()[-1:]
+        == [
+            "uv run --locked python tools/check_release.py --wheel dist "
+            '--assets assets/manifest.json --pypi-version "$CLIENT_VERSION"'
+        ]
+        and uploads == [upload]
+        and "if" not in upload
+        and upload.get("with")
+        == {
+            "name": "client-dist",
+            "path": "dist/assist_live_client-*.whl",
+            "if-no-files-found": "error",
+        }
+        and len(publish) == 3
+        and publish[1].get("uses", "").startswith("actions/download-artifact@")
+        and publish[1].get("with") == {"name": "client-dist", "path": "dist/"}
+        and publish[2].get("uses", "").startswith("pypa/gh-action-pypi-publish@")
+        and publish[2].get("with") == {"packages-dir": "dist/"}
+    )
+
+
 def check_ci(root: Path = ROOT) -> list[str]:
     errors: list[str] = []
     workflows = {}
@@ -69,6 +122,28 @@ def check_ci(root: Path = ROOT) -> list[str]:
         except OSError, ValueError, KeyError, TypeError, AttributeError, yaml.YAMLError:
             errors.append(f"{name}: invalid workflow")
     ci = workflows.get("ci", {}).get("jobs", {})
+    try:
+        public_tree = [
+            step
+            for job in ci.values()
+            for step in job["steps"]
+            if "check_public_tree.py" in step.get("run", "")
+        ]
+        if (
+            len(public_tree) != 1
+            or public_tree[0] not in ci["checks"]["steps"]
+            or public_tree[0].get("if") != "matrix.check == 'public-tree'"
+            or public_tree[0].get("continue-on-error")
+            or not PUBLIC_TREE_STEP.fullmatch(public_tree[0]["run"].rstrip("\n"))
+        ):
+            raise ValueError
+    except ValueError, KeyError, TypeError, AttributeError:
+        errors.append("ci: public-tree checker requires a commit and verified SHA-256")
+    try:
+        if not _publishes_only_checked_client_wheel(workflows["publish-client"]):
+            raise ValueError
+    except ValueError, KeyError, TypeError, AttributeError, IndexError:
+        errors.append("publish-client: only checked client wheels can be published")
     try:
         matrix = ci["checks"]["strategy"]["matrix"]
         image_pins = set(

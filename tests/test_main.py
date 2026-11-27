@@ -55,6 +55,33 @@ def environment(tmp_path):
     }
 
 
+@pytest.mark.parametrize("provider", ["Deepgram", "OpenAI"])
+def test_startup_refuses_short_cloud_stt_credential(
+    tmp_path, monkeypatch, capsys, provider
+):
+    from assist_live_server import store
+    from assist_live_server.__main__ import main
+
+    for name, value in environment(tmp_path).items():
+        if name.startswith("ASSIST_LIVE_"):
+            monkeypatch.setenv(name, value)
+    monkeypatch.setenv("ASSIST_LIVE_LOCAL_ONLY", "false")
+    monkeypatch.setenv("ASSIST_LIVE_STT_PROVIDER", provider.lower())
+    monkeypatch.setenv(f"{provider.upper()}_API_KEY", "x" * 15)
+
+    def unexpected_store(*args, **kwargs):
+        pytest.fail("server reached store construction with a short credential")
+
+    monkeypatch.setattr(store, "SQLiteStore", unexpected_store)
+    assert main([]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == (
+        "FAIL server: startup configuration or model check failed: "
+        f"{provider} STT credential must have at least 16 characters\n"
+    )
+    assert captured.err == ""
+
+
 @pytest.mark.parametrize("provisioned", [False, True])
 def test_valid_startup_serves_health(tmp_path, provisioned):
     if provisioned:

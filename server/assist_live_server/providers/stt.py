@@ -36,6 +36,16 @@ class CredentialTranscriptError(ValueError):
 MIN_CHECKED_CREDENTIAL_CHARS = 16
 
 
+class STTCredentialLengthError(ValueError):
+    """The configured cloud STT credential is too short."""
+
+    def __init__(self, provider: str) -> None:
+        super().__init__(
+            f"{provider} STT credential must have at least "
+            f"{MIN_CHECKED_CREDENTIAL_CHARS} characters"
+        )
+
+
 def refuse_credential(credential: str, parts: list[str]) -> None:
     """Refuse accumulated transcript text that contains the credential.
 

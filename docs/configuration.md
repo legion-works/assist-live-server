@@ -38,6 +38,8 @@ The STT helper's explicit `mode="local_compatible"` filter lists local providers
 
 `DEEPGRAM_API_KEY`, `OPENAI_API_KEY`, and `ELEVENLABS_API_KEY` supply credentials for a selected cloud provider.
 A credential does not select a provider. `local_only=True` refuses cloud selection before construction and at each request selection.
+The key for Deepgram or OpenAI STT has a minimum of 16 characters.
+If the key is shorter, the server stops at startup and names the provider without showing its key.
 
 For OpenAI STT, select `openai` and set `local_only=False`.
 The provider uses one `gpt-live-transcribe` realtime transcription session for each turn.

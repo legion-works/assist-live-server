@@ -28,7 +28,7 @@ jobs:
         run: uv run --locked python tools/check_ci.py --package client
       - name: Check repository asset rights
         run: uv run --locked python tools/check_assets.py --manifest assets/manifest.json --release
-      - run: uv build --package assist-live-client
+      - run: uv build --wheel --package assist-live-client
       - name: Check client wheel before publication
         run: |
           CLIENT_VERSION=$(uv run --locked python -c 'import tomllib; from pathlib import Path; print(tomllib.loads(Path("client/pyproject.toml").read_text())["project"]["version"])')
@@ -36,7 +36,7 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: client-dist
-          path: dist/
+          path: dist/assist_live_client-*.whl
           if-no-files-found: error
   publish:
     needs: build
@@ -54,3 +54,5 @@ jobs:
           name: client-dist
           path: dist/
       - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          packages-dir: dist/

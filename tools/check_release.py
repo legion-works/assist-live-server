@@ -412,9 +412,11 @@ def check_image(
             ):
                 errors.append("third-party Apache-2.0 claim in image labels")
             seen: set[str] = set()
+            bundled_paths: set[tuple[PurePosixPath, str]] = set()
             installed: dict[str, str] = {}
             origins: dict[str, dict[str, Any]] = {}
             for layer_name in layers:
+                layer_paths: set[tuple[PurePosixPath, str]] = set()
                 stream = archive.extractfile(safe_member(layer_name))
                 if stream is None:
                     raise ValueError("missing image layer")
@@ -423,19 +425,32 @@ def check_image(
                         name = safe_member(member.name)
                         path_name = PurePosixPath(name)
                         if path_name.name.startswith(".wh."):
-                            removed = str(
-                                path_name.parent / path_name.name.removeprefix(".wh.")
+                            target = path_name.parent / path_name.name.removeprefix(
+                                ".wh."
                             )
+                            removed = str(target)
                             opaque = path_name.name == ".wh..wh..opq"
+                            removed_ids = {
+                                asset_id
+                                for asset_path, asset_id in bundled_paths
+                                if asset_path.is_relative_to(
+                                    path_name.parent if opaque else target
+                                )
+                            }
                             for row in included:
-                                if row["download"] == "included" and any(
-                                    removed == item
-                                    or removed.endswith("/" + item)
-                                    or (
-                                        opaque
-                                        and item.startswith(str(path_name.parent) + "/")
+                                if row["download"] == "included" and (
+                                    row["id"] in removed_ids
+                                    or any(
+                                        removed == item
+                                        or removed.endswith("/" + item)
+                                        or (
+                                            opaque
+                                            and item.startswith(
+                                                str(path_name.parent) + "/"
+                                            )
+                                        )
+                                        for item in row["paths"]
                                     )
-                                    for item in row["paths"]
                                 ):
                                     errors.append(f"{row['id']}: bundled asset removed")
                             continue
@@ -499,6 +514,7 @@ def check_image(
                                 errors.append(f"unlisted image asset: {name}")
                             for row in matches:
                                 seen.add(row["id"])
+                                layer_paths.add((path_name, row["id"]))
                                 if (
                                     row["download"] != "included"
                                     or row["id"] not in document["image_inventory"]
@@ -558,6 +574,7 @@ def check_image(
                                 "assets/manifest.json"
                             ) and apache_claims(data, records):
                                 errors.append(f"{name}: third-party Apache-2.0 claim")
+                bundled_paths.update(layer_paths)
             for entry in document.get("build_plan", []):
                 package = entry["package"]
                 origin = origins.get(package, {})

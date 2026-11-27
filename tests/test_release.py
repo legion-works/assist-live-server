@@ -129,7 +129,7 @@ def tar_bytes(files):
     return output.getvalue()
 
 
-def image_tar(tmp_path, files=None, labels=None, oci=False):
+def image_tar(tmp_path, files=None, labels=None, oci=False, next_layer=None):
     layer = tar_bytes(files or {"models/voice.onnx": b"voice weights"})
     config = json.dumps(
         {
@@ -152,11 +152,15 @@ def image_tar(tmp_path, files=None, labels=None, oci=False):
         def blob(data):
             return "blobs/sha256/" + hashlib.sha256(data).hexdigest()
 
+        layers = [layer] if next_layer is None else [layer, tar_bytes(next_layer)]
         manifest = json.dumps(
             {
                 "schemaVersion": 2,
                 "config": {"digest": "sha256:" + hashlib.sha256(config).hexdigest()},
-                "layers": [{"digest": "sha256:" + hashlib.sha256(layer).hexdigest()}],
+                "layers": [
+                    {"digest": "sha256:" + hashlib.sha256(data).hexdigest()}
+                    for data in layers
+                ],
             }
         ).encode()
         index = json.dumps(
@@ -173,7 +177,7 @@ def image_tar(tmp_path, files=None, labels=None, oci=False):
             "index.json": index,
             blob(manifest): manifest,
             blob(config): config,
-            blob(layer): layer,
+            **{blob(data): data for data in layers},
         }
     else:
         manifest = json.dumps(
@@ -526,6 +530,30 @@ def test_bundled_model_cannot_be_deleted_in_a_later_layer(tmp_path):
     )
     errors, _ = checker().check_image(image, document)
     assert any("bundled asset removed" in error for error in errors)
+
+
+@pytest.mark.parametrize(
+    "whiteout, removed",
+    [
+        (".wh.models", True),
+        ("app/.wh.models", True),
+        (".wh.app", True),
+        ("app/.wh.model", False),
+        ("other/.wh.models", False),
+    ],
+)
+def test_oci_whiteout_cannot_remove_a_bundled_asset_directory(
+    tmp_path, whiteout, removed
+):
+    name = "models/voice.onnx" if whiteout == ".wh.models" else "app/models/voice.onnx"
+    image = image_tar(
+        tmp_path, files={name: b"voice weights"}, oci=True, next_layer={whiteout: b""}
+    )
+    errors, _ = checker().check_image(image, asset_document())
+    if removed:
+        assert any("bundled asset removed" in error for error in errors)
+    else:
+        assert errors == []
 
 
 def test_cli_argument_error_is_named_without_stderr():

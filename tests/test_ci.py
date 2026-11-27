@@ -139,8 +139,10 @@ def test_ci_runs_tests_on_image_python_and_declared_floor():
 
 @pytest.mark.parametrize("use_denylist", [False, True])
 def test_public_tree_is_in_local_and_ci_gates(tmp_path, use_denylist):
+    import hashlib
     import json
     import os
+    import re
     import subprocess
     import sys
 
@@ -175,7 +177,8 @@ def test_public_tree_is_in_local_and_ci_gates(tmp_path, use_denylist):
     curl.write_text(
         f"#!{sys.executable}\nimport os, pathlib, sys\n"
         "if os.environ.get('FAIL_CURL'): sys.exit(22)\n"
-        "pathlib.Path(sys.argv[-1]).write_text('# fixture\\n')\n"
+        "pathlib.Path(sys.argv[-1]).write_text(\n"
+        "    os.environ.get('CHECKER_BYTES', '# fixture\\n'))\n"
     )
     curl.chmod(0o755)
     subprocess.run(
@@ -221,29 +224,31 @@ def test_public_tree_is_in_local_and_ci_gates(tmp_path, use_denylist):
         step for step in checks["steps"] if step.get("name") == "Check public tree"
     )
     assert public["if"] == "matrix.check == 'public-tree'"
-    assert (
-        "curl -fsSL https://raw.githubusercontent.com/legion-works/assist-live/main/"
-        'tools/check_public_tree.py -o "$RUNNER_TEMP/check_public_tree.py"'
-        in public["run"]
-    )
+    digest = hashlib.sha256(b"# fixture\n").hexdigest()
+    script_body = re.sub(r"[a-f0-9]{64}(?=  \$RUNNER_TEMP/)", digest, public["run"])
     log.unlink()
-    ci_result = subprocess.run(
-        ["bash", "-e", "-c", public["run"]],
+    subprocess.run(
+        ["bash", "-e", "-c", script_body],
         cwd=server,
         env=env,
         check=True,
         capture_output=True,
     )
-    import hashlib
-
-    assert hashlib.sha256(b"# fixture\n").hexdigest().encode() in ci_result.stdout
     ci_args = json.loads(log.read_text())
     assert ci_args[:5] == args[:5]
     assert ci_args[5] == str(Path(env["RUNNER_TEMP"]) / "check_public_tree.py")
     assert ci_args[6:] == args[6:]
     log.unlink()
+    wrong_bytes = subprocess.run(
+        ["bash", "-e", "-c", script_body],
+        cwd=server,
+        env={**env, "CHECKER_BYTES": "# wrong fixture\n"},
+        capture_output=True,
+    )
+    assert wrong_bytes.returncode != 0
+    assert not log.exists()
     failed = subprocess.run(
-        ["bash", "-e", "-c", public["run"]],
+        ["bash", "-e", "-c", script_body],
         cwd=server,
         env={**env, "FAIL_CURL": "1"},
         capture_output=True,
@@ -429,6 +434,56 @@ def test_ci_structure_and_pins():
     assert not check_ci(ROOT)
 
 
+@pytest.fixture
+def ci_tree(tmp_path):
+    import shutil
+
+    shutil.copytree(ROOT / ".github", tmp_path / ".github")
+    for filename in (
+        "release-please-config.json",
+        ".release-please-manifest.json",
+        "Dockerfile",
+        "pyproject.toml",
+    ):
+        shutil.copyfile(ROOT / filename, tmp_path / filename)
+    return tmp_path
+
+
+@pytest.mark.parametrize("mutation", ["unpinned", "unverified"])
+def test_ci_refuses_unpinned_or_unverified_public_tree(ci_tree, mutation):
+    import re
+
+    from tools.check_ci import check_ci
+
+    path = ci_tree / ".github/workflows/ci.yml"
+    text = path.read_text()
+    if mutation == "unpinned":
+        text = re.sub(r"(/assist-live/)[a-f0-9]{40}/", r"\g<1>main/", text)
+    else:
+        text = re.sub(
+            r'^ +echo "[a-f0-9]{64}  \$RUNNER_TEMP/check_public_tree.py".*$',
+            '          sha256sum "$RUNNER_TEMP/check_public_tree.py"',
+            text,
+            flags=re.M,
+        )
+    path.write_text(text)
+    assert "ci: public-tree checker requires a commit and verified SHA-256" in check_ci(
+        ci_tree
+    )
+
+
+def test_ci_refuses_upload_outside_checked_client_wheels(ci_tree):
+    from tools.check_ci import check_ci
+
+    path = ci_tree / ".github/workflows/publish-client.yml"
+    path.write_text(
+        path.read_text().replace("path: dist/assist_live_client-*.whl", "path: dist/")
+    )
+    assert "publish-client: only checked client wheels can be published" in check_ci(
+        ci_tree
+    )
+
+
 @pytest.mark.parametrize(
     "mutation, expected",
     [
@@ -460,35 +515,17 @@ def test_ci_structure_and_pins():
         ),
     ],
 )
-def test_publish_permissions_are_scoped_to_one_job(tmp_path, mutation, expected):
-    import shutil
-
+def test_publish_permissions_are_scoped_to_one_job(ci_tree, mutation, expected):
     from tools.check_ci import check_ci
 
-    shutil.copytree(ROOT / ".github", tmp_path / ".github")
-    for filename in (
-        "release-please-config.json",
-        ".release-please-manifest.json",
-        "Dockerfile",
-        "pyproject.toml",
-    ):
-        shutil.copyfile(ROOT / filename, tmp_path / filename)
     guard = (
         "      - name: Require publication approval\n"
         "        env:\n"
         "          RELEASES_APPROVED: ${{ vars.ASSIST_LIVE_RELEASES_APPROVED }}\n"
         '        run: test "$RELEASES_APPROVED" = "true"\n'
     )
-    workflow = (
-        "on:\n  workflow_dispatch:\npermissions:\n  contents: read\njobs:\n"
-        "  build:\n    runs-on: ubuntu-latest\n    steps:\n"
-        + guard
-        + "      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5"
-        " # v4.3.1\n"
-        "  publish:\n    needs: build\n    environment: pypi\n"
-        "    runs-on: ubuntu-latest\n    permissions:\n      id-token: write\n"
-        "    steps:\n" + guard
-    )
+    publish_path = ci_tree / ".github/workflows/publish-client.yml"
+    workflow = publish_path.read_text()
     if mutation == "second-token":
         workflow = workflow.replace(
             "  build:\n", "  build:\n    permissions:\n      id-token: write\n"
@@ -510,14 +547,14 @@ def test_publish_permissions_are_scoped_to_one_job(tmp_path, mutation, expected)
             "      pull-requests: write\n",
         )
     elif mutation == "other-workflow-token":
-        path = tmp_path / ".github/workflows/ci.yml"
+        path = ci_tree / ".github/workflows/ci.yml"
         path.write_text(
             path.read_text().replace(
                 "  checks:\n", "  checks:\n    permissions:\n      id-token: write\n"
             )
         )
     elif mutation in ("old-python", "missing-floor"):
-        path = tmp_path / ".github/workflows/ci.yml"
+        path = ci_tree / ".github/workflows/ci.yml"
         workflow_ci = yaml.safe_load(path.read_text())
         matrix = workflow_ci["jobs"]["checks"]["strategy"]["matrix"]
         if mutation == "old-python":
@@ -526,7 +563,7 @@ def test_publish_permissions_are_scoped_to_one_job(tmp_path, mutation, expected)
             matrix["include"] = []
         path.write_text(yaml.safe_dump(workflow_ci))
     elif mutation == "other-release-job":
-        path = tmp_path / ".github/workflows/release-please.yml"
+        path = ci_tree / ".github/workflows/release-please.yml"
         original = path.read_text()
         path.write_text(
             original
@@ -534,8 +571,8 @@ def test_publish_permissions_are_scoped_to_one_job(tmp_path, mutation, expected)
                 "  release-please:\n", "  other:\n", 1
             )
         )
-    (tmp_path / ".github/workflows/publish-client.yml").write_text(workflow)
-    errors = check_ci(tmp_path)
+    publish_path.write_text(workflow)
+    errors = check_ci(ci_tree)
     if expected is None:
         assert not errors
     else:

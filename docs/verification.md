@@ -5113,3 +5113,21 @@ The store removes `end_sample` from decisions from other sources. An integration
 Before the source check, the store kept the field and the tests gave `4 failed`. The related tests gave `217 passed` after the repair.
 
 The four hard-end grace tests also check `end_sample`. A change to the detector count gave `2 failed, 2 passed`.
+
+## Release checks and cloud STT keys
+
+CI downloads the public-tree checker from a Git commit, not a branch. It stops before it runs the checker if the SHA-256 does not agree.
+The image check refuses an OCI whiteout that removes a directory with a bundled asset from an earlier layer.
+
+The publication workflow sends only the client wheel after a satisfactory release check. It does not send a source archive.
+Deepgram and OpenAI STT refuse short configured keys at startup. The error names the provider but does not show the key.
+
+The regression tests give `10 failed, 2 passed` on `d823389` and `12 passed` with the changes.
+The seven related test files give `337 passed`.
+
+Each of these four isolated changes gives test failures:
+
+- The checksum command shows the checksum but does not check it.
+- The whiteout check examines only the path of the asset.
+- The publication workflow uploads the full directory.
+- The minimum key length is 15 characters.

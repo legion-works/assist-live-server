@@ -360,8 +360,8 @@ def test_health_reports_stt_only_with_turn_models(
         return object()
 
     monkeypatch.setattr(ParakeetProvider, "load", classmethod(load))
-    monkeypatch.setenv("DEEPGRAM_API_KEY", "synthetic-key")
-    monkeypatch.setenv("OPENAI_API_KEY", "synthetic-key")
+    monkeypatch.setenv("DEEPGRAM_API_KEY", "synthetic-cloud-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "synthetic-cloud-key")
 
     async def run():
         config = ServerConfig(
@@ -405,7 +405,7 @@ def test_health_reports_changed_turn_model_by_name(
     for name in TURN_MODEL_IDS:
         (tmp_path / f"{name}.onnx").write_bytes(b"changed model")
     monkeypatch.setattr(detector, "model_records", lambda manifest=None: records)
-    monkeypatch.setenv("DEEPGRAM_API_KEY", "synthetic-key")
+    monkeypatch.setenv("DEEPGRAM_API_KEY", "synthetic-cloud-key")
 
     async def run():
         config = ServerConfig(

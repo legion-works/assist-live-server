@@ -13,9 +13,11 @@ from yarl import URL
 from .deepgram import MAX_FINAL_SEGMENTS, MAX_SEGMENT_BYTES, MAX_TRANSCRIPT_BYTES
 from .parakeet import MAX_AUDIO_BYTES
 from .stt import (
+    MIN_CHECKED_CREDENTIAL_CHARS,
     AudioLimitError,
     CredentialTranscriptError,
     STTClosedError,
+    STTCredentialLengthError,
     refuse_credential,
 )
 
@@ -37,6 +39,8 @@ class OpenAIProvider:
     ) -> None:
         if not api_key or any(c in api_key for c in "\r\n"):
             raise ValueError("invalid OpenAI credential")
+        if len(api_key) < MIN_CHECKED_CREDENTIAL_CHARS:
+            raise STTCredentialLengthError("OpenAI")
         url = None
         try:
             url = URL(endpoint)

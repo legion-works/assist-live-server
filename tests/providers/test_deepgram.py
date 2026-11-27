@@ -716,12 +716,18 @@ def test_result_with_credential_is_refused(cloud_ws_server, caplog, values):
     asyncio.run(asyncio.wait_for(run(), 5))
 
 
-@pytest.mark.parametrize(
-    "key,refused",
-    [("on", False), ("lights", False), ("turnonthelights", False), ("a" * 16, True)],
-)
-def test_credential_check_needs_sixteen_characters(cloud_ws_server, key, refused):
-    words = ["turn on", "the lights"] if not refused else ["say " + key[:8], key[8:]]
+@pytest.mark.parametrize("key", ["on", "lights", "turnonthelights"])
+def test_transcript_check_does_not_treat_short_words_as_credentials(key):
+    from assist_live_server.providers.stt import refuse_credential
+
+    refuse_credential(key, ["turn on", "the lights"])
+
+
+def test_deepgram_refuses_transcript_with_split_sixteen_character_credential(
+    cloud_ws_server,
+):
+    key = "a" * 16
+    words = ["say " + key[:8], key[8:]]
 
     async def run():
         async def handler(request):
@@ -739,11 +745,8 @@ def test_credential_check_needs_sixteen_characters(cloud_ws_server, key, refused
             session = DeepgramProvider(key, endpoint=fake.url).session()
             try:
                 await session.push(b"\x01\x00")
-                if refused:
-                    with pytest.raises(DeepgramError, match="transcript refused"):
-                        await session.finish()
-                else:
-                    assert await session.finish() == " ".join(words)
+                with pytest.raises(DeepgramError, match="transcript refused"):
+                    await session.finish()
             finally:
                 await session.aclose()
 

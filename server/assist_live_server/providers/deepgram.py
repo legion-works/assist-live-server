@@ -9,9 +9,11 @@ from assist_live_client.protocol import MAX_TRANSCRIPT_BYTES
 from yarl import URL
 
 from .stt import (
+    MIN_CHECKED_CREDENTIAL_CHARS,
     AudioLimitError,
     CredentialTranscriptError,
     STTClosedError,
+    STTCredentialLengthError,
     refuse_credential,
 )
 
@@ -35,6 +37,8 @@ class DeepgramProvider:
     ) -> None:
         if not api_key or any(c in api_key for c in "\r\n"):
             raise ValueError("invalid Deepgram credential")
+        if len(api_key) < MIN_CHECKED_CREDENTIAL_CHARS:
+            raise STTCredentialLengthError("Deepgram")
         url = None
         try:
             url = URL(endpoint)
