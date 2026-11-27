@@ -4,11 +4,17 @@ import unicodedata
 from collections.abc import Iterator
 
 MAX_LINK_HOLD = 2048
+MAX_SENTENCE_CHARS = 16384
 type Character = tuple[str, int, bool]
 
 
 def _word(char: str) -> bool:
     return bool(char) and (char.isalnum() or unicodedata.category(char).startswith("M"))
+
+
+def check_sentence_size(size: int) -> None:
+    if size > MAX_SENTENCE_CHARS:
+        raise ValueError(f"TTS sentence exceeds {MAX_SENTENCE_CHARS} characters")
 
 
 class SpokenText:
@@ -30,10 +36,15 @@ class SpokenText:
         self._tag_quote = ""
         self._last_cr = False
 
+    @property
+    def held_size(self) -> int:
+        return len(self._prefix) + len(self._pending) + len(self._pipe)
+
     def feed(self, part: str) -> Iterator[Character]:
         for char in part:
             self.received += 1
             yield from self._line(char, self.received)
+            check_sentence_size(self.held_size)
 
     def finish(self) -> Iterator[Character]:
         yield from self._end_line(self.received, final=True)

@@ -10,7 +10,7 @@ from typing import Protocol
 from assist_live_client.models import TTSItem
 
 from ..destinations import Destination
-from ..spoken import SpokenText
+from ..spoken import SpokenText, check_sentence_size
 
 
 class TTSBusyError(RuntimeError):
@@ -166,8 +166,11 @@ class SentenceAssembler:
                 self._trailing = False
             self._position = end
             self._read_token(character)
-        if len(self.buffer) > 16384:
-            raise ValueError("TTS sentence exceeds 16384 characters")
+        # A complete sentence in this part is not an unfinished fragment.
+        check_sentence_size(
+            len(self.buffer)
+            + (self._spoken.held_size if self._spoken is not None else 0)
+        )
         self.spoken_part = "".join(output)
         return ready
 

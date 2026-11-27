@@ -274,6 +274,10 @@ The same rate also selects the service's PCM output format.
 
 One `alignment` message has a maximum of 4096 characters. All `alignment` text together has a maximum of 65536 UTF-8 bytes.
 The sentence assembler also limits an unfinished fragment to 16384 characters.
+
+At the end of each input part, the limit includes text that the parser holds, such as an open markup token.
+The parser also limits the text it holds during each part. The limit does not apply to a sentence that ends in the same part.
+
 Sentence punctuation does not change the total `alignment` budget.
 The WebSocket limit of 262144 bytes also limits each decoded remote message and its arrays.
 Data above a limit stops output, cancels the text sender, closes the connection, and gives the static provider error.

@@ -283,6 +283,8 @@ The turn record gets a different `speaker_result` event with the actual destinat
 The transcript does not get a speaker prefix or other changes.
 
 When no plug-in is set, the empty `speaker_result` message means that the server has no speaker identification.
+When no command starts, the server sends the same message without a plug-in call.
+If a plug-in is set, the server records `reason=no_command` for this case.
 Audio stays only in the bounded turn buffer and request memory. The server does not store it.
 
 A stored speaker name uses NFC. It must have 1 to 64 characters and at most 256 UTF-8 bytes.

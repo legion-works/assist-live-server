@@ -34,6 +34,10 @@ Closing quotation marks stay with their sentence. Input end flushes the last fra
 An empty or whitespace-only input gives no audio or sentence-completion marker.
 The unfinished fragment has a limit of 16384 characters.
 
+At the end of each input part, the limit includes text that the parser holds, such as an open markup token.
+The parser also limits the text it holds during each part. The limit does not apply to a sentence that ends in the same part.
+
+
 The assembler examines each input character one time and keeps boundary state across text parts.
 It removes Markdown marks before synthesis but keeps sentence positions in the initial request. See [spoken-text rules](../protocol.md#spoken-text).
 

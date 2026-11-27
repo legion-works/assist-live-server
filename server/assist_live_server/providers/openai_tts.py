@@ -43,6 +43,10 @@ class OpenAITTSError(RuntimeError):
     pass
 
 
+class UnknownOpenAITTSVoice(ValueError):
+    pass
+
+
 # A language tag such as en, de, en-US, or en_US. The HTTP route gives no language.
 LANGUAGE = re.compile(r"[a-z]{2,3}(?:[-_][A-Za-z0-9]{2,8}){0,3}")
 
@@ -58,6 +62,8 @@ class OpenAITTSProvider:
         self.language = os.environ.get("OPENAI_TTS_LANGUAGE", "en")
         self.voices: tuple[TTSVoice, ...] = ()
         self._next_refresh = 0.0
+        self._refresh_done = asyncio.Event()
+        self._refresh_done.set()
         self.invalid_voice_names_total = 0
         self._api_key = ""
         key_file = os.environ.get("OPENAI_TTS_API_KEY_FILE")
@@ -170,6 +176,7 @@ class OpenAITTSProvider:
         if monotonic() < self._next_refresh:
             return
         self._next_refresh = monotonic() + VOICE_CACHE_SECONDS
+        self._refresh_done.clear()
         try:
             async with asyncio.timeout(2.0 if initial else METADATA_TIMEOUT):
                 value = json.loads(await self._request("v1/audio/voices"))
@@ -194,6 +201,8 @@ class OpenAITTSProvider:
                 raise ValueError(
                     "invalid openai_tts voice list or default voice"
                 ) from None
+        finally:
+            self._refresh_done.set()
 
     def _pcm(self, raw: bytes) -> tuple[TTSFormat, bytes]:
         try:
@@ -246,8 +255,9 @@ class OpenAITTSProvider:
         self, text: AsyncIterator[str], voice: str
     ) -> AsyncGenerator[TTSItem]:
         await self.refresh_voices()
+        await self._refresh_done.wait()
         if voice not in {v.id for v in self.voices}:
-            raise ValueError("unknown TTS voice")
+            raise UnknownOpenAITTSVoice("unknown TTS voice")
         # The provider sends the reply format before the first synthesis request.
         # A caller can then start playback before it gets the first sentence audio.
         yield TTSFormat("pcm_s16le", 22050, 1, 2)

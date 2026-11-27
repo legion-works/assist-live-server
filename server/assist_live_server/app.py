@@ -882,6 +882,9 @@ def create_app(
                     try:
                         async for reply in replies:
                             replaced = reply.pop("_final_replaced", False) is True
+                            speaker_skipped = (
+                                reply.pop("_speaker_skipped", False) is True
+                            )
                             reply = decode_control(json.dumps(reply), turn_id)
                             kind = reply["type"]
                             if terminal and kind != "speaker_result":
@@ -916,7 +919,12 @@ def create_app(
                                     if speaker or not terminal:
                                         continue
                                     speaker = True
-                                    await record("speaker_result", reply)
+                                    await record(
+                                        "speaker_result",
+                                        {**reply, "reason": "no_command"}
+                                        if speaker_skipped
+                                        else reply,
+                                    )
                                 elif kind == "error":
                                     await record("stt_failed", metadata)
                             except Exception:

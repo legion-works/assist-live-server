@@ -192,13 +192,14 @@ def test_checkpoint_ui_waits_for_command_start():
     asyncio.run(asyncio.wait_for(run(), 3))
 
 
-@pytest.mark.parametrize("past_result", ["ready", "queued"])
+@pytest.mark.parametrize("past_result", ["ready", "queued", "failed", "deadline"])
 def test_checkpoint_ui_and_past_end_cancellation_use_processed_position(past_result):
     async def run():
         past_ready = threading.Event()
         turn = None
         published = []
         decided = False
+        failures = []
 
         class Session(ParakeetSession):
             async def checkpoint(self, prefix):
@@ -207,10 +208,14 @@ def test_checkpoint_ui_and_past_end_cancellation_use_processed_position(past_res
                     past_ready.set()
                     if past_result == "queued" or position >= 25600:
                         await asyncio.Event().wait()
+                    if past_result == "failed":
+                        raise RuntimeError("speculative checkpoint failed")
+                    if past_result == "deadline":
+                        raise stt.STTCheckpointDeadlineError("speculative deadline")
                 return str(position)
 
         def score(_):
-            assert past_ready.wait(1)
+            assert past_ready.wait(10)
             return 1
 
         detector = TurnDetector(
@@ -240,6 +245,58 @@ def test_checkpoint_ui_and_past_end_cancellation_use_processed_position(past_res
             note=note,
             decide=decide,
             publish=publish,
+            failure=failures.append,
+            observe=lambda _: None,
+            speaker_audio=None,
+            limit=480000,
+        )
+
+        async def audio():
+            for offset in range(0, len(PCM), 1024):
+                yield PCM[offset : offset + 1024]
+
+        assert await turn.run(audio(), timeout=20, grace=2) == "12800"
+        assert not failures
+        assert published
+        assert all(q <= position and q <= 14848 for q, position, _ in published), (
+            "UI_PARTIAL_MUST_NOT_USE_AUDIO_PAST_END"
+        )
+        assert all(not after_decision for _, _, after_decision in published)
+
+    asyncio.run(asyncio.wait_for(run(), 25))
+
+
+def test_no_onset_earlier_checkpoint_failure_stops_turn():
+    async def run():
+        failed_once = threading.Event()
+
+        class Session(ParakeetSession):
+            async def checkpoint(self, prefix):
+                position = len(prefix) // 2
+                if position == 12800:
+                    failed_once.set()
+                    raise RuntimeError("in-scope checkpoint failed")
+                return str(position)
+
+        class NoOnsetDetector(TurnDetector):
+            def push(self, block, text):
+                if self.samples + len(block) // 2 > 12800:
+                    assert failed_once.wait(10)
+                self.samples += len(block) // 2
+                return [{"reason": "early"}] if self.samples >= 30000 else []
+
+        async def note(*args, **kwargs):
+            pass
+
+        async def publish(text):
+            pytest.fail("partial without command start")
+
+        turn = CheckpointTurn(
+            Session(lambda _: ""),
+            NoOnsetDetector(vad_probability=lambda _: 0, turn_probability=lambda _: 0),
+            note=note,
+            decide=note,
+            publish=publish,
             failure=lambda _: None,
             observe=lambda _: None,
             speaker_audio=None,
@@ -250,14 +307,69 @@ def test_checkpoint_ui_and_past_end_cancellation_use_processed_position(past_res
             for offset in range(0, len(PCM), 1024):
                 yield PCM[offset : offset + 1024]
 
-        assert await turn.run(audio(), timeout=3, grace=0.5) == "12800"
-        assert published
-        assert all(q <= position and q <= 14848 for q, position, _ in published), (
-            "UI_PARTIAL_MUST_NOT_USE_AUDIO_PAST_END"
-        )
-        assert all(not after_decision for _, _, after_decision in published)
+        with pytest.raises(RuntimeError, match="in-scope checkpoint failed"):
+            await turn.run(audio(), timeout=20, grace=2)
 
-    asyncio.run(asyncio.wait_for(run(), 4))
+    asyncio.run(asyncio.wait_for(run(), 25))
+
+
+@pytest.mark.parametrize("checkpoint_fails", [False, True])
+def test_end_decision_precedes_pending_in_scope_checkpoint(
+    monkeypatch, checkpoint_fails
+):
+    monkeypatch.setattr("assist_live_server.checkpoint_turn.CHECKPOINT_TIMEOUT", 5)
+
+    async def run():
+        decided = asyncio.Event()
+        order = []
+
+        class Session(ParakeetSession):
+            async def checkpoint(self, prefix):
+                order.append("pending")
+                await decided.wait()
+                order.append("checkpoint")
+                if checkpoint_fails:
+                    raise RuntimeError("in-scope checkpoint failed after decision")
+                return "checkpoint text"
+
+        class EndAtCheckpoint(TurnDetector):
+            def push(self, block, text):
+                self.samples += len(block) // 2
+                return [{"reason": "early"}] if self.samples >= 6400 else []
+
+        async def note(*args, **kwargs):
+            pass
+
+        async def decide(reason):
+            assert reason == "early"
+            order.append("decision")
+            decided.set()
+
+        turn = CheckpointTurn(
+            Session(lambda _: ""),
+            EndAtCheckpoint(vad_probability=lambda _: 0, turn_probability=lambda _: 0),
+            note=note,
+            decide=decide,
+            publish=note,
+            failure=lambda _: None,
+            observe=lambda _: order.append("observe"),
+            speaker_audio=None,
+            limit=480000,
+        )
+
+        async def audio():
+            yield PCM[:12800]
+
+        if checkpoint_fails:
+            with pytest.raises(
+                RuntimeError, match="in-scope checkpoint failed after decision"
+            ):
+                await turn.run(audio(), timeout=20, grace=2)
+        else:
+            assert await turn.run(audio(), timeout=20, grace=2) == ""
+        assert order == ["pending", "observe", "decision", "checkpoint"]
+
+    asyncio.run(asyncio.wait_for(run(), 25))
 
 
 @pytest.mark.parametrize("end_rule", ["partial", "checkpoint"])

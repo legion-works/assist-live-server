@@ -17,6 +17,7 @@ from assist_live_client.protocol import MAX_PCM, decode_control, encode_control
 from .audio_gateway import Recorder
 from .destinations import Destination, require_destination
 from .protocol import AudioBackend
+from .providers.openai_tts import OpenAITTSProvider, UnknownOpenAITTSVoice
 from .providers.tts import SentenceAssembler, TTSProvider
 
 
@@ -190,7 +191,11 @@ class TTSGateway:
             voice = (
                 voice or getattr(selected, "default_voice", self.default_voice) or ""
             )
-            if voices and voice not in {item.id for item in voices}:
+            if (
+                not isinstance(selected, OpenAITTSProvider)
+                and voices
+                and voice not in {item.id for item in voices}
+            ):
                 failure_code = "unknown_tts_voice"
                 raise ValueError("unknown TTS voice")
             if self.backend is not None:
@@ -258,9 +263,11 @@ class TTSGateway:
                         else time.time_ns(),
                     },
                 )
-        except ValueError, RuntimeError:
+        except (ValueError, RuntimeError) as error:
             if record is not None:
                 await record("tts_failed", metadata)
+            if isinstance(error, UnknownOpenAITTSVoice):
+                failure_code = "unknown_tts_voice"
             yield encode_control("error", turn_id, code=failure_code)
         finally:
             if stream is not None and hasattr(stream, "aclose"):

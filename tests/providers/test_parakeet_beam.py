@@ -2,6 +2,7 @@ import asyncio
 import importlib.metadata
 import inspect
 import os
+import weakref
 from types import SimpleNamespace
 
 import numpy as np
@@ -237,6 +238,91 @@ def test_endless_zero_duration_search_has_a_hard_frame_call_bound():
     assert result and all(h.frame >= 2 for h in result), (
         "frame budget must return kept advancing hypotheses, not raise"
     )
+
+
+def test_joint_scores_do_not_accumulate_across_frames(monkeypatch):
+    log_softmax = parakeet_beam._log_softmax
+    scores = weakref.WeakValueDictionary()
+    peak = 0
+
+    def track(logits):
+        nonlocal peak
+        result = log_softmax(logits)
+        scores[id(result)] = result
+        peak = max(peak, len(scores))
+        return result
+
+    monkeypatch.setattr(parakeet_beam, "_log_softmax", track)
+    joint = EndlessZeroJoint(vocabulary_size=3, call_budget=11)
+    result = parakeet_beam.search(
+        fake_model(joint).asr, np.arange(8, dtype=np.float32)[:, None], 8, width=1
+    )
+    assert len(result[0].tokens) == 88
+    assert joint.calls == dict.fromkeys(range(8), 11)
+    assert peak <= 22, "joint scores from earlier frames are still retained"
+
+
+def test_frame_local_cache_is_byte_identical_to_unpruned_cache(monkeypatch):
+    class UnprunedCache(dict):
+        def clear(self):
+            pass
+
+    class AuditedFrameCache(dict):
+        frame = -1
+
+        def clear(self):
+            self.frame += 1
+            super().clear()
+
+        def __contains__(self, key):
+            assert key[1] == self.frame, "joint lookup crossed the frame boundary"
+            return super().__contains__(key)
+
+        def __getitem__(self, key):
+            assert key[1] == self.frame, "joint lookup crossed the frame boundary"
+            return super().__getitem__(key)
+
+    class RandomJoint(Joint):
+        def __init__(self, seed, vocab_size):
+            self.seed = seed
+            self.vocab_size = vocab_size
+
+        def run(self, outputs, inputs):
+            frame = int(inputs["encoder_outputs"].flat[0])
+            token = int(inputs["targets"][0][0])
+            old = int(inputs["input_states_1"].flat[0])
+            rng = np.random.default_rng([self.seed, frame, token, old])
+            logits = rng.integers(-5, 6, self.vocab_size + 5).astype(np.float32)
+            state1 = rng.integers(0, 127, (1, 1, 1)).astype(np.float32)
+            state2 = rng.integers(0, 127, (1, 1, 1)).astype(np.float32)
+            return logits, state1, state2
+
+    def fingerprint(hypotheses):
+        return [
+            (
+                h.tokens,
+                h.score.hex(),
+                h.frame,
+                h.zero_duration_tokens,
+                tuple(state.tobytes() for state in h.state),
+            )
+            for h in hypotheses
+        ]
+
+    rng = np.random.default_rng(198963)
+    for seed in range(64):
+        length = int(rng.integers(1, 25))
+        vocab_size = int(rng.integers(3, 33))
+        width = (1, 2, 4, 8, 16)[seed % 5]
+        encoded = rng.integers(0, 2000, (length, 4)).astype(np.float32)
+        model = fake_model(RandomJoint(seed, vocab_size))
+        model.asr._vocab_size = vocab_size
+        model.asr._blank_idx = vocab_size - 1
+        monkeypatch.setattr(parakeet_beam, "_JointCache", UnprunedCache)
+        unpruned = parakeet_beam.search(model.asr, encoded, length, width=width)
+        monkeypatch.setattr(parakeet_beam, "_JointCache", AuditedFrameCache)
+        pruned = parakeet_beam.search(model.asr, encoded, length, width=width)
+        assert fingerprint(pruned) == fingerprint(unpruned), (seed, width, length)
 
 
 @pytest.mark.parametrize("frames", [1, 2])

@@ -730,6 +730,12 @@ A provider's own `TimeoutError` gives `stt_failed`, not a hard end or a checkpoi
 Only expiry of the turn's wall timer gives that wall-limit cause.
 
 The server sends `end_decision`, one `final`, then `speaker_result` before `end` and stream close.
+Without a command start, the server does not call the speaker plug-in.
+It sends the same `speaker_result` as when no plug-in is set: `name=""`, `distance=0.0`, and `destination="local"`.
+This lets the client distinguish no identification from a missing message.
+
+The server does not wait for pending checkpoints at the end sample or before it to send `end_decision`.
+It waits for those checkpoints before it sends a `final`.
 If the server cannot publish `end_decision`, it does not send `final`.
 A provider failure sends one terminal `error` with code `stt_failed`, not a `final`.
 The server does not retry or use fallback after a `final`.
@@ -773,6 +779,10 @@ The store keeps `stt_partial` timing events without transcript text. The two tra
 Only a replaced `final` adds `data.replaced: true` to `stt_final`.
 This boolean does not store text. Transcript-storage permission is not necessary for this field.
 Other timing events and other values do not keep this field. Older clients can read it without negotiation.
+
+If the server does not call the configured speaker plug-in because no command starts, the one `speaker_result` timing event has `data.reason: "no_command"`.
+The event also has the destination `local` and the distance 0.0 of the empty message.
+The `speaker_result` message does not have this field.
 
 Disconnect cancels the session and awaits the gateway tasks.
 CPU work can finish in its `thread` after cancellation, but it cannot write a socket or store event.

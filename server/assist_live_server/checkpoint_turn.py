@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
+from functools import partial
 from typing import Any, Protocol, runtime_checkable
 
 from .providers.parakeet import CHECKPOINT_TIMEOUT, INTERVAL_BYTES
@@ -72,9 +73,14 @@ class CheckpointTurn:
         loop = asyncio.get_running_loop()
         failed: asyncio.Future[None] = loop.create_future()
 
-        def completed(task: asyncio.Task[Any]) -> None:
+        def completed(task: asyncio.Task[Any], position: int = 0) -> None:
             if not task.cancelled() and (error := task.exception()) is not None:
-                if not failed.done():
+                # After the endpoint, the processor checks checkpoints after decide().
+                if (
+                    position <= self.processed_samples
+                    and (not position or not self.ended)
+                    and not failed.done()
+                ):
                     failed.set_exception(error)
 
         async def checkpoint(prefix: bytes) -> str:
@@ -84,10 +90,8 @@ class CheckpointTurn:
             except TimeoutError:
                 if not deadline.expired():
                     raise
-                self.fail("deadline")
                 raise CheckpointDeadline from None
             except STTCheckpointDeadlineError:
-                self.fail("deadline")
                 raise CheckpointDeadline from None
 
         async def collect() -> None:
@@ -106,14 +110,17 @@ class CheckpointTurn:
                     first = (previous // INTERVAL_BYTES + 1) * INTERVAL_BYTES
                     for end in range(first, len(self.audio) + 1, INTERVAL_BYTES):
                         task = asyncio.create_task(checkpoint(bytes(self.audio[:end])))
-                        self.checkpoints[end // 2] = task
+                        position = end // 2
+                        self.checkpoints[position] = task
                         self.tasks.append(task)
-                        task.add_done_callback(completed)
-                        self.publications.put_nowait((end // 2, task))
+                        task.add_done_callback(partial(completed, position=position))
+                        self.publications.put_nowait((position, task))
                         # The input bound limits prefix copies during checkpoint waits.
                         pending = [t for t in self.checkpoints.values() if not t.done()]
                         if len(pending) >= 2:
-                            await asyncio.shield(pending[0])
+                            await asyncio.wait([pending[0]])
+                            if failed.done():
+                                return
                     await self.queue.put(block)
                 if len(self.audio) == self.limit:
                     break
@@ -122,7 +129,6 @@ class CheckpointTurn:
         async def publish() -> None:
             while True:
                 position, task = await self.publications.get()
-                text = await asyncio.shield(task)
                 async with self.progress:
                     while not (
                         self.ended
@@ -131,7 +137,7 @@ class CheckpointTurn:
                         await self.progress.wait()
                     if self.ended:
                         return
-                await self.publish(text)
+                await self.publish(await asyncio.shield(task))
 
         def text(samples: int) -> str:
             # Collection must continue while this worker waits for checkpoint text.
@@ -178,6 +184,11 @@ class CheckpointTurn:
                         "speech_start", onset_ms=int(self.detector.speech_started_at_ms)
                     )
                 async with self.progress:
+                    # A failed result is relevant only after the detector reaches it.
+                    for position, task in self.checkpoints.items():
+                        if self.processed_samples < position <= self.detector.samples:
+                            if task.done():
+                                task.result()
                     self.processed_samples = self.detector.samples
                     self.progress.notify_all()
                 silence_ms = self.detector.silent_samples / 16
@@ -197,6 +208,9 @@ class CheckpointTurn:
                         )
                         self.observe(loop.time() - arrival)
                     await self.decide(events[-1]["reason"] if events else "input_end")
+                    for position, task in self.checkpoints.items():
+                        if position <= self.detector.samples:
+                            await asyncio.shield(task)
                     return (
                         await self.text_at(self.detector.samples) if self.onset else ""
                     )
@@ -215,6 +229,9 @@ class CheckpointTurn:
                     if failed.done():
                         await failed
                     return await processor
+            except CheckpointDeadline:
+                self.fail("deadline")
+                raise
             except TimeoutError:
                 if wall_deadline is not None and wall_deadline.expired():
                     self.fail("wall_limit")

@@ -95,6 +95,8 @@ def safe_data(event: TimingEvent, transcript: bool = False) -> dict[str, object]
             data[key] = event.data[key]
     if event.stage == "stt_final" and event.data.get("replaced") is True:
         data["replaced"] = True
+    if event.stage == "speaker_result" and event.data.get("reason") == "no_command":
+        data["reason"] = "no_command"
     if event.stage == "mic_open" and "pre_roll_ms" in event.data:
         data["pre_roll_ms"] = event.data["pre_roll_ms"]
     for key in ("part", "destination", "provider", "name", "original_stage"):

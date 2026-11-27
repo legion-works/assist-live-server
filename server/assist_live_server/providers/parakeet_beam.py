@@ -33,6 +33,9 @@ from .name_context import NameContext
 MAX_ZERO_DURATION_TOKENS = 10
 PARAKEET_DURATIONS = (0, 1, 2, 3, 4)
 _VALIDATED_DURATION_LAYOUTS: WeakKeyDictionary[Any, bool] = WeakKeyDictionary()
+_JointCache = dict[
+    tuple[tuple[int, ...], int], tuple[NDArray[np.float32], NDArray[np.float32], Any]
+]
 
 
 class ParakeetDurationLayoutError(ValueError):
@@ -101,7 +104,7 @@ def search(
     beam = min(width, asr._vocab_size - 1)
     token_count = min(beam, asr._vocab_size - 2)
     kept = [Hypothesis(0.0, (), asr._create_state(), 0)]
-    cache = {}
+    cache = _JointCache()
     if context is not None and (not context.active or bonus == 0):
         context = None
     context_states: dict[tuple[int, ...], int] = {(): 0}
@@ -110,6 +113,7 @@ def search(
     # Cache hits also use the beam * (cap + 1) expansion budget.
     frame_budget = beam * (MAX_ZERO_DURATION_TOKENS + 1)
     for frame in range(length):
+        cache.clear()
         current = [h for h in kept if h.frame == frame]
         kept = [h for h in kept if h.frame > frame]
         for _ in range(frame_budget):

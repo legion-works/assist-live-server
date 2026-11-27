@@ -5063,3 +5063,18 @@ The release procedure specifies an approved, annotated `client-v<version>` tag a
 The compatibility check on the first reviewed version of this change gave `30 failed, 93 passed`. HTTP 403 and 503 gave `refused` in those failures, not `closed`. The repair keeps `closed` for those statuses on a WebSocket upgrade or when the HTTP session uses `raise_for_status`. An HTTP 403 or 503 response without a session error gives `refused`. Redirects give `refused`.
 
 The repaired error-kind and redirect checks gave `133 passed` with resource warnings set to errors. The two IPv6 loopback checks also gave `2 passed`. A change from `unauthorized` to `refused` for HTTP 401 gave `25 failed, 98 passed`. The client keeps `unauthorized` for a proxy `CONNECT` reply with HTTP 401 on an HTTP request.
+
+## Voice provider checks (2026-11-27 UTC)
+
+- A checkpoint failure after the detector end sample does not stop the turn. The server cancels work after the end sample. A checkpoint failure at or before that sample stops the turn, with or without a command start. The server sends the end decision before it waits for pending checkpoints at or before the end sample.
+- The beam search clears the joint cache before each frame. The beam tests gave `620 passed, 1 skipped`. The beam results had the same bytes before and after the change. In 64 seeded tests, the full and frame-local caches gave the same results at widths 1, 2, 4, 8, and 16. All cache lookups used the current frame. In an eight-frame test, peak score-array data decreased from 2816 to 352 bytes. These counts do not measure process memory. The landing gate must compare real-model results and measure peak process memory.
+- If a command does not start, the server sends an empty `final` transcript and an empty `speaker_result`. It does not call the speaker plug-in. If the configuration sets a plug-in, the server records one `speaker_result` event with `reason=no_command`. This event also keeps the destination and the distance 0.0 of the empty message, so the integration accepts it. On the previous record, a test gives `KeyError: 'distance'`.
+- The 16384-character limit includes the unfinished fragment and the text that the parser holds at the end of each part. The parser also limits the text it holds during each part. A sentence that ends in the same part can be longer.
+- The typed client gets only the PCM format for empty or whitespace-only OpenAI-compatible TTS requests. No provider change was necessary for this behavior.
+- A TTS request can refresh an expired OpenAI-compatible voice list. A voice that is not in the list after refresh gives `unknown_tts_voice` before the server reads text or sends a synthesis request. A refresh failure keeps the previous list.
+
+The provider tests gave `921 passed, 1 skipped`. Each test found the error when its check ran with the related defect.
+
+The isolated suite gave `16 failed, 2901 passed, 1 skipped`. The runner did not have Git history or IPv6 loopback. The failures include one IPv6 socket resource warning. A runner with Git history and IPv6 loopback gave `16 passed` for these tests. The bootstrap, package, and asset checks gave exit code 0.
+
+The review checks gave `352 passed`. These checks include the empty speaker message, long complete sentences, checkpoint failure without a command start, and end-decision order. Changes that put the defects back gave six test failures. The isolated suite gave `16 failed, 2907 passed, 1 skipped`. The same 16 tests gave `16 passed` on a runner with Git history and IPv6 loopback.

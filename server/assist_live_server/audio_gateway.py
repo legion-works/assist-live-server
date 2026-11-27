@@ -392,7 +392,7 @@ class AudioGateway:
                     # The route removes this internal marker before wire validation.
                     reply["_final_replaced"] = True
                 await output.put(reply)
-                if self.speaker is not None:
+                if self.speaker is not None and onset:
                     try:
                         require_destination(self.speaker.destination, self.local_only)
                         result = await self.speaker.identify(bytes(speaker_audio))
@@ -409,15 +409,16 @@ class AudioGateway:
                         # Speaker metadata is optional. A final transcript stays final.
                         pass
                 else:
-                    await output.put(
-                        encode_control(
-                            "speaker_result",
-                            turn_id,
-                            name="",
-                            distance=0.0,
-                            destination="local",
-                        )
+                    speaker_reply = encode_control(
+                        "speaker_result",
+                        turn_id,
+                        name="",
+                        distance=0.0,
+                        destination="local",
                     )
+                    if self.speaker is not None:
+                        speaker_reply["_speaker_skipped"] = True
+                    await output.put(speaker_reply)
             except asyncio.CancelledError:
                 raise
             except Exception:

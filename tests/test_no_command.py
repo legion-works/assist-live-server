@@ -3,6 +3,7 @@ import asyncio
 import numpy as np
 import pytest
 from assist_live_server.audio_gateway import AudioGateway
+from assist_live_server.speaker import SpeakerResult
 from assist_live_server.turn.detector import TurnDetector
 
 TURN = "01900000-0000-7000-8000-000000000001"
@@ -85,7 +86,19 @@ def test_no_command_empty_final_without_provider_finish(case):
             detector = HardWithoutStart(
                 vad_probability=lambda _: 0.1, turn_probability=lambda _: 0
             )
-        gateway = AudioGateway(lambda _: session, detector_factory=lambda: detector)
+
+        class Speaker:
+            destination = "local"
+            calls = 0
+
+            async def identify(self, audio):
+                self.calls += 1
+                return SpeakerResult("speaker-a", 0.1)
+
+        speaker = Speaker()
+        gateway = AudioGateway(
+            lambda _: session, detector_factory=lambda: detector, speaker=speaker
+        )
         notes = []
 
         async def record(stage, data):
@@ -103,6 +116,12 @@ def test_no_command_empty_final_without_provider_finish(case):
         )
         assert session.finish_calls == 0, "final decode without command start"
         assert [r["text"] for r in replies if r["type"] == "final"] == [""]
+        assert speaker.calls == 0, "speaker plug-in received no-command audio"
+        assert [
+            (r["name"], r["distance"], r["destination"])
+            for r in replies
+            if r["type"] == "speaker_result"
+        ] == [("", 0.0, "local")]
         assert session.cancelled and session.closed
         assert gateway.stt_final_replaced_total == 0
 
@@ -131,6 +150,62 @@ def test_command_start_in_end_block_keeps_final():
         assert [r["text"] for r in replies if r["type"] == "final"] == [
             "provider final text"
         ]
+
+    asyncio.run(run())
+
+
+def test_no_command_speaker_skip_reaches_turn_record(tmp_path):
+    from tests.contract.test_streaming_stt import service
+
+    async def run():
+        class Speaker:
+            destination = "local"
+            calls = 0
+
+            async def identify(self, audio):
+                self.calls += 1
+                return SpeakerResult("speaker-a", 0.1)
+
+        speaker = Speaker()
+        gateway = AudioGateway(
+            lambda _: Session(),
+            speaker=speaker,
+            detector_factory=lambda: TurnDetector(
+                vad_probability=lambda _: 0, turn_probability=lambda _: 0
+            ),
+        )
+
+        async def audio():
+            yield bytes(1024)
+
+        async with service(tmp_path, gateway=gateway) as (client, _, turn, store):
+            replies = [reply async for reply in client.stt(turn.turn_id, audio())]
+            assert not speaker.calls
+            assert [r["text"] for r in replies if r["type"] == "final"] == [""]
+            assert [r["type"] for r in replies] == [
+                "end_decision",
+                "final",
+                "speaker_result",
+            ]
+            assert replies[-1] == {
+                "version": 1,
+                "type": "speaker_result",
+                "turn_id": turn.turn_id,
+                "name": "",
+                "distance": 0.0,
+                "destination": "local",
+            }
+            stored = await store.get_turn(turn.turn_id)
+            events = [
+                e["data"] for e in stored["events"] if e["stage"] == "speaker_result"
+            ]
+            assert len(events) == 1
+            data = events[0]
+            assert data["reason"] == "no_command"
+            # The integration accepts a timing-only speaker result only with
+            # a known destination and a numeric distance.
+            assert data["destination"] == "local"
+            assert type(data["distance"]) is float and data["distance"] == 0.0
 
     asyncio.run(run())
 

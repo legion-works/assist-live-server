@@ -161,6 +161,102 @@ def test_unknown_voice_stops_before_text_or_http(monkeypatch):
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("voice", ["voice-b", "voice-c", "unknown"])
+def test_request_uses_refreshed_voice_catalog(monkeypatch, voice):
+    clock = 100.0
+    monkeypatch.setattr(
+        "assist_live_server.providers.openai_tts.monotonic", lambda: clock
+    )
+    monkeypatch.setattr("assist_live_server.providers.openai_tts.METADATA_TIMEOUT", 5)
+
+    async def catalog(request, count):
+        return web.json_response(
+            {"voices": ["voice-a", "voice-b" if count == 1 else "voice-c"]}
+        )
+
+    async def run():
+        nonlocal clock
+        async with speech_server(catalog_handler=catalog) as (url, requests, refreshes):
+            factory = await configured(monkeypatch, url)
+            gateway = TTSGateway(factory.tts, provider="openai_tts")
+            clock += 61
+            read = []
+
+            async def text():
+                read.append(True)
+                yield "One."
+
+            turn_id = str(uuid7())
+            output = [item async for item in gateway.stream(turn_id, text(), voice)]
+            if voice == "voice-c":
+                assert any(isinstance(item, bytes) for item in output), output
+                assert requests == [{"input": "One.", "voice": voice}]
+            else:
+                assert [item["code"] for item in output] == ["unknown_tts_voice"]
+                assert not read and not requests
+                assert [
+                    item["code"]
+                    async for item in gateway.stream(turn_id, text(), voice)
+                ] == ["unknown_tts_voice"]
+                assert not read and not requests
+            assert len(refreshes) == 2, "one refresh per cooldown"
+
+    asyncio.run(run())
+
+
+def test_request_waits_for_catalog_refresh_in_progress(monkeypatch):
+    clock = 100.0
+    monkeypatch.setattr(
+        "assist_live_server.providers.openai_tts.monotonic", lambda: clock
+    )
+    monkeypatch.setattr("assist_live_server.providers.openai_tts.METADATA_TIMEOUT", 10)
+
+    async def run():
+        nonlocal clock
+        entered = asyncio.Event()
+        waiting = asyncio.Event()
+        release = asyncio.Event()
+
+        async def catalog(request, count):
+            if count == 1:
+                return web.json_response({"voices": ["voice-a"]})
+            entered.set()
+            await release.wait()
+            return web.json_response({"voices": ["voice-a", "voice-b"]})
+
+        async with speech_server(catalog_handler=catalog) as (url, requests, refreshes):
+            factory = await configured(monkeypatch, url)
+            provider = factory.tts("openai_tts")
+            refresh = provider.refresh_voices
+            clock += 61
+            async with asyncio.TaskGroup() as group:
+                group.create_task(refresh())
+                await entered.wait()
+
+                async def checked_refresh():
+                    await refresh()
+                    waiting.set()
+
+                monkeypatch.setattr(provider, "refresh_voices", checked_refresh)
+                stream = provider.stream(parts("One."), "voice-b")
+                result = group.create_task(anext(stream))
+                try:
+                    await waiting.wait()
+                    assert not result.done()
+                    release.set()
+                    assert await result == FORMAT
+                    assert len(refreshes) == 2
+                    assert not requests
+                finally:
+                    release.set()
+                    if not result.done():
+                        result.cancel()
+                        await asyncio.gather(result, return_exceptions=True)
+                    await stream.aclose()
+
+    asyncio.run(asyncio.wait_for(run(), 15))
+
+
 def test_checked_hostname_connection_is_pinned_and_keeps_host(monkeypatch):
     async def run():
         from assist_live_server.providers.openai_tts import OpenAITTSProvider
@@ -724,17 +820,48 @@ def test_resampled_24khz_reply_is_accepted_by_real_typed_client(monkeypatch, tmp
                     assert [
                         i.text_end for i in items if isinstance(i, TTSSentenceEnd)
                     ] == [4, 9]
+            finally:
+                store.close()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("chunks", [(), (" \n ", "\t")])
+def test_real_typed_client_gets_only_format_for_blank_openai_text(
+    monkeypatch, tmp_path, chunks
+):
+    from assist_live_client import AssistLiveClient, TurnOpen
+    from assist_live_server.app import create_app
+    from assist_live_server.auth import Registry
+    from assist_live_server.store import SQLiteStore
+
+    async def run():
+        async with speech_server() as (url, requests, _):
+            factory = await configured(monkeypatch, url)
+            store = SQLiteStore(tmp_path / "turns.sqlite3")
+            registry = Registry(replay_store=store)
+            registry.bind("satellite-a", "satellite-a", b"synthetic-device-secret")
+            registry.add_token("test-token", ["satellite-a"])
+            try:
+                async with TestClient(
+                    TestServer(create_app(registry, store, providers=factory))
+                ) as service:
+                    client = AssistLiveClient(
+                        str(service.make_url("/")).rstrip("/"),
+                        "test-token",
+                        session=service.session,
+                    )
                     turn_id = str(uuid7())
                     await client.open_turn(
                         TurnOpen(turn_id, "satellite-a", "tts_only", None, None)
                     )
-                    blank = [
-                        i
-                        async for i in client.tts_stream(
-                            turn_id, parts(" \n "), text_positions=True
+                    assert [
+                        item
+                        async for item in client.tts_stream(
+                            turn_id, parts(*chunks), text_positions=True
                         )
-                    ]
-                    assert blank == [FORMAT]
+                    ] == [FORMAT]
+                    assert not requests
             finally:
                 store.close()
 

@@ -186,6 +186,31 @@ def test_link_hold_releases_before_input_end():
     asyncio.run(run())
 
 
+@pytest.mark.parametrize(
+    ("head", "hold"), [("", "#"), ("", " "), ("Text ", "*"), ("Cell |", " ")]
+)
+def test_sentence_cap_includes_unresolved_parser_holds(head, hold):
+    assembler = SentenceAssembler()
+    text = head + hold * (16384 - len(head))
+    assert assembler.feed_positions(text[:8192]) == []
+    assert assembler.feed_positions(text[8192:]) == []
+    with pytest.raises(ValueError, match="TTS sentence exceeds 16384 characters"):
+        assembler.feed_positions(hold)
+
+
+@pytest.mark.parametrize("spoken", [False, True])
+def test_sentence_cap_allows_long_sentence_completed_in_one_part(spoken):
+    assembler = SentenceAssembler(spoken=spoken)
+    sentence = "a" * 17000 + "."
+    assert assembler.feed_positions(sentence + " b") == [(sentence, 17001)]
+
+
+def test_sentence_cap_allows_short_mark_hold_inside_long_complete_sentence():
+    assembler = SentenceAssembler()
+    head = "a" * 17000 + " "
+    assert assembler.feed_positions(head + "**word**. b") == [(head + "word.", 17010)]
+
+
 @pytest.mark.parametrize("opening", ["<", "<unfinished"])
 def test_unclosed_tag_in_large_reply_does_not_delay_first_audio(opening):
     async def run():

@@ -99,7 +99,7 @@ def test_concurrent_speaker_destinations_stay_with_each_result():
 
         async def turn(value):
             async def frames():
-                yield bytes([value, 0]) * 512
+                yield bytes([value, 0]) * 8192
 
             return [
                 item
