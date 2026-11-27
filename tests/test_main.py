@@ -574,6 +574,33 @@ def test_bad_configuration_exits_without_secret(tmp_path):
     assert json.loads((tmp_path / "configuration-imports.json").read_text()) == []
 
 
+@pytest.mark.parametrize("voice", ["", "test-voice"])
+def test_invalid_elevenlabs_logging_option_is_named_without_its_value(tmp_path, voice):
+    result = subprocess.run(
+        entrypoint_command(tmp_path, "logging"),
+        env={
+            **environment(tmp_path),
+            "ASSIST_LIVE_TTS_PROVIDER": "elevenlabs",
+            "ASSIST_LIVE_LOCAL_ONLY": "false",
+            "ELEVENLABS_API_KEY": "synthetic-key",
+            "ELEVENLABS_VOICE_ID": voice,
+            "ELEVENLABS_VOICE_LANGUAGE": "en-US",
+            "ELEVENLABS_ENABLE_LOGGING": "synthetic-password-value",
+        },
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    assert result.returncode == 1
+    assert result.stdout == (
+        "FAIL server: startup configuration or model check failed: "
+        "invalid ELEVENLABS_ENABLE_LOGGING option\n"
+    )
+    assert "synthetic-password-value" not in result.stdout + result.stderr
+    assert "synthetic-key" not in result.stdout + result.stderr
+    assert result.stderr == ""
+
+
 @pytest.mark.parametrize("fetch_only", [False, True])
 def test_bad_cached_hash_exits_without_traceback(tmp_path, fetch_only):
     cache = tmp_path / "cache"

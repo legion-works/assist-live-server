@@ -5078,3 +5078,22 @@ The provider tests gave `921 passed, 1 skipped`. Each test found the error when 
 The isolated suite gave `16 failed, 2901 passed, 1 skipped`. The runner did not have Git history or IPv6 loopback. The failures include one IPv6 socket resource warning. A runner with Git history and IPv6 loopback gave `16 passed` for these tests. The bootstrap, package, and asset checks gave exit code 0.
 
 The review checks gave `352 passed`. These checks include the empty speaker message, long complete sentences, checkpoint failure without a command start, and end-decision order. Changes that put the defects back gave six test failures. The isolated suite gave `16 failed, 2907 passed, 1 skipped`. The same 16 tests gave `16 passed` on a runner with Git history and IPv6 loopback.
+
+## ElevenLabs request logging and voice metadata (2026-11-27 UTC)
+
+The provider factory reads `ELEVENLABS_ENABLE_LOGGING`. The default `true` keeps the provider default. The value `false` sends `enable_logging=false`.
+
+If ElevenLabs is the configured TTS provider, other values stop the server. The startup command gives the diagnostic `invalid ELEVENLABS_ENABLE_LOGGING option` without the value.
+The provider documents that only select enterprise customers can use Zero Retention Mode. Live checks: `NOT RUN`.
+
+The constructor refuses a configured voice identifier, voice name, or language that contains the API key or key-shaped text. It also examines the published name when the identifier is the name. The language must agree with the language tag rule of the OpenAI-compatible provider. The error names the field and does not contain its value. Thus health cannot serialize these values.
+
+The new tests gave `16 failed, 6 passed` on base `1f675ca`. With the changes, the ElevenLabs, streaming TTS contract, and server command tests gave `212 passed`.
+Three source changes in scratch gave the related test failures again.
+The changes were a factory that ignores `ELEVENLABS_ENABLE_LOGGING`, no credential check on the voice name, and no language tag check.
+
+Review of the first version found two problems. A key-shaped identifier without a name went into the health voice list as the identifier and the name. The startup command gave only its general configuration diagnostic for an invalid `ELEVENLABS_ENABLE_LOGGING`.
+
+The new tests for these problems gave `5 failed` on that version. With the repair, the ElevenLabs, server command, and TTS contract tests gave `236 passed`.
+The on-wire logging test runs with and without a configured voice.
+Without the key-shaped identifier check, `1 failed`: the check of the published name refused the identifier when it was the name. Without the new startup diagnostic, `2 failed`.

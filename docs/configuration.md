@@ -332,7 +332,8 @@ This stops ONNX Runtime from sending its default telemetry data. It also applies
 | `ELEVENLABS_API_KEY` | empty | `elevenlabs_api_key` | Supply a runtime secret. |
 | `ELEVENLABS_VOICE_ID` | empty | `elevenlabs_voice_id` | Set the configured TTS voice. |
 | `ELEVENLABS_VOICE_NAME` | voice identifier | `elevenlabs_voice_name` | Set its display name. |
-| `ELEVENLABS_VOICE_LANGUAGE` | empty | `elevenlabs_voice_language` | Set its language. A nonempty value is necessary with a configured voice. |
+| `ELEVENLABS_VOICE_LANGUAGE` | empty | `elevenlabs_voice_language` | Set its language tag, such as `en-US`. A value is necessary with a configured voice. |
+| `ELEVENLABS_ENABLE_LOGGING` | `true` | none | Set `false` to request ElevenLabs Zero Retention Mode. |
 | `ASSIST_LIVE_DATA` | `/data` | none | Set the data directory. |
 | `ASSIST_LIVE_MODEL_CACHE` | data directory plus `cache` | none | Set the local model cache. |
 | `ASSIST_LIVE_HOST` | `0.0.0.0` | none | Set the server address. |
@@ -343,6 +344,11 @@ Boolean environment values must be `true` or `false`. The data directory must be
 
 An empty `ELEVENLABS_VOICE_ID` keeps request-selected voices and reports no voice list in health.
 An unset or empty `ELEVENLABS_VOICE_NAME` uses the voice identifier.
+The server refuses a voice identifier, name, or language that contains the API key or key-shaped text. The error names the field, not the value.
+
+`ELEVENLABS_ENABLE_LOGGING=false` sends `enable_logging=false` with each ElevenLabs request.
+The provider documents that only select enterprise customers can use Zero Retention Mode. See [cloud providers](providers/cloud.md).
+If ElevenLabs is the configured TTS provider, an invalid value stops the server with `invalid ELEVENLABS_ENABLE_LOGGING option`. The server does not read this setting for other TTS providers. The diagnostic does not contain the value.
 
 The app reads `/data/options.json` and maps only the listed app options.
 It does not put secrets in command arguments or print their values.

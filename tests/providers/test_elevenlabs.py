@@ -900,3 +900,150 @@ def test_logging_option_is_explicit_and_preserves_provider_default(
         assert seen == [expected]
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("configured", [False, True])
+@pytest.mark.parametrize(
+    "setting,expected", [(None, "true"), ("true", "true"), ("false", "false")]
+)
+def test_factory_logging_setting_reaches_the_request(
+    setting, expected, configured, cloud_ws_server, monkeypatch
+):
+    from assist_live_server.providers.tts import provider_factory
+
+    original = ElevenLabsProvider.__init__
+
+    async def run():
+        seen = []
+
+        async def handler(request):
+            seen.append(request.query.get("enable_logging"))
+            ws = web.WebSocketResponse()
+            await ws.prepare(request)
+            async for message in ws:
+                if message.json() == {"text": ""}:
+                    await ws.send_json({"isFinal": True})
+                    await ws.close()
+                    break
+            return ws
+
+        async with cloud_ws_server(handler) as fake:
+
+            def construct(self, key, **kwargs):
+                original(self, key, endpoint=fake.url, **kwargs)
+
+            monkeypatch.setattr(ElevenLabsProvider, "__init__", construct)
+            provider = await provider_factory("elevenlabs")(KEY)
+            async for _ in provider.stream(parts("Hello "), "test-voice"):
+                pass
+        assert seen == [expected]
+
+    if configured:
+        monkeypatch.setenv("ELEVENLABS_VOICE_ID", "test-voice")
+        monkeypatch.setenv("ELEVENLABS_VOICE_LANGUAGE", "en-US")
+        monkeypatch.delenv("ELEVENLABS_VOICE_NAME", raising=False)
+    else:
+        monkeypatch.delenv("ELEVENLABS_VOICE_ID", raising=False)
+    if setting is None:
+        monkeypatch.delenv("ELEVENLABS_ENABLE_LOGGING", raising=False)
+    else:
+        monkeypatch.setenv("ELEVENLABS_ENABLE_LOGGING", setting)
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("setting", ["", "False", "0", "no"])
+def test_factory_refuses_an_invalid_logging_setting(setting, monkeypatch):
+    from assist_live_server.providers.tts import provider_factory
+
+    monkeypatch.delenv("ELEVENLABS_VOICE_ID", raising=False)
+    monkeypatch.setenv("ELEVENLABS_ENABLE_LOGGING", setting)
+    with pytest.raises(ValueError, match="ELEVENLABS_ENABLE_LOGGING"):
+        asyncio.run(provider_factory("elevenlabs")(KEY))
+
+
+# Built at run time, so that the source has no literal key-shaped text.
+KEY_SHAPED = "sk_" + "a1" * 24
+
+
+@pytest.mark.parametrize(
+    "field,value,label",
+    [
+        ("voice_name", f"Voice {KEY}", "voice name"),
+        ("voice_name", KEY_SHAPED, "voice name"),
+        ("voice_name", "Voice\nname", "voice name"),
+        ("voice_name", "x" * 129, "voice name"),
+        ("voice_language", KEY, "voice language"),
+        ("voice_language", KEY_SHAPED, "voice language"),
+        ("voice_language", f"en-{KEY}", "voice language"),
+        ("voice_language", "english!", "voice language"),
+        ("voice_language", "", "voice language"),
+        ("voice_language", None, "voice language"),
+    ],
+)
+def test_voice_metadata_refuses_credentials_and_names_only_the_field(
+    field, value, label
+):
+    metadata = {"voice_name": "Test voice", "voice_language": "en-US", field: value}
+    with pytest.raises(ValueError) as caught:
+        ElevenLabsProvider(KEY, voice="test-voice", **metadata)
+    message = str(caught.value)
+    assert label in message
+    assert KEY not in message
+    assert KEY_SHAPED not in message
+    assert caught.value.__cause__ is None
+
+
+@pytest.mark.parametrize(
+    "name,language", [("Test voice", "en"), ("Voix d'essai", "fr_CA"), (None, "de")]
+)
+def test_voice_metadata_accepts_display_names_and_language_tags(name, language):
+    provider = ElevenLabsProvider(
+        KEY, voice="test-voice", voice_name=name, voice_language=language
+    )
+    assert [(v.name, v.language) for v in provider.voices] == [
+        (name or "test-voice", language)
+    ]
+
+
+@pytest.mark.parametrize(
+    "variable", ["ELEVENLABS_VOICE_NAME", "ELEVENLABS_VOICE_LANGUAGE"]
+)
+def test_factory_refuses_a_credential_in_voice_metadata(variable, monkeypatch):
+    from assist_live_server.config import ProviderFactory, ServerConfig
+
+    monkeypatch.delenv("ELEVENLABS_ENABLE_LOGGING", raising=False)
+    monkeypatch.setenv("ELEVENLABS_API_KEY", KEY)
+    monkeypatch.setenv("ELEVENLABS_VOICE_ID", "test-voice")
+    monkeypatch.setenv("ELEVENLABS_VOICE_NAME", "Test voice")
+    monkeypatch.setenv("ELEVENLABS_VOICE_LANGUAGE", "en-US")
+    monkeypatch.setenv(variable, KEY)
+    with pytest.raises(ValueError) as caught:
+        asyncio.run(
+            ProviderFactory.load(
+                ServerConfig(
+                    stt_provider=None, tts_provider="elevenlabs", local_only=False
+                )
+            )
+        )
+    assert KEY not in str(caught.value)
+
+
+@pytest.mark.parametrize("name", [None, "", "Test voice"])
+def test_key_shaped_voice_identifier_never_reaches_the_voice_catalog(name):
+    with pytest.raises(ValueError) as caught:
+        ElevenLabsProvider(
+            KEY, voice=KEY_SHAPED, voice_name=name, voice_language="en-US"
+        )
+    assert "voice" in str(caught.value)
+    assert KEY_SHAPED not in str(caught.value)
+    assert caught.value.__cause__ is None
+
+
+@pytest.mark.parametrize("name", [None, ""])
+def test_ordinary_voice_identifier_is_the_fallback_display_name(name):
+    # A synthetic identifier with the 20-character shape of provider voice IDs.
+    voice = "a1B2c3D4e5F6g7H8i9J0"
+    provider = ElevenLabsProvider(
+        KEY, voice=voice, voice_name=name, voice_language="en"
+    )
+    assert [(v.id, v.name) for v in provider.voices] == [(voice, voice)]

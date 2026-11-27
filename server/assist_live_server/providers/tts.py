@@ -220,14 +220,23 @@ def provider_destination(name: str) -> Destination:
         raise ValueError(f"unknown TTS provider: {name}") from None
 
 
+class ElevenLabsLoggingError(ValueError):
+    """The ElevenLabs logging option is not `true` or `false`."""
+
+
 async def _load_elevenlabs(api_key: str) -> TTSProvider:
     from .elevenlabs import ElevenLabsProvider
 
+    setting = os.environ.get("ELEVENLABS_ENABLE_LOGGING", "true")
+    if setting not in {"true", "false"}:
+        raise ElevenLabsLoggingError("invalid ELEVENLABS_ENABLE_LOGGING option")
+    enable_logging = setting == "true"
     voice = os.environ.get("ELEVENLABS_VOICE_ID")
     if not voice:
-        return ElevenLabsProvider(api_key)
+        return ElevenLabsProvider(api_key, enable_logging=enable_logging)
     return ElevenLabsProvider(
         api_key,
+        enable_logging=enable_logging,
         voice=voice,
         voice_name=os.environ.get("ELEVENLABS_VOICE_NAME"),
         voice_language=os.environ.get("ELEVENLABS_VOICE_LANGUAGE"),

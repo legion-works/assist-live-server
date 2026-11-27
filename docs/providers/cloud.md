@@ -291,6 +291,18 @@ TLS is necessary. Numeric loopback endpoints for tests can use unencrypted conne
 Errors contain no provider response text. An error has no transport `__context__`.
 Logs, metrics, and close messages contain no credentials.
 
+Health serializes the configured ElevenLabs voice identifier, voice name, and language.
+Without a voice name, health gives the identifier as the name.
+
+The constructor refuses an identifier, a name, or a language that contains the API key or key-shaped text.
+Key-shaped text is `sk_` and 16 or more ASCII letters or digits.
+It is also a word of 32 or more ASCII letters, digits, `-`, or `_` that contains a digit.
+This rule is a heuristic. The server can accept a key with a different format, and it can refuse a long machine-style name.
+
+The voice name has a maximum of 128 printable characters.
+The language must be a language tag such as `en`, `en-US`, or `en_US`.
+The error names the field and does not contain its value.
+
 The Deepgram and OpenAI STT adapters refuse a transcript result that contains the configured API key.
 They examine all the text that a `partial` or `final` can contain, also when the key is in more than one result.
 The error is `Deepgram transcript refused` or `OpenAI transcript refused`, and the turn gives `stt_failed`.
@@ -357,6 +369,10 @@ The WebSocket API source above declares this query option:
 `ElevenLabsProvider` supplies `enable_logging=True` and sends that value explicitly.
 An explicit `False` sends `enable_logging=false`. This option does not give account eligibility.
 The default stays `True` until operator approval for a different default.
+The provider factory reads `ELEVENLABS_ENABLE_LOGGING` (`true` or `false`, default `true`) for this option.
+The provider documents that only select enterprise customers can use Zero Retention Mode.
+
+If ElevenLabs is the configured TTS provider, an invalid value stops the server with the diagnostic `invalid ELEVENLABS_ENABLE_LOGGING option`. The diagnostic does not contain the value.
 
 Source: [TTS API](https://elevenlabs.io/docs/api-reference/text-to-speech/convert.md).
 Retrieved: 2026-10-26T07:04:23Z (UTC). Source text from the `enable_logging` query parameter:

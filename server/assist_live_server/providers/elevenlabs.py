@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import json
+import re
 from collections import deque
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import suppress
@@ -26,6 +27,10 @@ STREAM_MARGIN_SECONDS = 10.0
 CHARACTERS_PER_SECOND = 8.0
 MAX_ALIGNMENT_CHARACTERS = 4096
 MAX_ALIGNMENT_BYTES = 65536
+# The same language tag rule as the OpenAI-compatible provider: en, en-US, en_US.
+LANGUAGE = re.compile(r"[a-z]{2,3}(?:[-_][A-Za-z0-9]{2,8}){0,3}")
+# A provider key prefix, or a long word with a digit that is not a display name.
+KEY_SHAPED = re.compile(r"sk_[A-Za-z0-9]{16,}|(?=[A-Za-z_-]*[0-9])[A-Za-z0-9_-]{32,}")
 
 
 class ElevenLabsError(RuntimeError):
@@ -75,15 +80,32 @@ class ElevenLabsProvider:
         self.voices: tuple[TTSVoice, ...] = ()
         self.default_voice = voice
         if voice is not None:
+            # Health serializes the identifier, the published name, and the
+            # language, so none of them can hold a credential.
             if (
                 not voice
                 or api_key in voice
+                or KEY_SHAPED.search(voice)
                 or not all(c.isascii() and (c.isalnum() or c in "-_") for c in voice)
             ):
                 raise ValueError("invalid ElevenLabs voice identifier")
-            if voice_language is None:
-                raise ValueError("ElevenLabs voice language required")
-            self.voices = (TTSVoice(voice, voice_name or voice, voice_language),)
+            # An unset or empty name publishes the identifier as the name.
+            name = voice_name or voice
+            if (
+                len(name) > 128
+                or not name.isprintable()
+                or api_key in name
+                or KEY_SHAPED.search(name)
+            ):
+                raise ValueError("invalid ElevenLabs voice name")
+            if (
+                voice_language is None
+                or not LANGUAGE.fullmatch(voice_language)
+                or api_key in voice_language
+                or KEY_SHAPED.search(voice_language)
+            ):
+                raise ValueError("invalid ElevenLabs voice language")
+            self.voices = (TTSVoice(voice, name, voice_language),)
         self.audio_format = TTSFormat("pcm_s16le", 16000, 1, 2)
 
     async def stream(

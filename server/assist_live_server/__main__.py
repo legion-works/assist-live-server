@@ -297,8 +297,10 @@ def main(argv: list[str] | None = None) -> int:
             else "FAIL server: startup configuration or model check failed"
         )
         from .config import EndRuleError
+        from .providers.tts import ElevenLabsLoggingError
 
-        if isinstance(error, EndRuleError):
+        # These messages are fixed text without configured values.
+        if isinstance(error, EndRuleError | ElevenLabsLoggingError):
             failure += ": " + str(error)
         elif isinstance(error, ModelDownloadLimitError):
             failure += ": " + error.reason
