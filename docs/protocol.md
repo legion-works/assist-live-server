@@ -435,9 +435,10 @@ If the start cannot write the credential file after this decision, the pending e
 If the file and the store do not agree in a different way, the server refuses events from that device and logs `credential_state_mismatch`.
 
 A device without a store row is correct only at file epoch 0. This is the state of a device that never rotated, also after an update from an earlier version.
+File epoch 0 without a store row is the legacy state. It does not prove that no rotation with an earlier version occurred.
 A nonzero file epoch without a store row can come from a database that you restored from an older backup. The server refuses events from that device and logs `credential_state_mismatch`.
 
-The server cannot find an older backup for a device at epoch 0. Restore the credential file and the database from the same point in time.
+The server cannot find an older backup for a device at epoch 0. Do not put a credential file or a database from a backup into service.
 Do not delete the database or clear replay state with the active secret.
 
 A refused device makes health give `healthy: false` and `unavailable.credentials: credential_blocked`. Maintenance and later writes do not clear this state. A rotation of a refused device gives an error and does not clear the state. Only a restart that resolves the device clears it.
@@ -446,22 +447,41 @@ To repair a refused device, find the cause in the log:
 
 - `credential_file_write_failed`: the start did not write the credential file. Repair the cause, for example the free space or the permissions of the data directory. Then restart the server. The start completes or removes the pending entry.
 - `credential_state_unknown` or `credential_publish_failed`: a rotation had an error. Restart the server. The start resolves the device from the committed epoch.
-- `credential_state_mismatch`: the credential file and the database do not agree. Stop the server. Copy back the credential file and the database from the same backup. Then start the server.
+- `credential_state_mismatch`: the credential file and the database do not agree. Do not start the server with these files. Do the recovery with a new data directory below. Isolate the server from all network hosts during the recovery.
 
 The backup must have a complete SQLite database. Make it from a database that the server closed correctly. You can also make a copy of one point in time that includes the committed data in the `-wal` file. A copy of only the main file can be without committed rows.
 
-A backup can have a previous key of the device. The server accepts the key of the backup from the start until a rotation of that key is complete. Use a backup only if its keys stay safe.
+In this release, it is not correct to put a backup into service as a recovery. A restore moves the replay window and the device-event rows back to the time of the backup. The server can then accept again an event that a device sent after that time. This occurs also when the keys of the backup stay secret. The server accepts the keys of the backup until a rotation of each key is complete.
 
-If a person or a log could have read a key in the backup, do not use that backup to start the service again. The only alternative is to isolate the server from the devices before the start. Then no device can send data to a TCP or UDP listener of the server. Keep the server isolated until the rotation of that key is complete.
+This release has no operator command that rotates a device key or removes a binding. `store.rotate` is an internal method of the server process. The command line and the HTTP routes do not use it. A new key also makes a firmware update of the device necessary, because ESPHome writes the key into the firmware when it builds it.
 
-The provisioning command does not repair a mismatch, because it refuses a satellite that the credential file has. The server has no other repair for `credential_state_mismatch`. Do not edit the database.
+The server authenticates a device message with its HMAC key. The server does not compare the message with the address of the host that sent it. Thus, a satellite that you disconnect does not prevent a replay. A different host can send previous messages of that satellite again. During each recovery, isolate the server from all network hosts, not only from the satellites. No host can then send data to a TCP or UDP listener of the server.
+
+This is the only correct recovery in this release. It uses new keys and a new data directory:
+
+1. Stop the server and isolate it from all network hosts.
+2. Keep the previous data directory offline. Do not start a server with the previous database or with a database from a backup.
+3. Make a new, empty data directory.
+4. For each satellite, run the provisioning command with the credential file of the new data directory. Use the device ID that the firmware of that satellite sends as the satellite name. The command makes a new device key and a new access token for that satellite. Do not copy a binding from the previous credential file into the new file.
+5. Use the local procedure with access control to set the new key of each device. Put it in `assist_live_hmac_key` in the external ESPHome `secrets.yaml` of that device. Then build the firmware again and install it on the device.
+6. Start the server with the new data directory. Let only the Home Assistant host connect to the server. The satellites stay disconnected.
+7. In Home Assistant, remove the assist-live entry. For each new access token, add an entry with that token and its satellite. The setup reads the bindings from the server. This release has no flow that changes the token of an entry.
+8. Connect the satellites to the server again.
+
+The new database has no device-event rows and no replay state. The previous keys are not in the new credential file, so the server refuses each message that has a previous key. The records of the previous data directory are not in the new data directory.
 
 A file without a `pending` entry has the format that earlier server versions read. Earlier versions ignore the `pending` and `epoch` fields and use the `secret` field.
-Thus an earlier version uses the previous key while a pending entry exists, also when the store has committed the rotation. A rotation with an earlier version does not change the store row, so the next start of this version refuses that device.
+Thus an earlier version uses the previous key while a pending entry exists, also when the store has committed the rotation. A rotation with an earlier version changes the `secret` field. It does not change the `epoch` field or the store row.
+
+If a pending entry agrees with the committed state, the next start of this version first makes that pending entry the active key. A device can have a store row that no pending entry agrees with. If the active key also does not agree with the row, the next start of this version refuses that device. If the device has file epoch 0 and no store row, the next start of this version accepts the new key of the file. This is the same as for a device without a rotation.
+
 Before you install an earlier version, stop the server and run `assist-live-server --check-credentials` with the same `ASSIST_LIVE_DATA` directory. Keep the server stopped until the earlier version starts.
+From the check until the earlier version starts, only you can use the data directory, and its files must not change. No other process can write, checkpoint, move, or remove the credential file, the database, its symbolic link, or its journal files in this time. The check copies the files one at a time. It does not make one snapshot of all the files.
 
 The command reads the credential file and the `credential_state` rows of the database. It copies the database and its `-wal`, `-shm`, and `-journal` files to a private temporary directory. Then it opens the copy with the usual SQLite recovery and removes the copy. If the database path is a symbolic link, the command uses the files at the destination of the symbolic link, as the server does. The command does not change the files in the data directory.
 A database without the `credential_state` table has no rows.
+
+A database file that is not there has no rows. A different read error, for example a directory without access permission, gives exit code 1 and `FAIL credentials: credential file or database unreadable`. A journal file that is not there is not copied. A different read error of a journal file gives the same result.
 
 For each device, the command makes the same decision as a start. It gives exit code 0 and `PASS credentials: no pending entry or credential state mismatch` only when the start does not change or refuse a device.
 If the start changes or refuses a device, the command gives exit code 1. For each satellite that has a problem, it gives the identifier and the cause, `pending` or `credential_state_mismatch`. It gives no more than 20 satellites and then the number of the other satellites. It does not show keys.

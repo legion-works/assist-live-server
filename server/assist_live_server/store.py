@@ -200,17 +200,19 @@ def read_committed_states(
     # SQLite opens the destination of a symbolic link and finds the journal
     # files beside that destination, so the check uses the same files.
     source = Path(os.path.realpath(path))
-    if not source.exists():
-        return states, set()
     # Each read-only open can still make or rebuild a "-shm" file. A private
     # copy with the usual connection gets the usual WAL and journal recovery,
     # and the original files do not change.
     with tempfile.TemporaryDirectory(prefix="assist-live-check-") as scratch:
         copy = Path(scratch) / "turns.sqlite3"
         for suffix in ("", "-wal", "-shm", "-journal"):
-            if suffix and not Path(f"{source}{suffix}").exists():
-                continue
-            shutil.copyfile(f"{source}{suffix}", f"{copy}{suffix}")
+            # Only a missing file is absent. A different read error, for
+            # example no permission, must not hide stored credential rows.
+            try:
+                shutil.copyfile(f"{source}{suffix}", f"{copy}{suffix}")
+            except FileNotFoundError:
+                if not suffix:
+                    return states, set()
         connection = connect(copy)
         try:
             try:

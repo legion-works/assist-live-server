@@ -5262,3 +5262,29 @@ With the repair, the rotation tests gave `36 passed`. A scratch change that foun
 The protocol document says to use a backup only if its keys stay safe. If a person or a log could have read a key in the backup, do not use that backup. The only alternative is to isolate the server from the devices from the start until the rotation of that key is complete.
 
 The full suite on an isolated runner gave `20 failed, 3002 passed, 1 skipped`. That runner had no Git history, IPv6 loopback, or model cache setting for 19 of these tests. On a host with these items, those tests and their files gave `151 passed`. The other failure was `test_every_protocol_error_raise_has_an_explicit_valid_kind`. This change does not change the client files that the test reads, and its file gave `123 passed` three times on a different host. The bootstrap, package, and asset checks gave exit code 0.
+
+## Credential check: read errors, and restore with replay rollback (2026-11-28 UTC)
+
+A third review found these problems in the version at `2e12d56`:
+
+- The check used `Path.exists()` for the database and its journal files. On Python 3.14, this function gives `False` for a path that it cannot read and for a path that is not there. Thus a database behind a directory without access permission was a missing database, and the check gave a PASS for devices at epoch 0. A server start cannot open that database, and the database can have credential rows.
+- The protocol document said that a backup is safe if its keys stay secret. A restore also moves the replay window and the device-event rows back. Thus the server can accept again an event that a device sent after the time of the backup.
+- The protocol document said that each rotation with an earlier version causes a refusal at the next start. For a device at file epoch 0 without a store row, the start accepts the new key of the file.
+
+With the repair, the check copies the database and each journal file and ignores only a file that is not there. A different read error stops the check with exit code 1 and `FAIL credentials: credential file or database unreadable`.
+
+The protocol document says that it is not correct to put a backup into service as a recovery in this release. The only correct recovery uses a new data directory and new keys. The repair of `credential_state_mismatch` refers to this recovery.
+
+Stop the server and isolate it from all network hosts, because the server does not compare a device message with the address of the sender. Keep the previous data directory offline. Provision each satellite into a new credential file, without a binding from the previous file. Put each new key into the device firmware, build the firmware again, and install it. Start the server with only the Home Assistant host connected. Add one Home Assistant entry for each new access token. Then connect the satellites.
+
+The document also says these items. A pending entry that agrees with the committed state becomes active first. After a rotation with an earlier version, the start refuses a device only if no pending entry agrees with its store row and its active key also does not agree with that row. The check does not copy one snapshot of all files. Thus, from the check until the earlier version starts, no other process can write, checkpoint, move, or remove the data files.
+
+Known limit: this release has no offline operator command that rotates a device key or removes a binding. `store.rotate` is an internal method of the server process.
+
+The new test has four cases. The database path is a symbolic link into a directory without access permission, a symbolic link through a file, or a symbolic link to itself. In the fourth case, the `-wal` path is a symbolic link to itself. For the three database cases, a server start also gives an error. The test skips the case without access permission for the root user. The tests for a database that is not there and for a correct symbolic link did not change.
+
+On the previous version, the new test gave `4 failed, 36 passed` for the rotation tests. Each case gave `assert 0 == 1` with a PASS output.
+
+With the repair, the rotation tests gave `40 passed`. A scratch change that ignored each `OSError` and not only `FileNotFoundError` gave `4 failed`.
+
+The full suite on an isolated runner gave `20 failed, 3006 passed, 1 skipped`. That runner had no Git history, IPv6 loopback, or model cache setting. On a host with these items, the files of the 20 tests gave `484 passed`. The format, lint, type, bootstrap, package, and asset checks gave exit code 0.

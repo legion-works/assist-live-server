@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import sqlite3
 
 import pytest
@@ -657,6 +658,56 @@ def test_check_credentials_reads_wal_at_symlink_destination(
     assert (data / "turns.sqlite3").is_symlink()
     # A server start on a copy refuses the same device.
     assert start_copy(root, tmp_path, "data") == ["satellite-a"]
+
+
+@pytest.mark.parametrize(
+    "fault", ["no_permission", "not_a_directory", "loop", "journal_loop"]
+)
+def test_check_credentials_fails_when_database_path_is_unreadable(
+    tmp_path, monkeypatch, capsys, fault
+):
+    from assist_live_server.__main__ import main
+    from assist_live_server.auth import Registry
+    from assist_live_server.store import SQLiteStore
+
+    root = tmp_path / "root"
+    data = root / "data"
+    data.mkdir(parents=True)
+    monkeypatch.setenv("ASSIST_LIVE_DATA", str(data))
+    registry = Registry(data / "registry.json")
+    registry.bind("device-a", "satellite-a", OLD)
+    link = data / "turns.sqlite3"
+    if fault == "no_permission":
+        if os.geteuid() == 0:
+            pytest.skip("root can read a directory without permissions")
+        (root / "real").mkdir()
+        SQLiteStore(root / "real" / "turns.sqlite3").close()
+        link.symlink_to("../real/turns.sqlite3")
+        (root / "real").chmod(0)
+    elif fault == "not_a_directory":
+        (root / "real").write_bytes(b"")
+        link.symlink_to("../real/turns.sqlite3")
+    elif fault == "loop":
+        link.symlink_to("turns.sqlite3")
+    else:
+        SQLiteStore(link).close()
+        (data / "turns.sqlite3-wal").symlink_to("turns.sqlite3-wal")
+    try:
+        # The database can hold credential rows that the check cannot read,
+        # so the check must not give PASS for epoch-zero devices.
+        assert main(["--check-credentials"]) == 1
+        output = capsys.readouterr().out
+        assert output.startswith(
+            "FAIL credentials: credential file or database unreadable"
+        )
+        assert OLD.hex() not in output
+        if fault != "journal_loop":
+            # A server start also cannot open the database.
+            with pytest.raises((OSError, sqlite3.Error)):
+                asyncio.run(data_start(data))
+    finally:
+        if fault == "no_permission":
+            (root / "real").chmod(0o700)
 
 
 def test_check_credentials_reads_wal_without_shm_and_adds_no_file(
