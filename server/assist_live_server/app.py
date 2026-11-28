@@ -383,7 +383,8 @@ def create_app(
         )
         if timing_store_failed:
             unavailable["timing_store"] = "timing_store_failed"
-        # Only a later rotation or a restart clears a blocked credential.
+        # Only a restart that resolves the device clears a blocked credential.
+        # The store refuses a rotation of a blocked device.
         credentials_blocked = bool(registry.blocked_devices())
         if credentials_blocked:
             unavailable["credentials"] = "credential_blocked"

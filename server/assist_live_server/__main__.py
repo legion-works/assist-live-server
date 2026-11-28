@@ -28,6 +28,8 @@ DOWNLOAD_DEADLINE = 120.0
 DOWNLOAD_SOCKET_TIMEOUT = 120.0
 DOWNLOAD_MIN_BYTES_PER_SECOND = 256 * 1024
 LOGGER = logging.getLogger(__name__)
+# The credential check names at most this number of satellites.
+CHECK_OUTPUT_LIMIT = 20
 
 
 class ModelDownloadLimitError(ValueError):
@@ -283,14 +285,21 @@ def main(argv: list[str] | None = None) -> int:
                         raise ValueError("health response invalid") from None
             print("PASS server: health checked")
         elif args.check_credentials:
+            from .store import check_credentials
+
             data = Path(os.environ.get("ASSIST_LIVE_DATA", "/data"))
-            # Read only: an earlier server version uses the previous key of a
-            # pending entry, so a downgrade must wait until none remains.
-            pending = Registry.load(data / "registry.json").pending_satellites()
-            if pending:
-                print("FAIL credentials: pending entry: " + ", ".join(pending))
+            # Read only: an earlier server version does not check the store, so
+            # a downgrade must wait until each device passes the start check.
+            faults = check_credentials(data)
+            if faults:
+                entries = [
+                    f"{name}: {reason}" for name, reason in faults[:CHECK_OUTPUT_LIMIT]
+                ]
+                if len(faults) > CHECK_OUTPUT_LIMIT:
+                    entries.append(f"{len(faults) - CHECK_OUTPUT_LIMIT} more")
+                print("FAIL credentials: " + ", ".join(entries))
                 return 1
-            print("PASS credentials: no pending entry")
+            print("PASS credentials: no pending entry or credential state mismatch")
         elif args.fetch_models:
             cache = Path(os.environ.get("ASSIST_LIVE_MODEL_CACHE", "/data/cache"))
             fetch_plan(
@@ -305,7 +314,7 @@ def main(argv: list[str] | None = None) -> int:
         failure = (
             "FAIL health: server unavailable or health response invalid"
             if args.healthcheck
-            else "FAIL credentials: credential file unreadable"
+            else "FAIL credentials: credential file or database unreadable"
             if args.check_credentials
             else "FAIL server: startup configuration or model check failed"
         )

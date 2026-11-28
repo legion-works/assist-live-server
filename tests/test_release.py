@@ -271,6 +271,36 @@ def test_wheel_is_model_free_and_reports_dependencies(tmp_path):
     assert checker().check_wheel(wheel)[0]
 
 
+def test_built_client_wheel_has_type_marker_and_passes_check(tmp_path):
+    import tomllib
+
+    subprocess.run(
+        [
+            "uv",
+            "build",
+            "--offline",
+            "--wheel",
+            "--package",
+            "assist-live-client",
+            "--out-dir",
+            str(tmp_path),
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+    )
+    version = tomllib.loads((ROOT / "client/pyproject.toml").read_text())["project"][
+        "version"
+    ]
+    (wheel,) = tmp_path.glob("*.whl")
+    with zipfile.ZipFile(wheel) as archive:
+        # PEP 561: the marker tells type checkers to use the inline annotations.
+        assert archive.read("assist_live_client/py.typed") == b""
+    errors, dependencies = checker().check_wheel(wheel, version)
+    assert errors == []
+    assert dependencies == ["aiohttp<4,>=3.14.4"]
+
+
 def test_cli_failure_has_named_lines_without_traceback(tmp_path):
     result = subprocess.run(
         [

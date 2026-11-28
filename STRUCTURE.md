@@ -30,6 +30,7 @@ The root Python project is a uv workspace. It installs the two Python packages f
 - `client/assist_live_client/client.py`: asynchronous client methods.
 - `client/assist_live_client/models.py`: shared turn and timing records.
 - `client/assist_live_client/protocol.py`: bounded JSON and audio codecs.
+- `client/assist_live_client/py.typed`: empty PEP 561 marker for type checkers.
 - `tests/contract/conftest.py`: isolated service fixtures.
 - `tests/contract/test_protocol.py`: byte-layout and client contracts.
 - `tests/contract/test_auth.py`: authentication, mapping, and replay tests.

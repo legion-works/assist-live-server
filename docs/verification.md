@@ -5186,3 +5186,79 @@ The full suite on an isolated runner gave `2967 passed, 17 failed, 1 skipped`.
 The runner had no Git history or IPv6 loopback. These limits caused 16 failures.
 The second client bindings test on the same runner gave no error.
 On a runner with Git history and IPv6 loopback, these tests gave `17 passed`.
+
+## Credential check before a downgrade, repair of refused devices, and client type marker (2026-11-28 UTC)
+
+On base `96d4e37`, `--check-credentials` read only the credential file. A start of that version refuses a device when the file has a nonzero epoch and the database has no `credential_state` row for it. It also refuses a device when that row has a different epoch or fingerprint. For such a device without a pending entry, the check gave exit code 0. An earlier version then uses the file key without the epoch check.
+
+With this change, the check makes the same decision as a start for each device. It opens the database read-only and does not make tables. A database without the `credential_state` table has no rows. If the data directory has no `-wal` file, the connection is immutable, so SQLite makes no `-wal` or `-shm` file. The check gives exit code 1 and names each satellite with the cause `pending` or `credential_state_mismatch`. It does not show keys.
+
+The new tests examine a missing row, a different epoch, and a different fingerprint, each without a pending entry. They also examine a pending entry with and without a committed rotation. A start with the same files refuses the same satellite.
+Three cases with clean data from an earlier version give exit code 0. The cases are no database, a database without the `credential_state` table, and a database with the table but no rows. In each case, the SHA-256 of each file in the data directory does not change.
+
+On base `96d4e37`, the rotation and release tests gave `6 failed, 67 passed`. The three refused-device cases gave `assert 0 == 1`. The two pending cases gave a failure on the new output format. The wheel test gave `KeyError` for `assist_live_client/py.typed`.
+
+With the change, the same files gave `73 passed`. A scratch change that reported only pending entries gave `3 failed`. A scratch change that always used the usual read-only connection gave `5 failed`: SQLite made `-wal` and `-shm` files.
+
+The record "Credential rotation and SQL transaction failures" says that a rotation clears a refused device. That is not correct. The store refuses a rotation of a refused device, and this change keeps that refusal. Only a restart that resolves the device clears it. The protocol document gives the repair for each cause:
+
+- If the start did not write the credential file, repair the cause and restart. A test shows that the restart completes the rotation.
+- If the database and the credential file do not agree, copy back the two files from the same backup. A test copies back only the database, and the device stays refused. Then it copies back the credential file from the same backup, and the next start accepts the device.
+
+The provisioning command does not repair a mismatch, because it refuses a satellite that the credential file has. Without a backup of the two files from the same time, the server has no repair for a mismatch.
+
+The client wheel has the empty `py.typed` marker. The test builds the wheel, reads the marker, and gives the wheel to the release check, which gives no errors.
+
+The records "End-decision sample count", "Release checks and cloud STT keys", and "Turn detection setting" are from 2026-11-27 UTC.
+
+The full suite on an isolated runner gave `20 failed, 2996 passed, 1 skipped`. That runner had no Git history, IPv6 loopback, or model cache. On a host with these items, the same 20 tests gave no failures. The bootstrap, package, and asset checks gave exit code 0.
+
+## Credential check: journal files, symbolic links, and satellite names (2026-11-28 UTC)
+
+A security review of the credential check in the record above found these problems:
+
+- The check looked for a `-wal` file adjacent to the name in the data directory. SQLite uses the destination of a symbolic link and the journal files adjacent to that destination. Without a `-wal` file, the check used an immutable connection, which does not read a WAL. Thus a committed row in the WAL at the destination did not change the result. The check then gave a PASS for a device that the start refuses.
+- A read-only connection can make or rebuild a `-shm` file.
+- The check printed the satellite names from the credential file without validation. A damaged file can put control characters or a key in a name. The output also had no limit.
+- The test for data from an earlier version used a schema that the start does not accept.
+
+With the repair, the check finds the database like SQLite does at start. It copies the database and its `-wal`, `-shm`, and `-journal` files into a private temporary directory with mode 700. It opens the copy with the usual connection, so SQLite does the usual recovery. Then it removes the directory.
+
+The check reads the rows with the SQL statement of the start. Only a missing `credential_state` table gives no rows. Other SQLite errors stop the check with exit code 1.
+
+The check accepts only satellite names that agree with the identifier rule of the client and of `Registry.bind`. For other names, it shows `invalid satellite id` and gives exit code 1. It shows no more than 20 satellites and then the number of the other satellites.
+
+The new tests use a stopped database. Its `-wal` file keeps a committed row that is not in the main file. In one test, the data directory has a symbolic link to the database. In the other test, the directory has the `-wal` file but no `-shm` file. The two tests compare the SHA-256 of each file and the list of files before and after the check.
+
+A server start on a copy of the files gives the same decision as the check. The test for data from an earlier version uses the current schema without the `credential_state` table. A server start on a copy accepts the same credentials.
+
+On the previous version, the new tests gave `4 failed, 9 passed`. The symbolic link test gave `assert 0 == 1`. The test without a `-shm` file found a new `turns.sqlite3-shm` file. The name test gave `assert 0 == 1`, and the limit test found 25 names.
+
+With the repair, the rotation tests gave `34 passed`. A scratch change that used the path without the symbolic link destination gave `1 failed`. A scratch change that removed the name check gave `1 failed`.
+
+The protocol document also says these items:
+
+- A backup must have a complete SQLite database. This is a database that the server closed correctly, or a copy of one point in time with the committed WAL data.
+- If a person or a log could have read a key in the backup, do a rotation of that key immediately after the start.
+- Keep the server stopped until the earlier version starts, and run the check again after each repair.
+
+The full suite on an isolated runner gave `21 failed, 2999 passed, 1 skipped`. That runner had no Git history, IPv6 loopback, or model cache setting for 20 of these tests. On a host with these items, the 20 tests and their files gave `151 passed`. The other failure was `test_http_status_error_kind[True-401-health-GET-/health]`. Its file gave `123 passed` three times on a different host. The bootstrap, package, and asset checks gave exit code 0.
+
+## Credential check: row lookup and credential values in names (2026-11-28 UTC)
+
+A second security review found two problems in the record above:
+
+- The record says that the check reads the rows with the SQL statement of the start. That is not correct. The check read all rows and then found each device by the same text in Python. The start uses `WHERE device=?`, and SQLite compares with the collation of the column. A database from a backup can have a compatible table with a device column that ignores case. Then the start found a row of a different epoch, but the check used the legacy state and gave a PASS.
+- The identifier rule accepts hexadecimal text. Thus a satellite name can be equal to a device key or a fingerprint, and the check printed it for a refused device.
+
+With the repair, the start and the check use one function for the row lookup of each device. It has the same parameterized SQL statement and the same conversion. The check shows `device N` and not a name that contains a device key, a pending key, a token, or a fingerprint. N is the position of the device in the credential file. The check ignores case when it compares the name with these values. The check also shows `device N` for a name that is not a correct identifier.
+
+One new test makes a database with `COLLATE NOCASE` on the device column. Its row has the name of a device at epoch 0 in a different case. A server start on a copy refuses the device, and the check gives exit code 1. A second new test gives refused devices names that are equal to a device key, a stored fingerprint, and a token. These names are not in the output, and a usual name of a refused device is in the output.
+
+On the previous version, the two new tests gave `2 failed`. The collation test gave `assert 0 == 1`, and the name test found the device key in the output.
+
+With the repair, the rotation tests gave `36 passed`. A scratch change that found the rows by the same text in Python gave `1 failed`. A scratch change that did not compare names with credential values gave `1 failed`.
+
+The protocol document says to use a backup only if its keys stay safe. If a person or a log could have read a key in the backup, do not use that backup. The only alternative is to isolate the server from the devices from the start until the rotation of that key is complete.
+
+The full suite on an isolated runner gave `20 failed, 3002 passed, 1 skipped`. That runner had no Git history, IPv6 loopback, or model cache setting for 19 of these tests. On a host with these items, those tests and their files gave `151 passed`. The other failure was `test_every_protocol_error_raise_has_an_explicit_valid_kind`. This change does not change the client files that the test reads, and its file gave `123 passed` three times on a different host. The bootstrap, package, and asset checks gave exit code 0.

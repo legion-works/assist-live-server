@@ -440,14 +440,36 @@ A nonzero file epoch without a store row can come from a database that you resto
 The server cannot find an older backup for a device at epoch 0. Restore the credential file and the database from the same point in time.
 Do not delete the database or clear replay state with the active secret.
 
-A refused device makes health give `healthy: false` and `unavailable.credentials: credential_blocked`. Maintenance and later writes do not clear this state. Only a later rotation of that device or a restart that resolves the device clears it.
+A refused device makes health give `healthy: false` and `unavailable.credentials: credential_blocked`. Maintenance and later writes do not clear this state. A rotation of a refused device gives an error and does not clear the state. Only a restart that resolves the device clears it.
+
+To repair a refused device, find the cause in the log:
+
+- `credential_file_write_failed`: the start did not write the credential file. Repair the cause, for example the free space or the permissions of the data directory. Then restart the server. The start completes or removes the pending entry.
+- `credential_state_unknown` or `credential_publish_failed`: a rotation had an error. Restart the server. The start resolves the device from the committed epoch.
+- `credential_state_mismatch`: the credential file and the database do not agree. Stop the server. Copy back the credential file and the database from the same backup. Then start the server.
+
+The backup must have a complete SQLite database. Make it from a database that the server closed correctly. You can also make a copy of one point in time that includes the committed data in the `-wal` file. A copy of only the main file can be without committed rows.
+
+A backup can have a previous key of the device. The server accepts the key of the backup from the start until a rotation of that key is complete. Use a backup only if its keys stay safe.
+
+If a person or a log could have read a key in the backup, do not use that backup to start the service again. The only alternative is to isolate the server from the devices before the start. Then no device can send data to a TCP or UDP listener of the server. Keep the server isolated until the rotation of that key is complete.
+
+The provisioning command does not repair a mismatch, because it refuses a satellite that the credential file has. The server has no other repair for `credential_state_mismatch`. Do not edit the database.
 
 A file without a `pending` entry has the format that earlier server versions read. Earlier versions ignore the `pending` and `epoch` fields and use the `secret` field.
 Thus an earlier version uses the previous key while a pending entry exists, also when the store has committed the rotation. A rotation with an earlier version does not change the store row, so the next start of this version refuses that device.
-Before you install an earlier version, stop the server and run `assist-live-server --check-credentials` with the same `ASSIST_LIVE_DATA` directory.
+Before you install an earlier version, stop the server and run `assist-live-server --check-credentials` with the same `ASSIST_LIVE_DATA` directory. Keep the server stopped until the earlier version starts.
 
-The command reads the credential file only. It gives exit code 0 and `PASS credentials: no pending entry` when no pending entry stays. Otherwise it gives exit code 1 and the satellite identifiers with a pending entry. It does not show keys.
-Install the earlier version only after the command gives exit code 0. If it gives exit code 1, start this version again and repair the cause of the file-write error first.
+The command reads the credential file and the `credential_state` rows of the database. It copies the database and its `-wal`, `-shm`, and `-journal` files to a private temporary directory. Then it opens the copy with the usual SQLite recovery and removes the copy. If the database path is a symbolic link, the command uses the files at the destination of the symbolic link, as the server does. The command does not change the files in the data directory.
+A database without the `credential_state` table has no rows.
+
+For each device, the command makes the same decision as a start. It gives exit code 0 and `PASS credentials: no pending entry or credential state mismatch` only when the start does not change or refuse a device.
+If the start changes or refuses a device, the command gives exit code 1. For each satellite that has a problem, it gives the identifier and the cause, `pending` or `credential_state_mismatch`. It gives no more than 20 satellites and then the number of the other satellites. It does not show keys.
+
+A satellite name in the credential file that is not a correct identifier also gives exit code 1. The command then shows `device N` and `invalid satellite id`, where N is the position of the device in the credential file.
+Some names contain a key, a token, or a fingerprint from the credential file or the database. For these names, the command also shows `device N` and not the name.
+
+Install the earlier version only after the command gives exit code 0. For `pending`, start this version again: the start completes or removes the pending entry. For `credential_state_mismatch`, repair the device as specified above. After each repair, stop the server and run the command again.
 Keep credentials out of logs and command arguments.
 
 Queue entries keep an immutable credential-generation snapshot. The writer refuses an entry from a revoked generation.

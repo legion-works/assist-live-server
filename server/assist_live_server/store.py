@@ -2,7 +2,10 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
+import shutil
 import sqlite3
+import tempfile
 import time
 import unicodedata
 from collections import Counter
@@ -141,6 +144,140 @@ def safe_data(event: TimingEvent, transcript: bool = False) -> dict[str, object]
     return data
 
 
+def committed_state(
+    row: tuple[int, str] | None, active: Credential
+) -> tuple[int, str] | None:
+    if row is not None:
+        return row
+    if active.epoch == 0:
+        # A device that never rotated has no row: keep its legacy key.
+        return 0, fingerprint(active.secret)
+    # A file epoch without a row can come from a database restored from an
+    # older backup. Its replay state can then belong to a different key.
+    return None
+
+
+def start_decision(
+    committed: tuple[int, str] | None,
+    active: Credential,
+    pending: dict[str, Any] | None,
+) -> str:
+    """Give the start result for one device: promote, drop, keep, or refuse."""
+    if pending is not None and committed == (
+        pending["epoch"],
+        fingerprint(bytes.fromhex(pending["secret"])),
+    ):
+        return "promote"
+    if committed != (active.epoch, fingerprint(active.secret)):
+        return "credential_state_mismatch"
+    return "keep" if pending is None else "drop"
+
+
+def committed_lookup(
+    connection: sqlite3.Connection, device: str, active: Credential
+) -> tuple[int, str] | None:
+    """Read the committed state of one device with the SQL of the start."""
+    # The comparison uses the collation of the device column, so the start and
+    # the credential check must use this same parameterized statement.
+    row = connection.execute(
+        "SELECT epoch, fingerprint FROM credential_state WHERE device=?",
+        (device,),
+    ).fetchone()
+    return committed_state(None if row is None else (int(row[0]), str(row[1])), active)
+
+
+def read_committed_states(
+    path: Path, registry: Registry
+) -> tuple[dict[str, tuple[int, str] | None], set[str]]:
+    """Give the committed state of each device and each stored fingerprint.
+
+    The database files do not change.
+    """
+    states = {
+        device: committed_state(None, active)
+        for device, active in registry.credentials.items()
+    }
+    # SQLite opens the destination of a symbolic link and finds the journal
+    # files beside that destination, so the check uses the same files.
+    source = Path(os.path.realpath(path))
+    if not source.exists():
+        return states, set()
+    # Each read-only open can still make or rebuild a "-shm" file. A private
+    # copy with the usual connection gets the usual WAL and journal recovery,
+    # and the original files do not change.
+    with tempfile.TemporaryDirectory(prefix="assist-live-check-") as scratch:
+        copy = Path(scratch) / "turns.sqlite3"
+        for suffix in ("", "-wal", "-shm", "-journal"):
+            if suffix and not Path(f"{source}{suffix}").exists():
+                continue
+            shutil.copyfile(f"{source}{suffix}", f"{copy}{suffix}")
+        connection = connect(copy)
+        try:
+            try:
+                digests = {
+                    str(digest)
+                    for (digest,) in connection.execute(
+                        "SELECT fingerprint FROM credential_state"
+                    )
+                }
+            except sqlite3.OperationalError as error:
+                # The start makes this table when it is not there: no rows.
+                if str(error) != "no such table: credential_state":
+                    raise
+                return states, set()
+            for device, active in registry.credentials.items():
+                states[device] = committed_lookup(connection, device, active)
+        finally:
+            connection.close()
+    return states, digests
+
+
+def check_credentials(data: Path) -> list[tuple[str, str]]:
+    """Give each satellite that the start would change or refuse, with the cause.
+
+    A satellite label that is not safe to show becomes "device N", with the
+    position of the device in the credential file.
+    """
+    registry = Registry.load(data / "registry.json")
+    states, digests = read_committed_states(data / "turns.sqlite3", registry)
+    # The file is not validated when it loads, so a label can hold any text,
+    # also a key that is in a different field. A label that contains a
+    # credential value or a fingerprint is not shown.
+    hidden = set(digests) | set(registry.tokens)
+    for device, row in registry.devices.items():
+        active = registry.credentials[device]
+        hidden.update((active.secret.hex(), fingerprint(active.secret)))
+        if isinstance(pending := row.get("pending"), dict):
+            secret = str(pending.get("secret", ""))
+            hidden.add(secret)
+            with contextlib.suppress(ValueError):
+                hidden.add(fingerprint(bytes.fromhex(secret)))
+    hidden = {value.lower() for value in hidden if value}
+    faults: list[tuple[str, str]] = []
+    for position, (device, row) in enumerate(registry.devices.items(), start=1):
+        active = registry.credentials[device]
+        try:
+            label = identifier(active.satellite)
+            valid = True
+        except ValueError:
+            valid = False
+        if valid and not any(value in label.lower() for value in hidden):
+            name = label
+        else:
+            name = f"device {position}"
+        decision = start_decision(states[device], active, row.get("pending"))
+        if decision != "keep":
+            # Only a start of this version promotes or removes a pending entry.
+            # An earlier version ignores the entry and uses the previous key.
+            reason = "pending" if decision in {"promote", "drop"} else decision
+            faults.append(
+                (name, reason if valid else f"{reason} (invalid satellite id)")
+            )
+        elif not valid:
+            faults.append((name, "invalid satellite id"))
+    return sorted(faults)
+
+
 class SQLiteStore:
     def __init__(
         self,
@@ -241,37 +378,23 @@ class SQLiteStore:
                 registry.replay[device] = state
 
     def _committed(self, device: str, active: Credential) -> tuple[int, str] | None:
-        row = self.connection.execute(
-            "SELECT epoch, fingerprint FROM credential_state WHERE device=?",
-            (device,),
-        ).fetchone()
-        if row is not None:
-            return int(row[0]), str(row[1])
-        if active.epoch == 0:
-            # A device that never rotated has no row: keep its legacy key.
-            return 0, fingerprint(active.secret)
-        # A file epoch without a row can come from a database restored from an
-        # older backup. Its replay state can then belong to a different key.
-        return None
+        return committed_lookup(self.connection, device, active)
 
     def _resolve_credential(self, registry: Registry, device: str) -> None:
-        row = registry.devices[device]
+        pending = registry.devices[device].get("pending")
         active = registry.credentials[device]
-        committed = self._committed(device, active)
-        pending = row.get("pending")
-        if pending is not None:
-            secret = bytes.fromhex(pending["secret"])
-            if committed == (pending["epoch"], fingerprint(secret)):
-                registry._publish(device, secret, pending["epoch"])
-                try:
-                    registry._promote_pending(device)
-                except OSError:
-                    self._refuse(registry, device, "credential_file_write_failed")
-                return
-        if committed != (active.epoch, fingerprint(active.secret)):
-            self._refuse(registry, device, "credential_state_mismatch")
-            return
-        if pending is not None:
+        decision = start_decision(self._committed(device, active), active, pending)
+        if decision == "promote" and pending is not None:
+            registry._publish(
+                device, bytes.fromhex(pending["secret"]), pending["epoch"]
+            )
+            try:
+                registry._promote_pending(device)
+            except OSError:
+                self._refuse(registry, device, "credential_file_write_failed")
+        elif decision == "credential_state_mismatch":
+            self._refuse(registry, device, decision)
+        elif decision == "drop":
             try:
                 registry._drop_pending(device)
             except OSError:
