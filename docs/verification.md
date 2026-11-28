@@ -5288,3 +5288,13 @@ On the previous version, the new test gave `4 failed, 36 passed` for the rotatio
 With the repair, the rotation tests gave `40 passed`. A scratch change that ignored each `OSError` and not only `FileNotFoundError` gave `4 failed`.
 
 The full suite on an isolated runner gave `20 failed, 3006 passed, 1 skipped`. That runner had no Git history, IPv6 loopback, or model cache setting. On a host with these items, the files of the 20 tests gave `484 passed`. The format, lint, type, bootstrap, package, and asset checks gave exit code 0.
+
+## SQLite setup, credential recovery, and ElevenLabs app options (2026-11-28 UTC)
+
+On base `8f98593`, a start with an unreadable `-wal` file gave `ResourceWarning` for an open connection. An error during replay table setup gave the same warning. After a commit error, a `MemoryError` from the recovery read went to the caller. The previous key stayed active. The app did not set `ELEVENLABS_ENABLE_LOGGING`.
+
+The store closes its connection on a setup error. After a commit error, a `MemoryError` in the recovery read causes the server to refuse device events. The server reports `credential_state_unknown`. The app sets `ELEVENLABS_ENABLE_LOGGING` to `true` or `false` when you set `elevenlabs_enable_logging`. If you do not set this option, the app does not set `ELEVENLABS_ENABLE_LOGGING`.
+
+The store, startup, app, release, and ElevenLabs test files gave `262 passed`. Three changes in a test copy caused test failures. Without connection cleanup, two tests gave `ResourceWarning`. Without the `MemoryError` handler, the recovery test gave `MemoryError`. Without the app mapping, the two tests with an explicit value gave `KeyError`.
+
+The full suite on an isolated runner gave `16 failed, 3016 passed, 1 skipped`. This runner had no Git metadata or IPv6 loopback. On a runner with these two items, the same 16 tests gave `16 passed`. The bootstrap, contract, package, and asset checks gave exit code 0.

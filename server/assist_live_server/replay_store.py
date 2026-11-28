@@ -11,9 +11,13 @@ def connect(path: Path) -> sqlite3.Connection:
     fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
     os.close(fd)
     connection = sqlite3.connect(path, isolation_level=None, timeout=0.05)
-    connection.execute("PRAGMA journal_mode=WAL")
-    connection.execute("PRAGMA synchronous=NORMAL")
-    connection.execute("PRAGMA wal_autocheckpoint=0")
+    try:
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute("PRAGMA synchronous=NORMAL")
+        connection.execute("PRAGMA wal_autocheckpoint=0")
+    except BaseException:
+        connection.close()
+        raise
     return connection
 
 

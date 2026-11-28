@@ -309,11 +309,22 @@ class SQLiteStore:
         self.writer = ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="timing-writer"
         )
-        self.writer.submit(self._initialize).result()
+        try:
+            self.writer.submit(self._initialize).result()
+        except BaseException:
+            self.writer.shutdown(wait=True)
+            raise
 
     def _initialize(self) -> None:
         self.connection = connect(self.path)
-        self.replay = SQLiteReplayStore(self.path, connection=self.connection)
+        try:
+            self.replay = SQLiteReplayStore(self.path, connection=self.connection)
+            self._initialize_schema()
+        except BaseException:
+            self.connection.close()
+            raise
+
+    def _initialize_schema(self) -> None:
         self.connection.executescript("""
             CREATE TABLE IF NOT EXISTS turns (
                 turn_id TEXT PRIMARY KEY, satellite TEXT NOT NULL,
@@ -493,7 +504,7 @@ class SQLiteStore:
             self.connection = connect(self.path)
             self.replay.connection = self.connection
             committed = self._committed(device, active)
-        except (sqlite3.Error, OSError) as error:
+        except (sqlite3.Error, OSError, MemoryError) as error:
             registry._block(device)
             self.device_write_failed = True
             LOGGER.error(

@@ -19,6 +19,8 @@ The project is experimental. The clients `0.1.0a1` and `0.1.0a2` are pre-release
 - Add local sentence-level Piper TTS, typed audio formats, request-text positions, and voice metadata in health responses.
 - Remove Markdown marks before voice synthesis without changes to request-text positions.
 - Add explicit Deepgram and OpenAI STT options and ElevenLabs TTS. Keep cloud services off by default.
+- Add the optional `elevenlabs_enable_logging` setting to the Home Assistant app. Set it to `false` to request ElevenLabs Zero Retention Mode.
+- Close the SQLite connection on a setup error. After a commit error, refuse device events if the recovery read gives `MemoryError`.
 - Send the 22050 Hz format of the OpenAI-compatible TTS server provider before its first synthesis request. Change 16000 Hz and each other source rate to 22050 Hz for each sentence. Empty or whitespace-only text gives only the format and a usual end.
 - Add local-only destination checks, optional Murdock speaker metadata, and transcript storage with server and turn permission.
 - Accept the firmware's pre-roll length in microphone-open timing events. Keep the store available when historical rows are invalid.

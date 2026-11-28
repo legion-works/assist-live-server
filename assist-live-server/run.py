@@ -18,6 +18,7 @@ OPTIONS = {
     "elevenlabs_voice_id": "ELEVENLABS_VOICE_ID",
     "elevenlabs_voice_name": "ELEVENLABS_VOICE_NAME",
     "elevenlabs_voice_language": "ELEVENLABS_VOICE_LANGUAGE",
+    "elevenlabs_enable_logging": "ELEVENLABS_ENABLE_LOGGING",
 }
 
 

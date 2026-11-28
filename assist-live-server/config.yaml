@@ -46,3 +46,4 @@ schema:
   elevenlabs_voice_id: str
   elevenlabs_voice_name: str
   elevenlabs_voice_language: str
+  elevenlabs_enable_logging: bool?

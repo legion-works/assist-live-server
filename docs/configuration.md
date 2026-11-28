@@ -345,7 +345,7 @@ This stops ONNX Runtime from sending its default telemetry data. It also applies
 | `ELEVENLABS_VOICE_ID` | empty | `elevenlabs_voice_id` | Set the configured TTS voice. |
 | `ELEVENLABS_VOICE_NAME` | voice identifier | `elevenlabs_voice_name` | Set its display name. |
 | `ELEVENLABS_VOICE_LANGUAGE` | empty | `elevenlabs_voice_language` | Set its language tag, such as `en-US`. A value is necessary with a configured voice. |
-| `ELEVENLABS_ENABLE_LOGGING` | `true` | none | Set `false` to request ElevenLabs Zero Retention Mode. |
+| `ELEVENLABS_ENABLE_LOGGING` | `true` | `elevenlabs_enable_logging` | Set `false` to request ElevenLabs Zero Retention Mode. |
 | `ASSIST_LIVE_DATA` | `/data` | none | Set the data directory. |
 | `ASSIST_LIVE_MODEL_CACHE` | data directory plus `cache` | none | Set the local model cache. |
 | `ASSIST_LIVE_HOST` | `0.0.0.0` | none | Set the server address. |
@@ -363,7 +363,8 @@ The provider documents that only select enterprise customers can use Zero Retent
 If ElevenLabs is the configured TTS provider, an invalid value stops the server with `invalid ELEVENLABS_ENABLE_LOGGING option`. The server does not read this setting for other TTS providers. The diagnostic does not contain the value.
 
 The app reads `/data/options.json` and maps only the listed app options.
-It does not put secrets in command arguments or print their values.
+The app does not put secrets in command arguments or print their values.
+The app option `elevenlabs_enable_logging` is optional. If you do not set it, the server uses its default.
 
 The manifest `download_plan` supplies startup models, tokenizers, and voices only.
 `build_plan` supplies package provenance. The image installs these runtime wheels from `uv.lock` during the build.

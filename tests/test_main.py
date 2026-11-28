@@ -728,6 +728,28 @@ def test_app_option_mapping_keeps_password_out_of_output(tmp_path, monkeypatch, 
     assert "synthetic-password-value" not in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("setting", [None, False, True])
+def test_app_maps_optional_elevenlabs_logging(tmp_path, monkeypatch, setting):
+    spec = importlib.util.spec_from_file_location(
+        "app_run", ROOT / "assist-live-server/run.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    options = tmp_path / "options.json"
+    options.write_text(
+        json.dumps({} if setting is None else {"elevenlabs_enable_logging": setting})
+    )
+    calls = []
+    monkeypatch.delenv("ELEVENLABS_ENABLE_LOGGING", raising=False)
+    monkeypatch.setattr(module.os, "execvpe", lambda *args: calls.append(args))
+    module.main(options)
+    _, _, env = calls[0]
+    if setting is None:
+        assert "ELEVENLABS_ENABLE_LOGGING" not in env
+    else:
+        assert env["ELEVENLABS_ENABLE_LOGGING"] == str(setting).lower()
+
+
 @pytest.mark.parametrize(
     "kind,path", [("runtime", "models/file.whl"), ("voice", "../escape.onnx")]
 )

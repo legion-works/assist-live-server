@@ -62,6 +62,12 @@ def test_app_exposes_configured_cloud_voice_fields():
         assert config["schema"][field] == "str"
 
 
+def test_app_elevenlabs_logging_option_is_optional():
+    config = yaml.safe_load((ROOT / "assist-live-server/config.yaml").read_text())
+    assert "elevenlabs_enable_logging" not in config["options"]
+    assert config["schema"]["elevenlabs_enable_logging"] == "bool?"
+
+
 def test_app_repository_layout_has_one_config_and_no_duplicate_dockerfile():
     from tools.check_assets import release_files
 

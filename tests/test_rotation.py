@@ -1,4 +1,5 @@
 import asyncio
+import gc
 import json
 import os
 import sqlite3
@@ -250,6 +251,29 @@ def test_rotation_epoch_read_failure_refuses_both_keys(tmp_path, monkeypatch):
     state = run(tmp_path, inject, error=CredentialStateError)
     assert state["probe"].device_write_failed
     assert state["live"] == REFUSED
+    assert_restart_rotated(state)
+
+
+def test_rotation_recovery_read_memory_error_refuses_both_keys(tmp_path, caplog):
+    from assist_live_server.store import CredentialStateError
+
+    async def inject(store, registry):
+        probe = CommitProbe(store.connection, "applied")
+        store.connection = probe
+        original = store._committed
+
+        def read(device, active):
+            if store.connection is not probe:
+                raise MemoryError("synthetic recovery read failure")
+            return original(device, active)
+
+        store._committed = read
+        return store
+
+    state = run(tmp_path, inject, error=CredentialStateError)
+    assert state["probe"].device_write_failed
+    assert state["live"] == REFUSED
+    assert "credential_state_unknown" in caplog.text
     assert_restart_rotated(state)
 
 
@@ -701,13 +725,29 @@ def test_check_credentials_fails_when_database_path_is_unreadable(
             "FAIL credentials: credential file or database unreadable"
         )
         assert OLD.hex() not in output
-        if fault != "journal_loop":
-            # A server start also cannot open the database.
-            with pytest.raises((OSError, sqlite3.Error)):
-                asyncio.run(data_start(data))
+        # A server start also cannot open the database.
+        with pytest.raises((OSError, sqlite3.Error)):
+            asyncio.run(data_start(data))
+        gc.collect()
     finally:
         if fault == "no_permission":
             (root / "real").chmod(0o700)
+
+
+def test_store_start_closes_connection_if_replay_table_creation_fails(
+    tmp_path, monkeypatch
+):
+    from assist_live_server import store
+
+    def fail(path, *, connection):
+        raise sqlite3.OperationalError("synthetic replay table failure")
+
+    monkeypatch.setattr(store, "SQLiteReplayStore", fail)
+    with pytest.raises(
+        sqlite3.OperationalError, match="synthetic replay table failure"
+    ):
+        store.SQLiteStore(tmp_path / "turns.sqlite3")
+    gc.collect()
 
 
 def test_check_credentials_reads_wal_without_shm_and_adds_no_file(
