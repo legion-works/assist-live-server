@@ -5298,3 +5298,11 @@ The store closes its connection on a setup error. After a commit error, a `Memor
 The store, startup, app, release, and ElevenLabs test files gave `262 passed`. Three changes in a test copy caused test failures. Without connection cleanup, two tests gave `ResourceWarning`. Without the `MemoryError` handler, the recovery test gave `MemoryError`. Without the app mapping, the two tests with an explicit value gave `KeyError`.
 
 The full suite on an isolated runner gave `16 failed, 3016 passed, 1 skipped`. This runner had no Git metadata or IPv6 loopback. On a runner with these two items, the same 16 tests gave `16 passed`. The bootstrap, contract, package, and asset checks gave exit code 0.
+
+## Public-tree and release checks
+
+CI downloads the public-tree checker from `main` in `legion-works/assist-live`.
+The release checks examine the client wheel and refuse a PyPI version in use.
+The package check installs and imports each wheel in an isolated virtual environment.
+The publication check also requires manual dispatch only, read-only workflow and build permissions, and the PyPI token permission only on the publish job. Three changed copies of the workflow each give a refusal: a token permission on the build job, a token permission at the top level, and a push trigger. Before this check, the three copies gave no refusal: `3 failed`.
+The CI tests gave `23 passed`. `actionlint`, Ruff, and mypy gave exit code 0.

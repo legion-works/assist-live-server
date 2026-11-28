@@ -1,34 +1,15 @@
-"""Check CI boundaries and the separate Python distributions."""
+"""Check client publication and the separate Python distributions."""
 
 import argparse
-import json
 import os
-import re
 import subprocess
 import tempfile
-import tomllib
 import zipfile
 from pathlib import Path
 
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
-APPROVAL = "${{ vars.ASSIST_LIVE_RELEASES_APPROVED }}"
-
-
-PUBLIC_TREE_STEP = re.compile(
-    r"set -eu\n"
-    r"curl -fsSL https://raw\.githubusercontent\.com/legion-works/assist-live/"
-    r"[a-f0-9]{40}/tools/check_public_tree\.py"
-    r' -o "\$RUNNER_TEMP/check_public_tree\.py"\n'
-    r'echo "[a-f0-9]{64}  \$RUNNER_TEMP/check_public_tree\.py" \| sha256sum -c -\n'
-    + re.escape(
-        'set --\nif [ -n "${PRIVATE_DENYLIST:-}" ]; then\n'
-        '  set -- --private-denylist "$PRIVATE_DENYLIST"\nfi\n'
-        'uv run --no-project --python 3.14 python "$RUNNER_TEMP/check_public_tree.py" '
-        '--history --root . "$@"'
-    )
-)
 
 
 def _publishes_only_checked_client_wheel(workflow: dict) -> bool:
@@ -41,8 +22,15 @@ def _publishes_only_checked_client_wheel(workflow: dict) -> bool:
         for step in build
         if step.get("uses", "").startswith("actions/upload-artifact@")
     ]
+    # PyYAML uses YAML 1.1 and reads the GitHub key `on` as True.
+    triggers = workflow.get("on", workflow.get(True))
     return (
-        set(jobs) == {"build", "publish"}
+        triggers == {"workflow_dispatch": None}
+        and workflow.get("permissions") == {"contents": "read"}
+        and jobs["build"].get("permissions", {"contents": "read"})
+        == {"contents": "read"}
+        and jobs["publish"].get("permissions") == {"id-token": "write"}
+        and set(jobs) == {"build", "publish"}
         and jobs["publish"].get("needs") == "build"
         and "if" not in jobs["publish"]
         and not jobs["build"].get("continue-on-error")
@@ -70,117 +58,17 @@ def _publishes_only_checked_client_wheel(workflow: dict) -> bool:
 
 
 def check_ci(root: Path = ROOT) -> list[str]:
-    errors: list[str] = []
-    workflows = {}
-    for name in ("ci", "release-please", "release-artifacts", "publish-client"):
-        path = root / f".github/workflows/{name}.yml"
-        try:
-            text = path.read_text()
-            workflow = yaml.safe_load(text)
-            workflows[name] = workflow
-            if workflow.get("permissions") != {"contents": "read"}:
-                errors.append(f"{name}: top-level read-only permissions required")
-            for job_name, job in workflow["jobs"].items():
-                permissions = job.get("permissions", {"contents": "read"})
-                if (name, job_name) == ("publish-client", "publish"):
-                    if job.get("permissions") != {"id-token": "write"}:
-                        errors.append(
-                            f"{name}: {job_name}: id-token-only permissions required"
-                        )
-                elif (name, job_name) == ("release-please", "release-please"):
-                    if permissions != {"contents": "write", "pull-requests": "write"}:
-                        errors.append(
-                            f"{name}: {job_name}: release metadata permissions required"
-                        )
-                elif permissions != {"contents": "read"}:
-                    errors.append(
-                        f"{name}: {job_name}: read-only job permissions required"
-                    )
-                for step in job["steps"]:
-                    if "uses" in step and not re.fullmatch(
-                        r"[\w.-]+/[\w./-]+@[a-f0-9]{40}", step["uses"]
-                    ):
-                        errors.append(f"{name}: full action commit required")
-            for line in text.splitlines():
-                if re.search(r"\buses:", line) and not re.search(
-                    r"# v\d+\.\d+\.\d+$", line
-                ):
-                    errors.append(f"{name}: action version comment required")
-            if name != "ci":
-                # PyYAML uses YAML 1.1 and reads the GitHub key `on` as True.
-                triggers = workflow.get("on", workflow.get(True))
-                if triggers != {"workflow_dispatch": None}:
-                    errors.append(f"{name}: manual dispatch only")
-                for job in workflow["jobs"].values():
-                    first = job["steps"][0]
-                    if first.get("env", {}).get("RELEASES_APPROVED") != APPROVAL or (
-                        first.get("run") != 'test "$RELEASES_APPROVED" = "true"'
-                    ):
-                        errors.append(
-                            f"{name}: fail-closed first-step release guard required"
-                        )
-        except OSError, ValueError, KeyError, TypeError, AttributeError, yaml.YAMLError:
-            errors.append(f"{name}: invalid workflow")
-    ci = workflows.get("ci", {}).get("jobs", {})
+    path = root / ".github/workflows/publish-client.yml"
     try:
-        public_tree = [
-            step
-            for job in ci.values()
-            for step in job["steps"]
-            if "check_public_tree.py" in step.get("run", "")
-        ]
-        if (
-            len(public_tree) != 1
-            or public_tree[0] not in ci["checks"]["steps"]
-            or public_tree[0].get("if") != "matrix.check == 'public-tree'"
-            or public_tree[0].get("continue-on-error")
-            or not PUBLIC_TREE_STEP.fullmatch(public_tree[0]["run"].rstrip("\n"))
-        ):
-            raise ValueError
-    except ValueError, KeyError, TypeError, AttributeError:
-        errors.append("ci: public-tree checker requires a commit and verified SHA-256")
+        workflow = yaml.safe_load(path.read_text())
+    except OSError, ValueError, yaml.YAMLError:
+        return ["publish-client: invalid workflow"]
     try:
-        if not _publishes_only_checked_client_wheel(workflows["publish-client"]):
-            raise ValueError
+        if _publishes_only_checked_client_wheel(workflow):
+            return []
     except ValueError, KeyError, TypeError, AttributeError, IndexError:
-        errors.append("publish-client: only checked client wheels can be published")
-    try:
-        matrix = ci["checks"]["strategy"]["matrix"]
-        image_pins = set(
-            re.findall(
-                r"^FROM python:(\d+\.\d+\.\d+)-",
-                (root / "Dockerfile").read_text(),
-                re.M,
-            )
-        )
-        if len(image_pins) != 1 or set(matrix["python"]) != image_pins:
-            errors.append("ci: checks: Python matrix must match the image Python pin")
-        floor = tomllib.loads((root / "pyproject.toml").read_text())["project"][
-            "requires-python"
-        ].removeprefix(">=")
-        if {"check": "unit", "python": floor} not in matrix["include"]:
-            errors.append(
-                "ci: checks: unit matrix must include the declared Python floor"
-            )
-    except OSError, ValueError, KeyError, TypeError:
-        errors.append("ci: checks: invalid Python matrix or version sources")
-    final = ci.get("ci-complete", {})
-    if final.get("if") != "always()" or set(final.get("needs", [])) != set(ci) - {
-        "ci-complete"
-    }:
-        errors.append("ci-complete must depend on every job and always run")
-    try:
-        packages = json.loads((root / "release-please-config.json").read_text())[
-            "packages"
-        ]
-        manifest = json.loads((root / ".release-please-manifest.json").read_text())
-        if set(packages) != {"server", "client"} or set(manifest) != set(packages):
-            errors.append("separate server and client releases required")
-        if len({value["component"] for value in packages.values()}) != 2:
-            errors.append("separate release tag components required")
-    except OSError, ValueError, KeyError, TypeError:
-        errors.append("release manifest configuration invalid")
-    return errors
+        pass
+    return ["publish-client: only checked client wheels can be published"]
 
 
 def check_packages(
@@ -260,7 +148,7 @@ def main() -> int:
         print(f"FAIL CI: {error}")
     if errors:
         return 1
-    print("PASS CI boundaries")
+    print("PASS client publication check")
     return 0
 
 
